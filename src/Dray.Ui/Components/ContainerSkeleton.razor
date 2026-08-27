@@ -1,0 +1,27 @@
+@* Shape-aware placeholder for the container table. A spinner here would be a placeholder for a
+   design decision nobody made (DESIGN.md section 6). *@
+
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr><th>Name</th><th>State</th><th>Image</th><th>Ports</th><th>Stack</th><th class="num">Uptime</th></tr>
+        </thead>
+        <tbody>
+            @for (var i = 0; i < Rows; i++)
+            {
+                <tr>
+                    <td><Skeleton Width="120px" /></td>
+                    <td><Skeleton Width="74px" /></td>
+                    <td><Skeleton Width="150px" /></td>
+                    <td><Skeleton Width="88px" /></td>
+                    <td><Skeleton Width="60px" /></td>
+                    <td><Skeleton Width="34px" /></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public int Rows { get; set; } = 6;
+}

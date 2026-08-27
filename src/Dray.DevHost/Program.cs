@@ -1,4 +1,6 @@
+using Dray.Core.Engine;
 using Dray.Core.Shell;
+using Dray.Docker;
 using Dray.DevHost.Components;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,7 +13,18 @@ builder.Services.AddScoped<IShellState, ShellState>();
 builder.Services.AddSingleton<IShellReadySignal, NoOpShellReadySignal>();
 builder.Services.AddSingleton<IPlatformTheme, GeneratedPaletteTheme>();
 
+// The engine layer. Singleton because the event stream and its store are per-application, not
+// per-connection: switching browser tab must not tear down and re-seed the connection.
+builder.Services.AddSingleton<IDockerConfigSource, SystemDockerConfigSource>();
+builder.Services.AddSingleton<DockerContextReader>();
+builder.Services.AddSingleton<IContainerRuntimeFactory, DockerRuntimeFactory>();
+builder.Services.AddSingleton<EngineManager>();
+
 var app = builder.Build();
+
+// Discover and connect before the first render, so the UI opens on real state rather than an
+// empty list that fills in a moment later.
+await app.Services.GetRequiredService<EngineManager>().InitializeAsync();
 
 // Serves Dray.Ui's wwwroot under /_content/Dray.Ui/ via the static web assets manifest.
 app.MapStaticAssets();

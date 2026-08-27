@@ -1,83 +1,99 @@
 @page "/containers"
-@using Dray.Ui.Fixtures
+@inject EngineManager Engine
 
 <PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="HandleSearch" OnFilter="HandleFilter" />
 
-<div class="page page--flush">
-    @if (_visible.Count == 0)
-    {
-        <EmptyState Icon="IconRef.Container"
-                    Title="@(HasFilter ? "No containers match" : "No containers yet")"
-                    Body="@(HasFilter
-                        ? "Nothing here matches the current search and filter. Clear them to see all containers on this host."
-                        : "Nothing is running on this host. Start a container from an image, or bring up a compose stack.")">
-            <Actions>
-                @if (HasFilter)
-                {
-                    <Button Label="Clear filters" Icon="IconRef.Close" OnClick="ClearFilters" />
-                }
-                else
-                {
-                    <Button Label="Run a container…" Icon="IconRef.Play" Variant="ButtonVariant.Primary" />
-                    <Button Label="Open a stack" Icon="IconRef.Stack" />
-                }
-            </Actions>
-        </EmptyState>
-    }
-    else
-    {
-        <div class="table-wrap">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>State</th>
-                        <th>Image</th>
-                        <th>Ports</th>
-                        <th>Stack</th>
-                        <th class="num">CPU</th>
-                        <th class="num">Memory</th>
-                        <th class="num">Uptime</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var c in _visible)
+<EngineScope>
+    <div class="page page--flush">
+        @if (Engine.HasNoHosts)
+        {
+            <NoEngine />
+        }
+        else if (Engine.Selected is { State: HostConnectionState.Connecting } or null && Engine.Store.Count == 0)
+        {
+            <ContainerSkeleton />
+        }
+        else if (Engine.Selected is { State: HostConnectionState.Unreachable } host && Engine.Store.Count == 0)
+        {
+            <EmptyState Icon="IconRef.Warning"
+                        Title="@($"Cannot reach {host.Name}")"
+                        Body="@(host.StateDetail ?? "The engine did not respond.")">
+                <Actions>
+                    <Button Label="Choose another host" Icon="IconRef.Host" OnClick="@(() => Nav("/hosts"))" />
+                </Actions>
+            </EmptyState>
+        }
+        else if (Visible.Count == 0)
+        {
+            <EmptyState Icon="IconRef.Container"
+                        Title="@(HasFilter ? "No containers match" : "No containers yet")"
+                        Body="@(HasFilter
+                            ? "Nothing here matches the current search and filter. Clear them to see everything on this host."
+                            : "Nothing is running on this host. Start a container from an image, or bring up a compose stack.")">
+                <Actions>
+                    @if (HasFilter)
                     {
-                        <tr class="@(c.Status.IsStale ? "is-stale" : null)"
-                            aria-selected="@(_selected == c.Id ? "true" : "false")"
-                            @onclick="() => _selected = c.Id">
-                            <td>
-                                <div class="cell-name">
-                                    <span>@c.Name</span>
-                                    <span class="mono muted">@c.ShortId</span>
-                                </div>
-                            </td>
-                            <td><StatePill Status="c.Status" /></td>
-                            <td>
-                                <span>@Humanize.ImageName(c.Image)</span>
-                                <span class="muted">:@Humanize.ImageTag(c.Image)</span>
-                            </td>
-                            <td class="mono">
-                                @if (c.Ports.Count == 0)
-                                {
-                                    <span class="muted">—</span>
-                                }
-                                else
-                                {
-                                    @string.Join("  ", c.Ports.Select(p => p.Display))
-                                }
-                            </td>
-                            <td>@(c.Stack ?? "—")</td>
-                            <td class="num">@Humanize.Percent(c.CpuPercent)</td>
-                            <td class="num">@(c.MemoryBytes is { } m ? Humanize.Bytes(m) : "—")</td>
-                            <td class="num muted">@Humanize.Since(c.Since, DemoData.Clock)</td>
-                        </tr>
+                        <Button Label="Clear filters" Icon="IconRef.Close" OnClick="ClearFilters" />
                     }
-                </tbody>
-            </table>
-        </div>
-    }
-</div>
+                    else
+                    {
+                        <Button Label="Run a container…" Icon="IconRef.Play" Variant="ButtonVariant.Primary" />
+                    }
+                </Actions>
+            </EmptyState>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>State</th>
+                            <th>Image</th>
+                            <th>Ports</th>
+                            <th>Stack</th>
+                            <th class="num">Uptime</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in Visible)
+                        {
+                            <tr @key="c.Id"
+                                class="@RowClass(c)"
+                                aria-selected="@((_selected == c.Id).ToString().ToLowerInvariant())"
+                                @onclick="() => _selected = c.Id">
+                                <td>
+                                    <div class="cell-name">
+                                        <span>@c.Name</span>
+                                        <span class="mono muted">@c.ShortId</span>
+                                    </div>
+                                </td>
+                                <td><StatePill Status="c.Status" /></td>
+                                <td>
+                                    <span>@Humanize.ImageName(c.Image)</span>
+                                    <span class="muted">:@Humanize.ImageTag(c.Image)</span>
+                                </td>
+                                <td class="mono">
+                                    @if (c.Ports.Count == 0)
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                    else
+                                    {
+                                        @string.Join("  ", c.Ports.Select(p => p.Display))
+                                    }
+                                </td>
+                                <td>@(c.Stack ?? "—")</td>
+                                <td class="num muted">@Humanize.Since(c.Since)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</EngineScope>
 
 @code {
     static readonly string[] StateFilters = ["All", "Running", "Stopped", "Unhealthy"];
@@ -86,71 +102,91 @@
     int _stateFilter;
     string? _selected;
 
-    List<ContainerSummary> _visible = [];
-
-    PageChrome Chrome => new(
-        "Containers",
-        Subtitle: $"{DemoData.Containers.Count(c => c.State == DockerState.Running)} running · docker-desktop",
-        Search: new ChromeSearch("Filter containers", _search),
-        Actions:
-        [
-            ChromeAction.Primary("run", "Run…", IconRef.Play, "⌘N"),
-            ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh, "⌘R"),
-            ChromeAction.Destructive("prune", "Prune stopped", IconRef.Trash),
-        ],
-        Filters: [new ChromeFilter("state", "State", [.. StateFilters.Select(s => new ChromeFilterOption(s))], _stateFilter)]);
+    [Inject] NavigationManager Navigation { get; set; } = default!;
 
     bool HasFilter => _stateFilter != 0 || !string.IsNullOrWhiteSpace(_search);
 
-    protected override void OnInitialized() => Recompute();
-
-    void HandleSearch(string text)
+    IReadOnlyList<ContainerSummary> Visible
     {
-        _search = text;
-        Recompute();
+        get
+        {
+            IEnumerable<ContainerSummary> q = Engine.Store.Containers;
+
+            q = _stateFilter switch
+            {
+                1 => q.Where(c => c.State == DockerState.Running),
+                2 => q.Where(c => c.State is DockerState.Exited or DockerState.Dead or DockerState.Created),
+                3 => q.Where(c => c.Health == DockerHealth.Unhealthy || c.ExitCode is not null and not 0),
+                _ => q,
+            };
+
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                var needle = _search.Trim();
+                q = q.Where(c =>
+                    c.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                    || c.Image.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                    || c.Id.StartsWith(needle, StringComparison.OrdinalIgnoreCase)
+                    || (c.Stack?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            return [.. q];
+        }
     }
 
-    void HandleFilter((string FilterId, int Index) change)
+    PageChrome Chrome
     {
-        if (change.FilterId == "state") _stateFilter = change.Index;
-        Recompute();
+        get
+        {
+            var running = Engine.Store.Containers.Count(c => c.State == DockerState.Running);
+            var host = Engine.Selected;
+
+            return new PageChrome(
+                "Containers",
+                Subtitle: host is null ? null : $"{running} running · {host.Name}",
+                Search: new ChromeSearch("Filter containers", _search),
+                Actions:
+                [
+                    ChromeAction.Primary("run", "Run…", IconRef.Play, "⌘N"),
+                    ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh, "⌘R") with
+                    {
+                        // A manual refresh is a fallback, not the primary affordance — state comes
+                        // from the event stream. It is only useful when the stream is impaired.
+                        IsEnabled = host?.State is HostConnectionState.Degraded or HostConnectionState.Unreachable,
+                        Tooltip = "State updates automatically from the engine's event stream",
+                    },
+                    ChromeAction.Destructive("prune", "Prune stopped", IconRef.Trash),
+                ],
+                Filters: [new ChromeFilter("state", "State", [.. StateFilters.Select(s => new ChromeFilterOption(s))], _stateFilter)]);
+        }
     }
+
+    string? RowClass(ContainerSummary c)
+    {
+        var stale = c.Status.IsStale ? "is-stale" : null;
+        var pulsed = Engine.Store.WasRecentlyChanged(c.Id) ? "just-changed" : null;
+
+        return stale is null && pulsed is null ? null : $"{stale} {pulsed}".Trim();
+    }
+
+    void Nav(string route) => Navigation.NavigateTo(route);
+
+    void HandleSearch(string text) => _search = text;
 
     void ClearFilters()
     {
         _search = "";
         _stateFilter = 0;
-        Recompute();
     }
 
-    void HandleAction(string id)
+    void HandleFilter((string FilterId, int Index) change)
     {
-        // Wired to the runtime in Phase 3. Refresh is a no-op here by design: state comes from the
-        // event stream, and a manual refresh is a fallback, not the primary affordance.
+        if (change.FilterId == "state") _stateFilter = change.Index;
     }
 
-    void Recompute()
+    async Task HandleAction(string id)
     {
-        IEnumerable<ContainerSummary> q = DemoData.Containers;
-
-        q = _stateFilter switch
-        {
-            1 => q.Where(c => c.State == DockerState.Running),
-            2 => q.Where(c => c.State is DockerState.Exited or DockerState.Dead or DockerState.Created),
-            3 => q.Where(c => c.Health == DockerHealth.Unhealthy || c.ExitCode is not null and not 0),
-            _ => q,
-        };
-
-        if (!string.IsNullOrWhiteSpace(_search))
-        {
-            var needle = _search.Trim();
-            q = q.Where(c =>
-                c.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
-                || c.Image.Contains(needle, StringComparison.OrdinalIgnoreCase)
-                || c.Id.StartsWith(needle, StringComparison.OrdinalIgnoreCase)
-                || (c.Stack?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-
-        _visible = [.. q];
+        if (id == "refresh" && Engine.Selected is { } host)
+            await Engine.SelectAsync(host.Id);
     }
 }

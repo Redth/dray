@@ -1,7 +1,114 @@
 @page "/hosts"
+@inject EngineManager Engine
 
-<PageChromeScope Chrome="@(new PageChrome("Hosts"))" />
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
 
-<div class="page">
-    <EmptyState Icon="IconRef.Host" Title="Hosts arrive in phase 2" Body="Every Docker context — a local socket, a WSL2 distro, or SSH to a box in a closet — treated exactly the same as this machine." />
-</div>
+<EngineScope>
+    <div class="page">
+        @if (Engine.HasNoHosts)
+        {
+            <NoEngine OnRetry="Rediscover" />
+        }
+        else
+        {
+            <p class="muted" style="max-width: 72ch; margin-bottom: var(--s4)">
+                Every host works the same behind this picker — a local socket, a WSL2 distro, or SSH
+                to a machine elsewhere. Only the selected host streams events; the rest are checked
+                when you open this page.
+            </p>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr><th></th><th>Host</th><th>State</th><th>Endpoint</th><th>Engine</th><th>Source</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var host in Engine.Hosts)
+                        {
+                            <tr @key="host.Id"
+                                class="@(host.IsStale ? "is-stale" : null)"
+                                aria-selected="@((Engine.Selected?.Id == host.Id).ToString().ToLowerInvariant())"
+                                @onclick="() => Select(host)">
+                                <td style="width: 1%">
+                                    @if (Engine.Selected?.Id == host.Id)
+                                    {
+                                        <Icon Name="IconRef.Check" Size="IconSize.Sm" Label="Selected" />
+                                    }
+                                </td>
+                                <td>@host.Name</td>
+                                <td><HostState Host="host" /></td>
+                                <td class="mono muted">@host.Endpoint.Display</td>
+                                <td>
+                                    @if (host.Capabilities.EngineVersion is { } version)
+                                    {
+                                        <span>@host.Capabilities.Flavor @version</span>
+                                        @if (host.Capabilities.IsRootless)
+                                        {
+                                            <span class="muted"> · rootless</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                </td>
+                                <td class="muted">@Source(host)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (Engine.Selected is { Capabilities.Flavor: not EngineFlavor.Unknown } selected)
+            {
+                <div class="panel" style="margin-top: var(--s4)">
+                    <div class="panel__head"><span class="panel__title">What @selected.Name supports</span></div>
+                    <div class="panel__body">
+                        <div class="caps">
+                            <Capability Name="Event stream" Supported="selected.Capabilities.SupportsEvents"
+                                        Absent="Dray would have to poll, and lists would update slowly." />
+                            <Capability Name="Container stats" Supported="selected.Capabilities.SupportsStats"
+                                        Absent="CPU and memory columns stay empty on this engine." />
+                            <Capability Name="BuildKit" Supported="selected.Capabilities.SupportsBuildKit"
+                                        Absent="Builds fall back to the legacy builder." />
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</EngineScope>
+
+@code {
+    PageChrome Chrome => new(
+        "Hosts",
+        Subtitle: Engine.HasNoHosts ? null : $"{Engine.Hosts.Count} known",
+        Actions: [ChromeAction.Secondary("refresh", "Look again", IconRef.Refresh)]);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Checked when the page opens rather than on a timer: probing a remote host costs a
+        // connection, and doing it for hosts nobody is looking at is the polling this design avoids.
+        if (firstRender) await Engine.ProbeOthersAsync();
+    }
+
+    static string Source(DockerHost host) => host.Origin switch
+    {
+        HostOrigin.DockerContext => "docker context",
+        HostOrigin.Environment => "DOCKER_HOST",
+        HostOrigin.WslDistro => "WSL2",
+        _ => "found on this machine",
+    };
+
+    async Task Select(DockerHost host) => await Engine.SelectAsync(host.Id);
+
+    async Task Rediscover() => await Engine.InitializeAsync();
+
+    async Task HandleAction(string id)
+    {
+        if (id != "refresh") return;
+
+        await Engine.InitializeAsync();
+        await Engine.ProbeOthersAsync();
+    }
+}

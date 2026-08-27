@@ -1,0 +1,29 @@
+@* Re-renders its content whenever the engine's hosts, selection or store change.
+
+   Pages wrap their body in this rather than each subscribing to two events and remembering to
+   unsubscribe. The store raises a change per affected row, so this is the one place that decides
+   how a store change becomes a render. *@
+@implements IDisposable
+@inject EngineManager Engine
+
+@ChildContent
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Engine.Changed += OnChanged;
+        Engine.Store.Changed += OnStoreChanged;
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    void OnStoreChanged(StoreChange _) => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Engine.Changed -= OnChanged;
+        Engine.Store.Changed -= OnStoreChanged;
+    }
+}

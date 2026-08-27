@@ -1,0 +1,37 @@
+@* A host's connection state as a pill. Same vocabulary rules as container state: tint + glyph +
+   word, never colour alone (DESIGN.md section 2.4). *@
+
+<span class="pill pill--@Tone" title="@(Host.StateDetail ?? Host.Endpoint.Display)">
+    <span class="pill__glyph" aria-hidden="true">@Glyph</span>
+    <span>@Word</span>
+</span>
+
+@code {
+    [Parameter, EditorRequired] public DockerHost Host { get; set; } = default!;
+
+    string Tone => Host.State switch
+    {
+        HostConnectionState.Connected => "ok",
+        HostConnectionState.Degraded or HostConnectionState.Connecting => "warn",
+        HostConnectionState.Unreachable => "danger",
+        _ => "neutral",
+    };
+
+    string Glyph => Host.State switch
+    {
+        HostConnectionState.Connected => "●",
+        HostConnectionState.Degraded => "◐",
+        HostConnectionState.Connecting => "◌",
+        HostConnectionState.Unreachable => "⚠",
+        _ => "○",
+    };
+
+    string Word => Host.State switch
+    {
+        HostConnectionState.Connected => "Connected",
+        HostConnectionState.Degraded => "Degraded",
+        HostConnectionState.Connecting => "Connecting",
+        HostConnectionState.Unreachable => "Unreachable",
+        _ => "Not connected",
+    };
+}

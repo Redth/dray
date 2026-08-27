@@ -88,6 +88,12 @@ one place.
 - Dashboard: engine version, resource usage, disk-usage breakdown, live event log
 - First-run: "No engine found" that names what Dray looked for and links to real options
 
+**Progress:** endpoints, context discovery, capabilities, entity store, event pump, the Docker
+transport and the host picker are done and running against a live engine. Killing a container from a
+terminal updates the UI with no refresh, and the Refresh action is disabled while the stream is
+healthy. Still outstanding: SSH tunnelling, WSL2 distro enumeration, and the disk-usage breakdown
+(`system df` is not exposed by the client and needs a direct call).
+
 **Demo:** connect to local Docker, a WSL2 distro, and a remote host over SSH; kill a container from a
 terminal and watch the dashboard update with no refresh.
 **Exit:** an unreachable host degrades one sidebar entry and nothing else · reconnect survives a

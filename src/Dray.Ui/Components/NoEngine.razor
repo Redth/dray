@@ -1,0 +1,15 @@
+@* The genuine first-run state: nothing to connect to. Names what Dray looked for rather than
+   saying "no engine found" and leaving the user to guess (PRODUCT.md: teach, don't shrug). *@
+
+<EmptyState Icon="IconRef.Host"
+            Title="No container engine found"
+            Body="Dray looked at your Docker contexts, DOCKER_HOST, and the sockets Docker Desktop, OrbStack, Colima, Rancher Desktop and Podman use. Start one of those, or add a host to connect over SSH.">
+    <Actions>
+        <Button Label="Look again" Icon="IconRef.Refresh" Variant="ButtonVariant.Primary" OnClick="OnRetry" />
+        <Button Label="Add a host…" Icon="IconRef.Plus" />
+    </Actions>
+</EmptyState>
+
+@code {
+    [Parameter] public EventCallback OnRetry { get; set; }
+}
