@@ -13,14 +13,33 @@ namespace Dray.Core.Model;
 public sealed record EnvVar(string Key, string Value)
 {
     /// <summary>
-    /// Whether the value is masked until the user asks for it.
+    /// What the user said about this variable, overriding the guess. Null means they did not say.
     /// <para>
-    /// Matched on the name rather than the shape of the value. Entropy scoring would catch more
-    /// and would also mask a build hash, and a user who cannot predict what will be hidden stops
-    /// trusting the screen. A name-based rule is one the user can hold in their head.
+    /// Both directions are legitimate and each catches what the other cannot. The heuristic below
+    /// catches what nobody thought to mark — a real stack read during this design carried a JWT
+    /// API key that its own tool had stored as not-secret. The mark catches what no heuristic can
+    /// know: <c>LICENCE_BLOB</c> is a secret and does not look like one.
     /// </para>
     /// </summary>
-    public bool IsSecret => LooksSecret(Key) || CarriesInlineCredentials(Value);
+    public bool? Marked { get; init; }
+
+    /// <summary>
+    /// Whether the value is masked until the user asks for it.
+    /// <para>
+    /// An explicit <see cref="Marked"/> wins. Otherwise matched on the name rather than the shape
+    /// of the value: entropy scoring would catch more and would also mask a build hash, and a user
+    /// who cannot predict what will be hidden stops trusting the screen. A name-based rule is one
+    /// the user can hold in their head.
+    /// </para>
+    /// </summary>
+    public bool IsSecret => Marked ?? (LooksSecret(Key) || CarriesInlineCredentials(Value));
+
+    /// <summary>
+    /// True when the mask is the user's decision rather than Dray's guess. The UI says which,
+    /// because "Dray thinks this looks like a secret" and "you marked this" deserve different
+    /// wording — one is worth correcting and the other is not.
+    /// </summary>
+    public bool IsMarked => Marked is not null;
 
     static readonly string[] SecretNameParts =
     [

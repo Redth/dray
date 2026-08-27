@@ -1,0 +1,60 @@
+.pi {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.pi__field {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+}
+
+.pi__input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Same shape as the combobox's dropdown, deliberately: two different-looking popups over two
+   fields in one dialog would read as two different mechanisms. */
+.pi__list {
+    position: absolute;
+    z-index: var(--z-dropdown);
+    inset-inline: 0;
+    top: calc(100% + var(--s1));
+
+    margin: 0;
+    padding: var(--s1);
+    list-style: none;
+
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-popover);
+
+    max-height: min(18rem, 40vh);
+    overflow-y: auto;
+}
+
+.pi__list[hidden] {
+    display: none;
+}
+
+.pi__row {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s1) var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-sm);
+    cursor: default;
+}
+
+.pi__row.is-selected {
+    background: var(--surface-2);
+}
+
+/* The slash says "choosing this goes deeper" without a sentence explaining it. */
+.pi__slash {
+    margin-left: auto;
+}

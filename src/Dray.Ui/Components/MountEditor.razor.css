@@ -1,0 +1,136 @@
+.me {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+}
+
+.me__rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.me__row {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s1) var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-sm);
+}
+
+.me__row:hover {
+    background: var(--surface-2);
+}
+
+/* The type as a word, fixed width so three rows of different kinds still line up. */
+.me__kind {
+    flex: 0 0 5rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.me__source,
+.me__dest {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    /* From the end: the interesting part of a long path is its tail, not its mount point. */
+    direction: rtl;
+    text-align: left;
+}
+
+.me__arrow {
+    flex: 0 0 auto;
+    color: var(--muted);
+}
+
+.me__ro {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: var(--text-xs);
+}
+
+.me__remove {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 2px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+}
+
+.me__remove:hover {
+    color: var(--danger);
+    background: var(--danger-tint);
+}
+
+.me__remove:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}
+
+.me__add {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+}
+
+.me__line {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+}
+
+.me__kind-select {
+    flex: 0 0 auto;
+    width: 12rem;
+}
+
+.me__grow {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Aligns the destination field under the source field above it, so the two lines read as one
+   statement rather than two unrelated rows. */
+.me__into {
+    flex: 0 0 12rem;
+    text-align: right;
+    font-size: var(--text-sm);
+}
+
+.me__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    flex: 0 0 auto;
+    font-size: var(--text-xs);
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.me__note {
+    flex: 1 1 auto;
+    font-size: var(--text-sm);
+}
+
+.me__problem {
+    margin: 0;
+    color: var(--danger-ink);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    max-width: 56ch;
+}

@@ -45,30 +45,19 @@
                    @bind="_name" @bind:event="oninput" autocomplete="off" spellcheck="false" />
         </div>
 
-        <div class="run__grid">
-            <div class="field">
-                <label class="field__label" for="run-ports">
-                    Ports <span class="muted">(one per line, host:container)</span>
-                </label>
-                <textarea id="run-ports" class="input mono run__area" rows="3" placeholder="5432:5432"
-                          @bind="_ports" @bind:event="oninput" spellcheck="false"></textarea>
-            </div>
-
-            <div class="field">
-                <label class="field__label" for="run-env">
-                    Environment <span class="muted">(one NAME=value per line)</span>
-                </label>
-                <textarea id="run-env" class="input mono run__area" rows="3" placeholder="POSTGRES_PASSWORD=secret"
-                          @bind="_env" @bind:event="oninput" spellcheck="false"></textarea>
-            </div>
+        <div class="field">
+            <span class="field__label">Ports</span>
+            <PortEditor Ports="_ports" PortsChanged="@(p => _ports = p)" />
         </div>
 
         <div class="field">
-            <label class="field__label" for="run-mounts">
-                Mounts <span class="muted">(one per line, source:/path/in/container, add :ro for read-only)</span>
-            </label>
-            <textarea id="run-mounts" class="input mono run__area" rows="2" placeholder="pgdata:/var/lib/postgresql/data"
-                      @bind="_mounts" @bind:event="oninput" spellcheck="false"></textarea>
+            <span class="field__label">Environment</span>
+            <EnvEditor Variables="_env" VariablesChanged="@(v => _env = v)" />
+        </div>
+
+        <div class="field">
+            <span class="field__label">Mounts</span>
+            <MountEditor Mounts="_mounts" MountsChanged="@(m => _mounts = m)" />
         </div>
 
         <label class="toggle">
@@ -102,9 +91,10 @@
 
     string _image = "";
     string _name = "";
-    string _ports = "";
-    string _env = "";
-    string _mounts = "";
+
+    IReadOnlyList<PortBinding> _ports = [];
+    IReadOnlyList<EnvVar> _env = [];
+    IReadOnlyList<MountPoint> _mounts = [];
     bool _start = true;
     bool _running;
 
@@ -130,17 +120,9 @@
         {
             if (_failure is { } failure) return failure;
 
-            if (_name.Trim().Length > 0 && ContainerName.Validate(_name.Trim()) is { } invalidName)
-                return invalidName;
-
-            RunParser.ParsePorts(_ports, out var portProblem);
-            if (portProblem is not null) return portProblem;
-
-            RunParser.ParseEnvironment(_env, out var envProblem);
-            if (envProblem is not null) return envProblem;
-
-            RunParser.ParseMounts(_mounts, out var mountProblem);
-            return mountProblem;
+            // Ports, environment and mounts validate as they are entered now — each editor
+            // refuses to add a row it cannot make sense of — so nothing here re-checks them.
+            return _name.Trim().Length > 0 ? ContainerName.Validate(_name.Trim()) : null;
         }
     }
 
@@ -182,16 +164,7 @@
     {
         _failure = null;
 
-        // Nothing is sent while anything is unreadable. Problem re-parses, which is cheap and
-        // keeps one definition of "is this form valid" rather than two that could drift.
         if (Problem is not null) return;
-
-        // Re-parsed here rather than reusing what Problem computed: that property is for display
-        // and runs on every render, and threading its results out would make the render allocate
-        // the request too.
-        var ports = RunParser.ParsePorts(_ports, out _);
-        var env = RunParser.ParseEnvironment(_env, out _);
-        var mounts = RunParser.ParseMounts(_mounts, out _);
 
         _running = true;
 
@@ -201,9 +174,13 @@
             {
                 Image = _image.Trim(),
                 Name = _name.Trim() is { Length: > 0 } name ? name : null,
-                Ports = ports,
-                Environment = env,
-                Mounts = mounts,
+                Ports = _ports,
+                Environment = _env,
+                Mounts = _mounts,
+
+                // Whatever the user marked rides along as labels, so the masking survives the
+                // container's whole life rather than only this dialog.
+                Labels = SecretMarks.ToLabels(_env),
                 Start = _start,
             };
 
@@ -227,9 +204,9 @@
     {
         _image = "";
         _name = "";
-        _ports = "";
-        _env = "";
-        _mounts = "";
+        _ports = [];
+        _env = [];
+        _mounts = [];
         _start = true;
         _local = [];
     }

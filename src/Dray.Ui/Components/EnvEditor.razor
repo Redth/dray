@@ -1,0 +1,190 @@
+@* Environment variables, with the secret decision made explicit.
+
+   Rows rather than chips: a value is a connection string, not a number, and a chip that truncates
+   the thing you are checking is worse than a field you can read.
+
+   Dray already guesses which values are secrets from their names. The guess is a floor, not the
+   answer — it catches what nobody thought to mark, and the mark catches what no name could reveal.
+   The checkbox states which of the two is in force, because "Dray thinks this looks like a secret"
+   and "you said so" deserve different wording: one is worth correcting and the other is not. *@
+
+<div class="ee">
+    @if (Variables.Count > 0)
+    {
+        <ul class="ee__rows">
+            @foreach (var variable in Variables)
+            {
+                var captured = variable;
+                var hidden = variable.IsSecret && !_revealed.Contains(variable.Key);
+
+                <li class="ee__row" @key="variable.Key">
+                    <span class="ee__key mono">@variable.Key</span>
+
+                    <span class="ee__value mono @(hidden ? "is-hidden" : null)">
+                        @(hidden ? Mask : variable.Value)
+                    </span>
+
+                    @if (variable.IsSecret)
+                    {
+                        <button type="button" class="ee__icon"
+                                aria-label="@($"{(hidden ? "Reveal" : "Hide")} the value of {variable.Key}")"
+                                aria-pressed="@((!hidden).ToString().ToLowerInvariant())"
+                                @onclick="() => ToggleReveal(captured.Key)">
+                            <Icon Name="@(hidden ? IconRef.Reveal : IconRef.Conceal)" Size="IconSize.Sm" />
+                        </button>
+                    }
+
+                    <label class="ee__secret" title="@SecretTitle(variable)">
+                        <input type="checkbox" checked="@variable.IsSecret"
+                               @onchange="e => SetSecretAsync(captured, (bool?)e.Value ?? false)" />
+                        <span>@(variable.IsMarked ? "secret" : "secret?")</span>
+                    </label>
+
+                    <button type="button" class="ee__icon ee__remove"
+                            aria-label="@($"Remove {variable.Key}")"
+                            @onclick="() => RemoveAsync(captured)">
+                        <Icon Name="IconRef.Close" Size="IconSize.Sm" />
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+
+    <div class="ee__add">
+        <input class="input mono ee__key-input" placeholder="POSTGRES_PASSWORD"
+               aria-label="Variable name" autocomplete="off" spellcheck="false"
+               @bind="_key" @bind:event="oninput" @onkeydown="OnKeyDownAsync" />
+
+        <span class="ee__equals" aria-hidden="true">=</span>
+
+        <input class="input mono ee__value-input" placeholder="value"
+               aria-label="Value" autocomplete="off" spellcheck="false"
+               @bind="_value" @bind:event="oninput" @onkeydown="OnKeyDownAsync" />
+
+        <Button Label="Add variable" Icon="IconRef.Plus" IconOnly="true" Variant="ButtonVariant.Secondary"
+                Disabled="@(Problem is not null || _key.Trim().Length == 0)" OnClick="AddAsync" />
+    </div>
+
+    @if (Problem is { } problem)
+    {
+        <p class="ee__problem" role="alert">@problem</p>
+    }
+    else if (ReadOnlyMarks && Variables.Any(v => v.IsSecret))
+    {
+        @* Labels are fixed when a container is created, so a mark made now cannot be written back
+           to one that already exists. Saying so beats a checkbox that silently forgets. *@
+        <p class="ee__hint muted">
+            Marking here changes what Dray shows you. It is not written to the container — labels
+            are fixed when a container is created.
+        </p>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// Fixed width regardless of the value's length. A mask that matched the length would leak it,
+    /// and the length of a password is worth something to whoever is watching the screen.
+    /// </summary>
+    const string Mask = "••••••••";
+
+    [Parameter, EditorRequired] public IReadOnlyList<EnvVar> Variables { get; set; } = [];
+
+    [Parameter] public EventCallback<IReadOnlyList<EnvVar>> VariablesChanged { get; set; }
+
+    /// <summary>
+    /// True when the marks cannot be persisted — an existing container, whose labels are already
+    /// set. The editor still works; it just says what it can and cannot do.
+    /// </summary>
+    [Parameter] public bool ReadOnlyMarks { get; set; }
+
+    /// <summary>Keys revealed for this session. Never persisted: revealing is a glance, not a setting.</summary>
+    readonly HashSet<string> _revealed = new(StringComparer.Ordinal);
+
+    string _key = "";
+    string _value = "";
+
+    string? Problem
+    {
+        get
+        {
+            var key = _key.Trim();
+            if (key.Length == 0) return null;
+
+            // A pasted `KEY=value` is not an error; AddAsync splits it.
+            if (key.Contains('=')) return null;
+
+            if (key.Any(char.IsWhiteSpace)) return "A variable name cannot contain spaces.";
+
+            return Variables.Any(v => string.Equals(v.Key, key, StringComparison.Ordinal))
+                ? $"{key} is already set."
+                : null;
+        }
+    }
+
+    static string SecretTitle(EnvVar variable) => variable.Marked switch
+    {
+        true => "You marked this secret.",
+        false => "You marked this as not a secret.",
+        _ => variable.IsSecret
+            ? "The name looks like a secret, so Dray masks it. Untick to show it."
+            : "Tick to mask this value everywhere it is shown.",
+    };
+
+    void ToggleReveal(string key)
+    {
+        if (!_revealed.Remove(key)) _revealed.Add(key);
+    }
+
+    async Task SetSecretAsync(EnvVar variable, bool secret)
+    {
+        // Revealing follows the mask: a variable that stops being secret should not stay in the
+        // revealed set, or re-marking it would show the value it was just told to hide.
+        _revealed.Remove(variable.Key);
+
+        await VariablesChanged.InvokeAsync(
+        [
+            .. Variables.Select(v => string.Equals(v.Key, variable.Key, StringComparison.Ordinal)
+                ? v with { Marked = secret }
+                : v),
+        ]);
+    }
+
+    async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AddAsync();
+    }
+
+    async Task AddAsync()
+    {
+        var key = _key.Trim();
+        if (key.Length == 0 || Problem is not null) return;
+
+        var value = _value;
+
+        // Pasted whole. Splitting it beats making the user cut it in half by hand — and the value
+        // keeps everything after the first `=`, so a connection string survives.
+        if (key.Contains('='))
+        {
+            var split = key.IndexOf('=');
+            value = key[(split + 1)..];
+            key = key[..split].Trim();
+
+            if (key.Length == 0 || Variables.Any(v => string.Equals(v.Key, key, StringComparison.Ordinal)))
+                return;
+        }
+
+        _key = "";
+        _value = "";
+
+        await VariablesChanged.InvokeAsync(
+            [.. Variables, new EnvVar(key, value)]);
+    }
+
+    async Task RemoveAsync(EnvVar variable)
+    {
+        _revealed.Remove(variable.Key);
+
+        await VariablesChanged.InvokeAsync(
+            [.. Variables.Where(v => !string.Equals(v.Key, variable.Key, StringComparison.Ordinal))]);
+    }
+}

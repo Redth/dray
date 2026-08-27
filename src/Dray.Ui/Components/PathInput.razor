@@ -1,0 +1,280 @@
+@* A path field that completes as you type.
+
+   Deliberately not `Combobox<T>` with a different data source, because path completion is a
+   different problem in three ways that matter:
+
+   - **It is segment-scoped.** The query resets at every `/`: you complete a basename within a
+     dirname, so the source lists one directory rather than searching a corpus.
+   - **It ranks by prefix, not by subsequence.** A path is a thing people know the start of.
+     Subsequence matching would rank a fuzzy hit above the literal prefix, which is wrong here.
+   - **A trailing `/` means keep going, not done.** Choosing a directory descends into it and stays
+     open, where choosing in a combobox closes it.
+
+   Host or container is just a different listing delegate; this component does not know which. *@
+@implements IAsyncDisposable
+
+<div class="pi">
+    <div class="pi__field">
+        <input class="input mono pi__input"
+               type="text"
+               role="combobox"
+               aria-expanded="@IsOpen.ToString().ToLowerInvariant()"
+               aria-controls="@_listId"
+               aria-autocomplete="list"
+               aria-activedescendant="@(IsOpen && _selected < _entries.Count ? RowId(_selected) : null)"
+               aria-label="@Label"
+               placeholder="@Placeholder"
+               autocomplete="off"
+               spellcheck="false"
+               disabled="@Disabled"
+               @ref="_input"
+               value="@Value"
+               @oninput="OnInputAsync"
+               @onkeydown="OnKeyDownAsync"
+               @onkeydown:preventDefault="_swallowKey"
+               @onfocus="OnFocusAsync"
+               @onblur="() => _open = false" />
+
+        @if (ShowPicker)
+        {
+            <Button Label="@($"Choose a folder for {Label}")" Icon="IconRef.Folder" IconOnly="true"
+                    Variant="ButtonVariant.Secondary" Disabled="@Disabled" OnClick="PickAsync" />
+        }
+    </div>
+
+    <ul class="pi__list" id="@_listId" role="listbox" aria-label="@Label" hidden="@(!IsOpen)">
+        @for (var i = 0; i < _entries.Count; i++)
+        {
+            var index = i;
+            var entry = _entries[i];
+
+            <li @key="entry.Path"
+                id="@RowId(index)"
+                class="pi__row @(index == _selected ? "is-selected" : null)"
+                role="option"
+                aria-selected="@((index == _selected).ToString().ToLowerInvariant())"
+                @onmousedown:preventDefault="true"
+                @onmousedown="() => ChooseAsync(entry)">
+
+                <Icon Name="@(entry.IsDirectory ? IconRef.Folder : IconRef.File)" Size="IconSize.Sm" />
+                <span class="mono">@entry.Name</span>
+
+                @if (entry.IsDirectory)
+                {
+                    <span class="pi__slash muted">/</span>
+                }
+            </li>
+        }
+    </ul>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    [Parameter] public string? Placeholder { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public string Value { get; set; } = "";
+
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>
+    /// List one directory. Null disables completion entirely, which is honest for a path Dray
+    /// cannot enumerate — a bind source on a remote engine's host, for instance.
+    /// </summary>
+    [Parameter] public Func<string, CancellationToken, Task<IReadOnlyList<FileEntry>>>? ListAsync { get; set; }
+
+    /// <summary>Offer the platform's folder picker beside the field. Host paths only.</summary>
+    [Parameter] public bool ShowPicker { get; set; }
+
+    /// <summary>Opens the platform folder picker. Required when <see cref="ShowPicker"/> is set.</summary>
+    [Parameter] public Func<Task<string?>>? Pick { get; set; }
+
+    /// <summary>Hide files and offer only directories — what a mount source or destination is.</summary>
+    [Parameter] public bool DirectoriesOnly { get; set; }
+
+    readonly string _listId = $"pi-{Guid.NewGuid():N}";
+
+    ElementReference _input;
+    IReadOnlyList<FileEntry> _entries = [];
+    string _listedDirectory = "";
+    int _selected;
+    bool _open;
+    bool _swallowKey;
+    CancellationTokenSource? _fetch;
+
+    bool IsOpen => _open && _entries.Count > 0;
+
+    string RowId(int index) => $"{_listId}-{index}";
+
+    /// <summary>
+    /// Everything up to and including the last slash — the directory being listed. A value with no
+    /// slash yet lists the root, which is where an absolute path starts.
+    /// </summary>
+    static string DirectoryOf(string value)
+    {
+        var slash = value.LastIndexOf('/');
+        return slash < 0 ? "/" : value[..(slash + 1)];
+    }
+
+    /// <summary>Everything after the last slash — what is being completed.</summary>
+    static string PrefixOf(string value)
+    {
+        var slash = value.LastIndexOf('/');
+        return slash < 0 ? value : value[(slash + 1)..];
+    }
+
+    async Task OnFocusAsync()
+    {
+        _open = true;
+        await RefreshAsync();
+    }
+
+    async Task OnInputAsync(ChangeEventArgs e)
+    {
+        Value = e.Value?.ToString() ?? "";
+        await ValueChanged.InvokeAsync(Value);
+
+        _open = true;
+        _selected = 0;
+
+        await RefreshAsync();
+    }
+
+    async Task RefreshAsync()
+    {
+        if (ListAsync is null) return;
+
+        var directory = DirectoryOf(Value);
+        var prefix = PrefixOf(Value);
+
+        // Listed once per directory: walking into a folder and typing a name is one listing, not
+        // one per keystroke. The engine call is a container exec — worth not repeating.
+        if (directory != _listedDirectory)
+        {
+            if (_fetch is { } previous)
+            {
+                await previous.CancelAsync();
+                previous.Dispose();
+            }
+
+            var cts = new CancellationTokenSource();
+            _fetch = cts;
+
+            try
+            {
+                var listed = await ListAsync(directory.TrimEnd('/') is { Length: > 0 } d ? d : "/", cts.Token);
+
+                _listedDirectory = directory;
+                _all = listed;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception)
+            {
+                // A directory that cannot be read offers no completions rather than an error: the
+                // user is mid-path and may be about to type something that does exist.
+                _listedDirectory = directory;
+                _all = [];
+            }
+        }
+
+        Filter(prefix);
+        StateHasChanged();
+    }
+
+    IReadOnlyList<FileEntry> _all = [];
+
+    /// <summary>
+    /// Prefix match, case-insensitive, directories first.
+    /// <para>
+    /// Not the fuzzy ranking the command palette uses: for a path, a literal prefix is what the
+    /// user is typing, and ranking a scattered match above it would put the wrong row under Enter.
+    /// </para>
+    /// </summary>
+    void Filter(string prefix)
+    {
+        _entries =
+        [
+            .. _all
+                .Where(e => !DirectoriesOnly || e.IsDirectory)
+                .Where(e => prefix.Length == 0
+                            || e.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(e => e.IsDirectory)
+                .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                .Take(20),
+        ];
+
+        if (_selected >= _entries.Count) _selected = Math.Max(0, _entries.Count - 1);
+    }
+
+    async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        _swallowKey = e.Key is "ArrowDown" or "ArrowUp" or "Tab" or "Enter" && IsOpen;
+
+        switch (e.Key)
+        {
+            case "ArrowDown" when IsOpen:
+                _selected = (_selected + 1) % _entries.Count;
+                break;
+
+            case "ArrowUp" when IsOpen:
+                _selected = (_selected - 1 + _entries.Count) % _entries.Count;
+                break;
+
+            // Tab and Enter both accept. Tab is the shell habit and Enter is the form habit, and
+            // there is no reason to make someone learn which one this field wanted.
+            case "Tab" when IsOpen:
+            case "Enter" when IsOpen:
+                await ChooseAsync(_entries[_selected]);
+                break;
+
+            case "Escape":
+                _open = false;
+                break;
+        }
+    }
+
+    async Task ChooseAsync(FileEntry entry)
+    {
+        // A directory gains its trailing slash and the list stays open on its contents: choosing a
+        // folder is a step along the path, not the end of it.
+        Value = entry.IsDirectory ? entry.Path.TrimEnd('/') + "/" : entry.Path;
+
+        await ValueChanged.InvokeAsync(Value);
+
+        if (entry.IsDirectory)
+        {
+            _selected = 0;
+            await RefreshAsync();
+        }
+        else
+        {
+            _open = false;
+        }
+    }
+
+    async Task PickAsync()
+    {
+        if (Pick is null) return;
+
+        if (await Pick() is { Length: > 0 } picked)
+        {
+            Value = picked;
+            await ValueChanged.InvokeAsync(Value);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_fetch is { } cts)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+            _fetch = null;
+        }
+    }
+}

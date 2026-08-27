@@ -45,6 +45,10 @@ public static class DockerRun
 
             Env = [.. request.Environment.Select(e => $"{e.Key}={e.Value}")],
 
+            // Carries the user's secret markings for the container's whole life, so the masking
+            // survives a restart and is visible to anyone running inspect (SecretMarks).
+            Labels = new Dictionary<string, string>(request.Labels, StringComparer.Ordinal),
+
             // Declaring the port on the container is separate from publishing it on the host, and
             // an image that does not EXPOSE a port still needs this or the binding is ignored.
             ExposedPorts = request.Ports.ToDictionary(

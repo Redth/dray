@@ -1,0 +1,90 @@
+.pe {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+}
+
+.pe__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.pe__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 2px var(--s1) 2px var(--s2);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    font-size: var(--text-sm);
+}
+
+/* An arrow rather than a colon: the colon is the syntax people had to remember, and the whole
+   point of the chip is that they no longer do. */
+.pe__arrow {
+    color: var(--muted);
+    padding: 0 var(--s1);
+}
+
+.pe__proto {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.pe__remove {
+    display: inline-flex;
+    align-items: center;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 2px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+}
+
+.pe__remove:hover {
+    color: var(--danger);
+    background: var(--danger-tint);
+}
+
+.pe__remove:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}
+
+.pe__add {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+}
+
+/* Wide enough for five digits and no wider: a port field the width of the dialog invites a
+   sentence. */
+.pe__port {
+    width: 7ch;
+    flex: 0 0 auto;
+}
+
+.pe__proto-select {
+    width: 7ch;
+    flex: 0 0 auto;
+}
+
+.pe__hint,
+.pe__problem {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    max-width: 52ch;
+}
+
+.pe__problem {
+    color: var(--danger-ink);
+}

@@ -1,0 +1,168 @@
+@* Published ports, as a list you build rather than a syntax you remember.
+
+   A textarea here asks the user to be a parser: to know that host comes first, that the separator
+   is a colon, that the protocol goes after a slash. Three fields and a button ask nothing.
+
+   The syntax is still accepted, because a README you are copying from has `8080:80` in it and
+   retyping that across three boxes is worse than pasting it. Pasting into the host field splits it,
+   through the same RunParser the textarea used — so the tested code still earns its keep. *@
+
+<div class="pe">
+    @if (Ports.Count > 0)
+    {
+        <ul class="pe__chips">
+            @foreach (var port in Ports)
+            {
+                var captured = port;
+
+                <li class="pe__chip" @key="@($"{port.HostPort}/{port.Protocol}")">
+                    <span class="mono">@port.HostPort<span class="pe__arrow">→</span>@port.ContainerPort</span>
+
+                    @if (port.Protocol != "tcp")
+                    {
+                        <span class="pe__proto">@port.Protocol</span>
+                    }
+
+                    <button type="button" class="pe__remove"
+                            aria-label="@($"Remove the mapping from host port {port.HostPort}")"
+                            @onclick="() => RemoveAsync(captured)">
+                        <Icon Name="IconRef.Close" Size="IconSize.Sm" />
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+
+    <div class="pe__add">
+        <input class="input mono pe__port" inputmode="numeric" placeholder="8080"
+               aria-label="Host port"
+               @bind="_host" @bind:event="oninput" @onkeydown="OnKeyDownAsync" />
+
+        <span class="pe__arrow" aria-hidden="true">→</span>
+
+        <input class="input mono pe__port" inputmode="numeric" placeholder="80"
+               aria-label="Port inside the container"
+               @bind="_container" @bind:event="oninput" @onkeydown="OnKeyDownAsync" />
+
+        <select class="input pe__proto-select" aria-label="Protocol" @bind="_protocol">
+            @foreach (var protocol in Protocols)
+            {
+                <option value="@protocol">@protocol</option>
+            }
+        </select>
+
+        <Button Label="Add port" Icon="IconRef.Plus" IconOnly="true" Variant="ButtonVariant.Secondary"
+                Disabled="@(Problem is not null || _host.Trim().Length == 0)" OnClick="AddAsync" />
+    </div>
+
+    @if (Problem is { } problem)
+    {
+        <p class="pe__problem" role="alert">@problem</p>
+    }
+    else if (Ports.Count == 0)
+    {
+        <p class="pe__hint muted">
+            Nothing published. The container still reaches the network; you just cannot reach it
+            from this machine.
+        </p>
+    }
+</div>
+
+@code {
+    static readonly string[] Protocols = ["tcp", "udp", "sctp"];
+
+    [Parameter, EditorRequired] public IReadOnlyList<PortBinding> Ports { get; set; } = [];
+
+    [Parameter] public EventCallback<IReadOnlyList<PortBinding>> PortsChanged { get; set; }
+
+    string _host = "";
+    string _container = "";
+    string _protocol = "tcp";
+
+    /// <summary>
+    /// What is wrong with what is typed right now, or null. Computed on every render so a clash is
+    /// visible before the button is pressed rather than after.
+    /// </summary>
+    string? Problem
+    {
+        get
+        {
+            var host = _host.Trim();
+            if (host.Length == 0) return null;
+
+            // A pasted `8080:80/udp` is not an error, it is the other way to enter one.
+            if (LooksPasted(host)) return PastedProblem(host);
+
+            if (!TryPort(host, out var hostPort)) return "A port is a number from 1 to 65535.";
+
+            var containerText = _container.Trim();
+            if (containerText.Length > 0 && !TryPort(containerText, out _))
+                return "A port is a number from 1 to 65535.";
+
+            return Ports.Any(p => p.HostPort == hostPort && p.Protocol == _protocol)
+                ? $"Host port {hostPort}/{_protocol} is already mapped."
+                : null;
+        }
+    }
+
+    static bool LooksPasted(string text) => text.Contains(':') || text.Contains('/');
+
+    /// <summary>Validate a pasted mapping with the same parser the textarea used.</summary>
+    string? PastedProblem(string text)
+    {
+        RunParser.ParsePorts(text, out var problem);
+        return problem;
+    }
+
+    static bool TryPort(string text, out int port)
+        => int.TryParse(text.Trim(), out port) && port is > 0 and <= 65535;
+
+    async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AddAsync();
+    }
+
+    async Task AddAsync()
+    {
+        var host = _host.Trim();
+        if (host.Length == 0 || Problem is not null) return;
+
+        // Pasted whole. Split it rather than making the user redistribute it across the fields.
+        if (LooksPasted(host))
+        {
+            var parsed = RunParser.ParsePorts(host, out var problem);
+            if (problem is not null || parsed.Count == 0) return;
+
+            var added = parsed[0];
+
+            // Still has to clear the list it is joining, which the parser cannot know about.
+            if (Ports.Any(p => p.HostPort == added.HostPort && p.Protocol == added.Protocol)) return;
+
+            await Commit([.. Ports, added]);
+            return;
+        }
+
+        if (!TryPort(host, out var hostPort)) return;
+
+        // An empty container port means the same on both sides, which is what everyone means when
+        // they type one number.
+        var containerPort = _container.Trim().Length == 0
+            ? hostPort
+            : TryPort(_container, out var parsedContainer) ? parsedContainer : hostPort;
+
+        await Commit([.. Ports, new PortBinding(hostPort, containerPort, _protocol)]);
+    }
+
+    async Task Commit(IReadOnlyList<PortBinding> ports)
+    {
+        _host = "";
+        _container = "";
+        _protocol = "tcp";
+
+        await PortsChanged.InvokeAsync([.. ports.OrderBy(p => p.HostPort)]);
+    }
+
+    async Task RemoveAsync(PortBinding port)
+        => await PortsChanged.InvokeAsync(
+            [.. Ports.Where(p => p.HostPort != port.HostPort || p.Protocol != port.Protocol)]);
+}

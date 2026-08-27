@@ -1,22 +1,11 @@
 /* Wider than the default dialog: three of these fields are multi-line, and a narrow box turns a
    two-column port mapping into something that wraps. */
 ::deep .dialog.run {
-    max-width: 44rem;
-}
+    max-width: 46rem;
 
-/* Ports and environment side by side — they are filled together and read together, and stacking
-   them pushes the mounts field below the fold on a short window. Collapses on a narrow one. */
-.run__grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-    gap: var(--s3);
-}
-
-.run__area {
-    /* Vertical only: a textarea that can be dragged wider breaks the grid it sits in. */
-    resize: vertical;
-    min-height: calc(var(--row-h) * 2);
-    line-height: 1.5;
+    /* The editors grow as rows are added, so the dialog scrolls rather than pushing its own
+       buttons off the screen. */
+    max-height: 88vh;
 }
 
 /* The reference takes the room it needs and the size follows it, rather than a fixed split that

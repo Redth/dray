@@ -196,6 +196,12 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
             args.Add($"{variable.Key}={variable.Value}");
         }
 
+        foreach (var (key, value) in request.Labels)
+        {
+            args.Add("--label");
+            args.Add($"{key}={value}");
+        }
+
         foreach (var mount in request.Mounts)
         {
             // No read-only suffix: the CLI's --volume takes source:destination and nothing else,
@@ -345,7 +351,9 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
             User = process?.User?.Id is { } id ? $"{id.Uid}:{id.Gid}" : null,
 
             Environment = process?.Environment is { } env
-                ? [.. env.Select(ParseEnv).OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase)]
+                ? SecretMarks.Apply(
+                    env.Select(ParseEnv).OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase),
+                    config?.Labels)
                 : [],
 
             Ports = MapExposedPorts(config?.PublishedPorts),

@@ -43,7 +43,9 @@ public static class DockerInspect
             Command = config?.Cmd?.ToArray() ?? [],
             WorkingDirectory = Blank(config?.WorkingDir),
             User = Blank(config?.User),
-            Environment = MapEnvironment(config?.Env),
+            // The user's own secret markings ride on the container's labels, so a variable marked
+            // when it was created is still masked now (SecretMarks).
+            Environment = SecretMarks.Apply(MapEnvironment(config?.Env), config?.Labels),
             Ports = MapPorts(config?.ExposedPorts, c.NetworkSettings?.Ports),
             Mounts = MapMounts(c.Mounts),
             Networks = MapNetworks(c.NetworkSettings?.Networks),

@@ -1,0 +1,240 @@
+@* Mounts, by type.
+
+   A single `source:destination` box hides that the three are genuinely different things. A named
+   volume is managed by the engine and outlives the container; a bind is a directory on this machine
+   that the container can write to; a tmpfs is memory that vanishes. Choosing the type first is what
+   makes the source field able to help — a volume gets the volumes that exist, a bind gets a folder
+   picker, and a tmpfs has no source at all. *@
+@inject EngineManager Engine
+@inject IShellBridge Shell
+
+<div class="me">
+    @if (Mounts.Count > 0)
+    {
+        <ul class="me__rows">
+            @foreach (var mount in Mounts)
+            {
+                var captured = mount;
+
+                <li class="me__row" @key="mount.Destination">
+                    <span class="me__kind" title="@KindTitle(mount.Kind)">@KindLabel(mount.Kind)</span>
+
+                    <span class="me__source mono">@(mount.Kind == MountKind.Tmpfs ? "memory" : mount.Source)</span>
+                    <span class="me__arrow" aria-hidden="true">→</span>
+                    <span class="me__dest mono">@mount.Destination</span>
+
+                    @if (mount.ReadOnly)
+                    {
+                        <span class="me__ro">read-only</span>
+                    }
+
+                    <button type="button" class="me__remove"
+                            aria-label="@($"Remove the mount at {mount.Destination}")"
+                            @onclick="() => RemoveAsync(captured)">
+                        <Icon Name="IconRef.Close" Size="IconSize.Sm" />
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+
+    <div class="me__add">
+        <div class="me__line">
+            <select class="input me__kind-select" aria-label="Mount type" @bind="_kind">
+                <option value="@MountKind.Volume">Volume</option>
+                <option value="@MountKind.Bind">Folder on this machine</option>
+                <option value="@MountKind.Tmpfs">Memory</option>
+            </select>
+
+            @switch (_kind)
+            {
+                case MountKind.Volume:
+                    <Combobox TItem="string"
+                              Label="Volume"
+                              Placeholder="pgdata — a new name creates it"
+                              InputClass="mono"
+                              Class="me__grow"
+                              Query="@_source"
+                              QueryChanged="@(v => _source = v)"
+                              Source="SearchVolumesAsync"
+                              LabelOf="@(v => v)"
+                              EmptyText="No volume by that name yet — running this will create it.">
+                        <Row Context="match">
+                            <span class="mono">
+                                <Highlighted Text="@match.Value" Highlights="match.Highlights" />
+                            </span>
+                        </Row>
+                    </Combobox>
+                    break;
+
+                case MountKind.Bind:
+                    @* Completes against this machine's filesystem, with the platform's own folder
+                       picker beside it — typing a path and choosing one are both reasonable and
+                       neither should be the only way. *@
+                    <PathInput Label="Folder on this machine"
+                               Placeholder="/Users/me/project"
+                               Value="@_source"
+                               ValueChanged="@(v => _source = v)"
+                               ShowPicker="true"
+                               Pick="PickFolderAsync"
+                               DirectoriesOnly="true" />
+                    break;
+
+                case MountKind.Tmpfs:
+                    <span class="me__note muted">
+                        Nothing on disk. Contents vanish when the container stops.
+                    </span>
+                    break;
+            }
+        </div>
+
+        <div class="me__line">
+            <span class="me__into muted">into</span>
+
+            <PathInput Label="Path inside the container"
+                       Placeholder="/var/lib/postgresql/data"
+                       Value="@_destination"
+                       ValueChanged="@(v => _destination = v)"
+                       ListAsync="ListImagePathsAsync"
+                       DirectoriesOnly="true" />
+
+            <label class="me__toggle" title="@ReadOnlyTitle">
+                <input type="checkbox" checked="@_readOnly" disabled="@(!CanBeReadOnly)"
+                       @onchange="e => _readOnly = (bool?)e.Value ?? false" />
+                <span>read-only</span>
+            </label>
+
+            <Button Label="Add mount" Icon="IconRef.Plus" IconOnly="true" Variant="ButtonVariant.Secondary"
+                    Disabled="@(Problem is not null || !IsComplete)" OnClick="AddAsync" />
+        </div>
+    </div>
+
+    @if (Problem is { } problem)
+    {
+        <p class="me__problem" role="alert">@problem</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<MountPoint> Mounts { get; set; } = [];
+
+    [Parameter] public EventCallback<IReadOnlyList<MountPoint>> MountsChanged { get; set; }
+
+    /// <summary>
+    /// A running container of the same image, when there is one, so the destination field can
+    /// complete against a real filesystem rather than guessing.
+    /// </summary>
+    [Parameter] public string? BrowseContainerId { get; set; }
+
+    MountKind _kind = MountKind.Volume;
+    string _source = "";
+    string _destination = "";
+    bool _readOnly;
+
+    IReadOnlyList<string> _volumes = [];
+
+    /// <summary>
+    /// Apple's runtime cannot mount read-only, so the checkbox is disabled rather than offered and
+    /// refused at the moment of the run.
+    /// </summary>
+    bool CanBeReadOnly => _kind != MountKind.Tmpfs
+                          && (Engine.Selected?.Capabilities.SupportsVolumes ?? true);
+
+    string ReadOnlyTitle => CanBeReadOnly
+        ? "The container can read this but not write to it."
+        : "This engine cannot mount read-only.";
+
+    bool IsComplete => _destination.Trim().Length > 0
+                       && (_kind == MountKind.Tmpfs || _source.Trim().Length > 0);
+
+    string? Problem
+    {
+        get
+        {
+            var destination = _destination.Trim();
+            if (destination.Length == 0) return null;
+
+            if (!destination.StartsWith('/'))
+                return "The path inside the container has to be absolute.";
+
+            var normalized = FileEntry.Normalize(destination);
+
+            return Mounts.Any(m => string.Equals(m.Destination, normalized, StringComparison.Ordinal))
+                ? $"Something is already mounted at {normalized}."
+                : null;
+        }
+    }
+
+    static string KindLabel(MountKind kind) => kind switch
+    {
+        MountKind.Volume => "volume",
+        MountKind.Bind => "folder",
+        MountKind.Tmpfs => "memory",
+        _ => "other",
+    };
+
+    static string KindTitle(MountKind kind) => kind switch
+    {
+        MountKind.Volume => "A volume the engine manages. Outlives the container.",
+        MountKind.Bind => "A folder on this machine, mounted in.",
+        MountKind.Tmpfs => "Memory. Contents vanish when the container stops.",
+        _ => "",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var volumes = await Engine.ListVolumesAsync();
+            _volumes = [.. volumes.Select(v => v.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase)];
+        }
+        catch (Exception)
+        {
+            // An engine with no volumes still lets a name be typed; it will be created.
+            _volumes = [];
+        }
+    }
+
+    Task<IReadOnlyList<string>> SearchVolumesAsync(string query, CancellationToken ct)
+        => Task.FromResult(_volumes);
+
+    async Task<string?> PickFolderAsync() => await Shell.PickFolderAsync("Choose a folder to mount");
+
+    /// <summary>
+    /// Complete the destination against a running container when one was named, and offer nothing
+    /// otherwise — an image's filesystem cannot be listed without creating something from it, and
+    /// creating a container to fill in a text field is not a trade worth making.
+    /// </summary>
+    async Task<IReadOnlyList<FileEntry>> ListImagePathsAsync(string path, CancellationToken ct)
+    {
+        if (BrowseContainerId is not { Length: > 0 } id) return [];
+
+        var listing = await Engine.ListDirectoryAsync(id, path, containerIsRunning: true, ct);
+        return listing.Entries;
+    }
+
+    async Task AddAsync()
+    {
+        if (Problem is not null || !IsComplete) return;
+
+        var destination = FileEntry.Normalize(_destination.Trim());
+
+        var source = _kind switch
+        {
+            MountKind.Tmpfs => "",
+            _ => _source.Trim().TrimEnd('/'),
+        };
+
+        var added = new MountPoint(_kind, source, destination, _readOnly && CanBeReadOnly);
+
+        _source = "";
+        _destination = "";
+        _readOnly = false;
+
+        await MountsChanged.InvokeAsync([.. Mounts, added]);
+    }
+
+    async Task RemoveAsync(MountPoint mount)
+        => await MountsChanged.InvokeAsync(
+            [.. Mounts.Where(m => !string.Equals(m.Destination, mount.Destination, StringComparison.Ordinal))]);
+}

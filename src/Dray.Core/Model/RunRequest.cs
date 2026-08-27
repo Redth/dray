@@ -34,6 +34,16 @@ public sealed record RunRequest
     public IReadOnlyList<MountPoint> Mounts { get; init; } = [];
 
     /// <summary>
+    /// Extra labels to stamp on the container.
+    /// <para>
+    /// Used to record which variables the user marked secret, which the engine then carries for
+    /// the container's whole life — see <see cref="SecretMarks"/>.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Labels { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Start it as well as create it.
     /// <para>
     /// False creates the container and leaves it stopped, which is how you inspect what an image

@@ -1,0 +1,124 @@
+.ee {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+}
+
+.ee__rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+
+    /* Bounded: a container with forty variables must not push the dialog's buttons off screen. */
+    max-height: 30vh;
+    overflow-y: auto;
+}
+
+.ee__row {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s1) var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-sm);
+}
+
+.ee__row:hover {
+    background: var(--surface-2);
+}
+
+/* The name takes what it needs and the value takes the rest: a fixed split truncates whichever of
+   the two happens to be long, and which one that is differs per row. */
+.ee__key {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ee__value {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+}
+
+/* Masked values are not text to read, so they stop looking like it. */
+.ee__value.is-hidden {
+    letter-spacing: 0.15em;
+}
+
+.ee__secret {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    flex: 0 0 auto;
+    font-size: var(--text-xs);
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.ee__icon {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 2px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+}
+
+.ee__icon:hover {
+    color: var(--ink);
+}
+
+.ee__remove:hover {
+    color: var(--danger);
+    background: var(--danger-tint);
+}
+
+.ee__icon:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}
+
+.ee__add {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+}
+
+.ee__key-input {
+    flex: 0 1 22ch;
+}
+
+.ee__value-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.ee__equals {
+    color: var(--muted);
+}
+
+.ee__hint,
+.ee__problem {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    max-width: 56ch;
+}
+
+.ee__problem {
+    color: var(--danger-ink);
+}
