@@ -119,6 +119,9 @@ The core loop. If this phase is excellent, the app is worth using even with noth
   `docker run` shown live and copyable
 - Exit-code plain-language expansion (DESIGN.md §2.4)
 
+**Progress:** actions and logs are done and running against a live engine. Detail page has its tab
+strip; Inspect, Files, Ports and Env are stubs. Exec, stats and the file browser remain.
+
 **Demo:** find a container that died overnight, read why in the logs, exec in, fix it, restart —
 without touching a terminal.
 **Exit:** 400 containers scroll at 60fps · one stopping re-renders one row · logs keep up with a

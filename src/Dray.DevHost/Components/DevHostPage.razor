@@ -6,6 +6,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dray</title>
+    @* Without this, the relative asset hrefs below resolve against the current route: on a nested
+       route like /containers/{id} the browser asks for /containers/_content/... and gets a 404,
+       so the page renders unstyled. The macOS host's index.html has always carried one. *@
+    <base href="/" />
     @* Vendored, local. No CDN links, no webfonts — the app must render with the network
        unplugged (docs/ARCHITECTURE.md section 1.1). *@
     <link rel="stylesheet" href="_content/Dray.Ui/css/app.css" />

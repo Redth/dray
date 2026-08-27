@@ -73,10 +73,11 @@
                             <tr @key="c.Id"
                                 class="@RowClass(c)"
                                 aria-selected="@((_selected == c.Id).ToString().ToLowerInvariant())"
-                                @onclick="() => _selected = c.Id">
+                                @onclick="() => _selected = c.Id"
+                                @ondblclick="() => Open(c)">
                                 <td>
                                     <div class="cell-name">
-                                        <span>@c.Name</span>
+                                        <a href="@($"/containers/{c.ShortId}")" @onclick:stopPropagation>@c.Name</a>
                                         <span class="mono muted">@c.ShortId</span>
                                     </div>
                                 </td>
@@ -185,6 +186,8 @@
     }
 
     void Nav(string route) => Navigation.NavigateTo(route);
+
+    void Open(ContainerSummary c) => Navigation.NavigateTo($"/containers/{c.ShortId}");
 
     void ShowError(string message) => _error = message;
 

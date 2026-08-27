@@ -172,6 +172,26 @@ public sealed class EngineManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Stream a container's output from the selected host.
+    /// <para>
+    /// The stream belongs to the caller and ends with their cancellation token, so a view that
+    /// goes away does not leave a connection open against the engine.
+    /// </para>
+    /// </summary>
+    public async IAsyncEnumerable<LogLine> StreamLogsAsync(
+        string containerId,
+        LogOptions options,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        // Captured once: a host switch replaces the field, and the caller's stream should end
+        // rather than silently continue against a different engine.
+        if (_runtime is not { } runtime) yield break;
+
+        await foreach (var line in runtime.StreamLogsAsync(containerId, options, ct).ConfigureAwait(false))
+            yield return line;
+    }
+
+    /// <summary>
     /// Check the hosts that are not selected, so the picker can show which are alive.
     /// <para>
     /// Deliberately on demand rather than on a timer: probing a remote host over SSH costs a

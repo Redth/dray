@@ -1,0 +1,256 @@
+@* A container's output.
+
+   Streams for as long as it is on screen and stops when it is not — the stream belongs to the view
+   (docs/ARCHITECTURE.md §3), so navigating away does not leave a connection open against the
+   engine. *@
+@implements IAsyncDisposable
+@inject EngineManager Engine
+@inject IShellBridge Shell
+@inject IJSRuntime JS
+
+<div class="log">
+    <div class="log__bar chrome">
+        <label class="toggle">
+            <input type="checkbox" @bind="_showTimestamps" />
+            <span>Timestamps</span>
+        </label>
+        <label class="toggle">
+            <input type="checkbox" @bind="_wrap" />
+            <span>Wrap</span>
+        </label>
+        <label class="toggle">
+            <input type="checkbox" @bind="_stderrOnly" />
+            <span>stderr only</span>
+        </label>
+
+        <input class="input log__filter" type="search" placeholder="Filter lines"
+               @bind="_filter" @bind:event="oninput" />
+
+        <span class="log__count muted">@Filtered.Count / @_lines.Count</span>
+
+        <Button Label="Copy" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost" IconOnly="true" OnClick="CopyAsync" />
+    </div>
+
+    <div class="log__body mono" @ref="_scroller">
+        @if (_lines.Count == 0)
+        {
+            <div class="log__empty muted">
+                @(_streaming ? "Waiting for output…" : "This container has produced no output.")
+            </div>
+        }
+        else
+        {
+            @foreach (var line in Filtered)
+            {
+                <div class="log__line @(line.Stream == LogStream.StdErr ? "is-stderr" : null)" @key="line.Sequence">
+                    @if (_showTimestamps && line.Timestamp is { } ts)
+                    {
+                        <span class="log__ts">@ts.ToLocalTime().ToString("HH:mm:ss.fff")</span>
+                    }
+                    <span class="log__text">@line.Text</span>
+                </div>
+            }
+        }
+    </div>
+
+    @if (!_following)
+    {
+        <button type="button" class="log__jump" @onclick="JumpToLatestAsync">
+            <Icon Name="IconRef.ChevronDown" Size="IconSize.Sm" />
+            Jump to latest
+        </button>
+    }
+
+    @if (_truncated)
+    {
+        <div class="log__truncated muted">
+            Showing the most recent @MaxLines lines. Older output is still in the engine.
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// A hard cap on what is held in memory. A chatty container can produce output faster than
+    /// anyone can read it, and an unbounded buffer would grow until the app died. The banner says
+    /// so rather than silently dropping history.
+    /// </summary>
+    const int MaxLines = 5_000;
+
+    [Parameter, EditorRequired] public ContainerSummary Container { get; set; } = default!;
+
+    readonly List<LogLine> _lines = [];
+
+    ElementReference _scroller;
+    IJSObjectReference? _module;
+    IJSObjectReference? _scrollState;
+    DotNetObjectReference<LogView>? _self;
+
+    CancellationTokenSource? _cts;
+    Task? _pump;
+    string? _streamingFor;
+
+    bool _showTimestamps = true;
+    bool _wrap;
+    bool _stderrOnly;
+    bool _following = true;
+    bool _streaming;
+    bool _truncated;
+    string _filter = "";
+
+    IReadOnlyList<LogLine> Filtered
+    {
+        get
+        {
+            IEnumerable<LogLine> q = _lines;
+
+            if (_stderrOnly) q = q.Where(l => l.Stream == LogStream.StdErr);
+
+            if (!string.IsNullOrWhiteSpace(_filter))
+            {
+                var needle = _filter.Trim();
+                q = q.Where(l => l.Text.Contains(needle, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return [.. q];
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Switching containers restarts the stream; a re-render for any other reason must not.
+        if (_streamingFor == Container.Id) return;
+
+        _streamingFor = Container.Id;
+        await RestartStreamAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+            _self = DotNetObjectReference.Create(this);
+            _scrollState = await _module.InvokeAsync<IJSObjectReference>("logs.attach", _scroller, _self);
+        }
+
+        // A no-op while the user is reading history further up.
+        if (_module is not null && _scrollState is not null)
+            await _module.InvokeVoidAsync("logs.followIfAttached", _scrollState);
+    }
+
+    /// <summary>Called from JS when the user scrolls away from, or back to, the bottom.</summary>
+    [JSInvokable]
+    public Task OnFollowChanged(bool following)
+    {
+        _following = following;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    async Task RestartStreamAsync()
+    {
+        await StopStreamAsync();
+
+        _lines.Clear();
+        _truncated = false;
+        _following = true;
+        _streaming = true;
+
+        _cts = new CancellationTokenSource();
+        _pump = PumpAsync(Container.Id, _cts.Token);
+    }
+
+    async Task PumpAsync(string containerId, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var line in Engine.StreamLogsAsync(containerId, LogOptions.Default, ct))
+            {
+                _lines.Add(line);
+
+                if (_lines.Count > MaxLines)
+                {
+                    // Drop from the front in one go rather than per line: removing a single item
+                    // from the head of a List is O(n), and doing that per line on a busy container
+                    // is the difference between smooth and unusable.
+                    _lines.RemoveRange(0, _lines.Count - MaxLines);
+                    _truncated = true;
+                }
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigating away or switching containers.
+        }
+        catch (Exception ex)
+        {
+            _lines.Add(new LogLine(null, LogStream.StdErr, $"— log stream ended: {RuntimeEventPump.Describe(ex)}", long.MaxValue));
+        }
+        finally
+        {
+            _streaming = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    async Task StopStreamAsync()
+    {
+        if (_cts is null) return;
+
+        await _cts.CancelAsync();
+
+        if (_pump is not null)
+        {
+            try
+            {
+                await _pump;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        _cts.Dispose();
+        _cts = null;
+        _pump = null;
+    }
+
+    async Task JumpToLatestAsync()
+    {
+        if (_module is null || _scrollState is null) return;
+        await _module.InvokeVoidAsync("logs.scrollToBottom", _scrollState);
+    }
+
+    async Task CopyAsync()
+    {
+        var text = string.Join(
+            '\n',
+            Filtered.Select(l => _showTimestamps && l.Timestamp is { } ts
+                ? $"{ts.ToLocalTime():HH:mm:ss.fff} {l.Text}"
+                : l.Text));
+
+        await Shell.WriteClipboardAsync(text);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopStreamAsync();
+
+        try
+        {
+            if (_module is not null && _scrollState is not null)
+                await _module.InvokeVoidAsync("logs.detach", _scrollState);
+
+            if (_scrollState is not null) await _scrollState.DisposeAsync();
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit went away first; nothing to release.
+        }
+
+        _self?.Dispose();
+    }
+}

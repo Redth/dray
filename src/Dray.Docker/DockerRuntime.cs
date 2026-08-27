@@ -230,6 +230,9 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         _ => $"The engine returned {(int)ex.StatusCode}.",
     };
 
+    public IAsyncEnumerable<LogLine> StreamLogsAsync(string containerId, LogOptions options, CancellationToken ct = default)
+        => DockerLogStream.ReadAsync(Client, containerId, options, ct);
+
     public async Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
     {
         var info = await Client.System.GetSystemInfoAsync(ct).ConfigureAwait(false);

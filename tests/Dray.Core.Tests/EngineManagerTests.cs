@@ -308,6 +308,9 @@ sealed class TrackedRuntime(string endpoint) : IContainerRuntime
         return Task.CompletedTask;
     }
 
+    public IAsyncEnumerable<LogLine> StreamLogsAsync(string containerId, LogOptions options, CancellationToken ct = default)
+        => AsyncEnumerable.Empty<LogLine>();
+
     public Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
         => Task.FromResult(new SystemInfo(0, 0, 0, 0, null, null));
 

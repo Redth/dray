@@ -8,6 +8,16 @@
     font-size: var(--text-xs);
 }
 
+.cell-name a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.cell-name a:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 .cell-actions {
     width: 1%;
     text-align: right;

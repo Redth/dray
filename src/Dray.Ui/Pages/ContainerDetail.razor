@@ -1,0 +1,89 @@
+@page "/containers/{Id}"
+@inject EngineManager Engine
+@inject NavigationManager Nav
+
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
+<EngineScope>
+    @if (Container is not { } container)
+    {
+        <div class="page">
+            <EmptyState Icon="IconRef.Container"
+                        Title="That container is not here"
+                        Body="It may have been removed, or it belongs to a different host than the one selected."
+                        />
+        </div>
+    }
+    else
+    {
+        <div class="detail">
+            <div class="detail__head">
+                <div class="detail__title">
+                    <h2>@container.Name</h2>
+                    <StatePill Status="container.Status" />
+                </div>
+                <div class="detail__meta mono muted">
+                    <span>@container.ShortId</span>
+                    <span>@container.Image</span>
+                    @if (container.Stack is { } stack)
+                    {
+                        <span>stack: @stack</span>
+                    }
+                </div>
+                <div class="detail__actions">
+                    <ContainerActionBar Container="container" />
+                </div>
+            </div>
+
+            <div class="detail__tabs" role="tablist">
+                @foreach (var tab in Tabs)
+                {
+                    <button type="button" role="tab" class="tab @(_tab == tab ? "is-active" : null)"
+                            aria-selected="@((_tab == tab).ToString().ToLowerInvariant())"
+                            @onclick="() => _tab = tab">
+                        @tab
+                    </button>
+                }
+            </div>
+
+            <div class="detail__body">
+                @switch (_tab)
+                {
+                    case "Logs":
+                        <LogView Container="container" />
+                        break;
+
+                    default:
+                        <div class="page">
+                            <EmptyState Icon="IconRef.Inspect"
+                                        Title="@($"{_tab} is not built yet")"
+                                        Body="Logs work today. Inspect, Files, Ports and Env are next." />
+                        </div>
+                        break;
+                }
+            </div>
+        </div>
+    }
+</EngineScope>
+
+@code {
+    static readonly string[] Tabs = ["Logs", "Inspect", "Files", "Ports", "Env"];
+
+    [Parameter] public string Id { get; set; } = "";
+
+    string _tab = "Logs";
+
+    ContainerSummary? Container => Engine.Store.Find(Id)
+        // The URL carries a short id when it came from a row, so fall back to a prefix match.
+        ?? Engine.Store.Containers.FirstOrDefault(c => c.Id.StartsWith(Id, StringComparison.Ordinal));
+
+    PageChrome Chrome => new(
+        Container?.Name ?? "Container",
+        Subtitle: Container is null ? null : Engine.Selected?.Name,
+        Actions: [ChromeAction.Secondary("back", "All containers", IconRef.ChevronRight)]);
+
+    void HandleAction(string id)
+    {
+        if (id == "back") Nav.NavigateTo("/containers");
+    }
+}

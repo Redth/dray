@@ -94,6 +94,16 @@ public interface IContainerRuntime : IAsyncDisposable
     /// </summary>
     Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default);
 
+    /// <summary>
+    /// Stream a container's output.
+    /// <para>
+    /// Ends when <paramref name="ct"/> fires, or — when not following — once the history has been
+    /// delivered. A container that stops while being followed ends the stream too, which is a
+    /// normal completion rather than an error.
+    /// </para>
+    /// </summary>
+    IAsyncEnumerable<LogLine> StreamLogsAsync(string containerId, LogOptions options, CancellationToken ct = default);
+
     Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default);
 
     Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default);
