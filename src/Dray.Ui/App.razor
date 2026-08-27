@@ -1,0 +1,15 @@
+<Router AppAssembly="@typeof(App).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(AppLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(AppLayout)">
+            <div class="page">
+                <EmptyState Title="No such page"
+                            Body="That route does not exist in Dray. This is a bug — the sidebar should never offer a link that goes nowhere."
+                            Icon="IconRef.Warning" />
+            </div>
+        </LayoutView>
+    </NotFound>
+</Router>

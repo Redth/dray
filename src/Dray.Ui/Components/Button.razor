@@ -1,0 +1,36 @@
+<button type="button"
+        class="btn btn--@Variant.ToString().ToLowerInvariant() @(Danger ? "btn--danger" : null) @(IconOnly ? "btn--icon" : null) @Class"
+        disabled="@(Disabled || Busy)"
+        title="@(Tooltip ?? (IconOnly ? Label : null))"
+        aria-label="@(IconOnly ? Label : null)"
+        @onclick="OnClick"
+        @attributes="Extra">
+    @if (Icon is { } icon)
+    {
+        <Icon Name="icon" Size="IconSize.Md" />
+    }
+    @if (!IconOnly)
+    {
+        <span>@Label</span>
+    }
+</button>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public IconRef? Icon { get; set; }
+    [Parameter] public ButtonVariant Variant { get; set; } = ButtonVariant.Secondary;
+
+    /// <summary>Applies the danger tone. Orthogonal to weight — see <see cref="ButtonVariant"/>.</summary>
+    [Parameter] public bool Danger { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Work in flight. Disables the button; the caller shows progress elsewhere.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    [Parameter] public bool IconOnly { get; set; }
+    [Parameter] public string? Tooltip { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public EventCallback OnClick { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public IDictionary<string, object>? Extra { get; set; }
+}

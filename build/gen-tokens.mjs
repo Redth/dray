@@ -29,7 +29,14 @@ function cssBlock(theme, indent = '  ') {
     hex: toHex(oklch),
   }));
   const width = Math.max(...decls.map((d) => d.decl.length)) + 2;
-  return decls.map((d) => `${indent}${d.decl.padEnd(width)}/* ${d.hex} */`).join('\n');
+  const colors = decls.map((d) => `${indent}${d.decl.padEnd(width)}/* ${d.hex} */`);
+
+  // Effects carry alpha and are not palette entries, so they are emitted verbatim.
+  const effects = Object.entries(tokens.effects?.[theme] ?? {})
+    .filter(([k]) => !k.startsWith('$'))
+    .map(([k, v]) => `${indent}--${k}: ${v};`);
+
+  return effects.length ? [...colors, '', ...effects].join('\n') : colors.join('\n');
 }
 
 function scaleBlock() {

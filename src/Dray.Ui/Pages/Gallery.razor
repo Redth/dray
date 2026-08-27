@@ -1,0 +1,181 @@
+@page "/gallery"
+@using Dray.Ui.Fixtures
+
+@* Every component against fixtures, in one place.
+   This is how Phase 1's exit criteria get checked: both themes, greyscale state pills, and every
+   interaction state present rather than four of the seven. *@
+
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="_ => { }" />
+
+<div class="page stack-v">
+
+    <section class="gal">
+        <h2 class="gal__h">Container state vocabulary</h2>
+        <p class="gal__note">
+            DESIGN.md §2.4. Tint + glyph + word, always all three — view this page in greyscale and
+            every row must still be readable.
+        </p>
+        <div class="gal__row">
+            @foreach (var s in AllStates)
+            {
+                <StatePill Status="s" />
+            }
+        </div>
+    </section>
+
+    <section class="gal">
+        <h2 class="gal__h">Buttons — all seven states</h2>
+        <p class="gal__note">
+            Three variants and no more. Primary appears at most once per view and never on an
+            action that destroys something.
+        </p>
+        @foreach (var variant in Enum.GetValues<ButtonVariant>())
+        {
+            <div class="gal__row">
+                <span class="gal__label">@variant</span>
+                <Button Label="Default" Variant="variant" Icon="IconRef.Play" />
+                <Button Label="Disabled" Variant="variant" Icon="IconRef.Play" Disabled="true" />
+                <Button Label="Busy" Variant="variant" Icon="IconRef.Refresh" Busy="true" />
+                <Button Label="Icon only" Variant="variant" Icon="IconRef.More" IconOnly="true" />
+                <Button Label="No icon" Variant="variant" />
+            </div>
+        }
+        <p class="gal__note">
+            Danger is a tone, not a variant — so the weight of a destructive control is chosen
+            independently of the fact that it destroys something.
+        </p>
+        @foreach (var variant in Enum.GetValues<ButtonVariant>())
+        {
+            <div class="gal__row">
+                <span class="gal__label">@variant · danger</span>
+                <Button Label="Remove" Variant="variant" Danger="true" Icon="IconRef.Trash" />
+                <Button Label="Disabled" Variant="variant" Danger="true" Icon="IconRef.Trash" Disabled="true" />
+            </div>
+        }
+    </section>
+
+    <section class="gal">
+        <h2 class="gal__h">Skeletons, not spinners</h2>
+        <div class="panel">
+            <div class="panel__body stack-v" style="gap: var(--s2)">
+                <Skeleton Width="34%" Height="1.1em" />
+                <Skeleton Width="72%" />
+                <Skeleton Width="61%" />
+                <Skeleton Width="45%" />
+            </div>
+        </div>
+    </section>
+
+    <section class="gal">
+        <h2 class="gal__h">Empty state</h2>
+        <p class="gal__note">Names the thing, says why it might be empty, offers the fix.</p>
+        <div class="panel">
+            <EmptyState Icon="IconRef.Volume"
+                        Title="No volumes on this host"
+                        Body="Volumes appear here once a container creates one, or you can create an empty volume to mount later.">
+                <Actions>
+                    <Button Label="Create volume…" Icon="IconRef.Plus" Variant="ButtonVariant.Primary" />
+                </Actions>
+            </EmptyState>
+        </div>
+    </section>
+
+    <section class="gal">
+        <h2 class="gal__h">Dialog</h2>
+        <p class="gal__note">
+            One component over the native <code>&lt;dialog&gt;</code>. Focus trap, focus restore and
+            Escape come from the platform. No page defines its own overlay CSS.
+        </p>
+        <div class="gal__row">
+            <Button Label="Open dialog" Icon="IconRef.Inspect" OnClick="() => _dialogOpen = true" />
+            <Button Label="Destructive confirm" Icon="IconRef.Trash" Variant="ButtonVariant.Ghost" Danger="true"
+                    OnClick="() => _confirmOpen = true" />
+        </div>
+    </section>
+
+    <section class="gal">
+        <h2 class="gal__h">Icons — all @IconNames.Length</h2>
+        <div class="gal__icons">
+            @foreach (var icon in IconNames)
+            {
+                <div class="gal__icon">
+                    <Icon Name="icon" Size="IconSize.Lg" />
+                    <span>@icon</span>
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="gal">
+        <h2 class="gal__h">Type scale</h2>
+        <p class="gal__note">Fixed rem, ratio 1.125, 13px base. No clamp() in product UI.</p>
+        <div class="stack-v" style="gap: var(--s1)">
+            <div style="font-size: var(--text-xl); font-weight: var(--text-xl-weight)">xl · 24px · dashboard values</div>
+            <div style="font-size: var(--text-lg); font-weight: var(--text-lg-weight)">lg · 18px · page titles</div>
+            <div style="font-size: var(--text-md); font-weight: var(--text-md-weight)">md · 15px · section headings</div>
+            <div style="font-size: var(--text-base)">base · 13px · body, labels, buttons</div>
+            <div style="font-size: var(--text-sm)">sm · 12px · table cells, metadata</div>
+            <div style="font-size: var(--text-xs); font-weight: var(--text-xs-weight)">XS · 11px · COLUMN HEADERS, PILLS</div>
+        </div>
+    </section>
+
+</div>
+
+<Dialog Title="Container details" @bind-Open="_dialogOpen">
+    <p>
+        A plain dialog. Tab is trapped inside it, Escape closes it, and focus returns to the button
+        that opened it — all from <code>showModal()</code> rather than hand-rolled key handling.
+    </p>
+</Dialog>
+
+<Dialog Title="Remove 3 stopped containers?" @bind-Open="_confirmOpen">
+    <ChildContent>
+        <p>
+            <strong>migrate</strong>, <strong>worker</strong> and <strong>old-jenkins</strong> will be
+            removed. Anything written inside them that is not on a volume is lost.
+        </p>
+    </ChildContent>
+    <Footer>
+        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => _confirmOpen = false" />
+        <Button Label="Remove" Icon="IconRef.Trash" Variant="ButtonVariant.Primary" Danger="true"
+                OnClick="() => _confirmOpen = false" />
+    </Footer>
+</Dialog>
+
+@code {
+    bool _dialogOpen;
+    bool _confirmOpen;
+
+    static readonly IconRef[] IconNames = Enum.GetValues<IconRef>();
+
+    static IReadOnlyList<ContainerStatus> AllStates =>
+    [
+        ContainerStatusVocabulary.Resolve(DockerState.Running),
+        ContainerStatusVocabulary.Resolve(DockerState.Running, DockerHealth.Starting),
+        ContainerStatusVocabulary.Resolve(DockerState.Running, DockerHealth.Unhealthy),
+        ContainerStatusVocabulary.Resolve(DockerState.Restarting),
+        ContainerStatusVocabulary.Resolve(DockerState.Paused),
+        ContainerStatusVocabulary.Resolve(DockerState.Created),
+        ContainerStatusVocabulary.Resolve(DockerState.Exited, exitCode: 0),
+        ContainerStatusVocabulary.Resolve(DockerState.Exited, exitCode: 137),
+        ContainerStatusVocabulary.Resolve(DockerState.Dead),
+        ContainerStatusVocabulary.Resolve(DockerState.Unknown),
+    ];
+
+    PageChrome Chrome => new(
+        "Component gallery",
+        Subtitle: "fixtures only",
+        Search: new ChromeSearch("Search components"),
+        Actions:
+        [
+            ChromeAction.Primary("primary", "Primary", IconRef.Plus),
+            ChromeAction.Secondary("secondary", "Refresh", IconRef.Refresh),
+            ChromeAction.Destructive("destructive", "Delete", IconRef.Trash),
+        ]);
+
+    void HandleAction(string id)
+    {
+        if (id == "destructive") _confirmOpen = true;
+        else _dialogOpen = true;
+    }
+}

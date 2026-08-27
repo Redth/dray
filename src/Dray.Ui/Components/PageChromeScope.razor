@@ -1,0 +1,58 @@
+@* Declares this page's native chrome, the way a page declares a title.
+   The host projects it onto NSToolbar / CommandBar / AdwHeaderBar. Pages never mutate chrome.
+
+   It also emits the document's <h1>. That heading has to live in the content area rather than in
+   the toolbar: on macOS, Windows and GTK the toolbar is native and there is no DOM element to
+   carry it, so a screen reader would find a page with no heading at all. Visually hidden because
+   the visible title is already in the chrome. *@
+@implements IDisposable
+@inject IShellState Shell
+
+<h1 class="visually-hidden" tabindex="-1">@Chrome.Title</h1>
+
+@code {
+    [Parameter, EditorRequired] public PageChrome Chrome { get; set; } = PageChrome.Empty;
+
+    /// <summary>Raised when the user activates one of this page's chrome actions, by action id.</summary>
+    [Parameter] public EventCallback<string> OnAction { get; set; }
+
+    [Parameter] public EventCallback<string> OnSearch { get; set; }
+
+    /// <summary>Raised with the filter id and the newly selected option index.</summary>
+    [Parameter] public EventCallback<(string FilterId, int Index)> OnFilter { get; set; }
+
+    bool _subscribed;
+
+    protected override void OnParametersSet()
+    {
+        if (!_subscribed)
+        {
+            Shell.ActionInvoked += HandleAction;
+            Shell.SearchTextChanged += HandleSearch;
+            Shell.FilterChanged += HandleFilter;
+            _subscribed = true;
+        }
+
+        // Idempotent: PageChrome has value equality, so a re-render with identical content does
+        // not re-raise and does not thrash the native toolbar.
+        Shell.DeclareChrome(Chrome);
+    }
+
+    void HandleAction(string id) => _ = InvokeAsync(() => OnAction.InvokeAsync(id));
+
+    void HandleSearch(string text) => _ = InvokeAsync(() => OnSearch.InvokeAsync(text));
+
+    void HandleFilter(string id, int index) => _ = InvokeAsync(() => OnFilter.InvokeAsync((id, index)));
+
+    public void Dispose()
+    {
+        if (!_subscribed) return;
+
+        Shell.ActionInvoked -= HandleAction;
+        Shell.SearchTextChanged -= HandleSearch;
+        Shell.FilterChanged -= HandleFilter;
+
+        // Leaving a page must clear its chrome, or the next page inherits stale actions.
+        Shell.DeclareChrome(PageChrome.Empty);
+    }
+}

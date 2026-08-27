@@ -1,0 +1,31 @@
+@* Renders one IconRef from the vendored sprite. Never an icon font, never a CDN. *@
+
+<svg class="icon @SizeClass @Class" aria-hidden="@(Label is null ? "true" : "false")"
+     role="@(Label is null ? null : "img")" @attributes="Extra">
+    @if (Label is not null)
+    {
+        <title>@Label</title>
+    }
+    <use href="@($"_content/Dray.Ui/icons/sprite.svg#{Icons.SpriteId(Name)}")" />
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public IconRef Name { get; set; }
+
+    /// <summary>Accessible name. Leave null for decorative icons that sit beside a text label.</summary>
+    [Parameter] public string? Label { get; set; }
+
+    [Parameter] public IconSize Size { get; set; } = IconSize.Md;
+
+    [Parameter] public string? Class { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)] public IDictionary<string, object>? Extra { get; set; }
+
+    string SizeClass => Size switch
+    {
+        IconSize.Sm => "icon--sm",
+        IconSize.Lg => "icon--lg",
+        IconSize.Xl => "icon--xl",
+        _ => "icon--md",
+    };
+}

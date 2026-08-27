@@ -1,0 +1,39 @@
+@* The fallback nav, for hosts without a native sidebar. Renders from NavigationManifest —
+   the same list the native sidebars use, so the two can never drift (docs/NATIVE-SHELL.md 2.2). *@
+@inject ShellCapabilities Caps
+
+<nav class="sidebar chrome" aria-label="Main">
+    <div class="sidebar__brand">
+        <Icon Name="IconRef.Container" Size="IconSize.Lg" />
+        <span>Dray</span>
+    </div>
+
+    <ul class="sidebar__list">
+        @foreach (var node in NavigationManifest.Visible(Caps.IsDebugBuild))
+        {
+            @if (node.IsGroup)
+            {
+                <li class="sidebar__group">@node.Title</li>
+                @foreach (var child in node.Children)
+                {
+                    <li>@NavItem(child)</li>
+                }
+            }
+            else
+            {
+                <li>@NavItem(node)</li>
+            }
+        }
+    </ul>
+</nav>
+
+@code {
+    RenderFragment NavItem(NavNode node) => @<NavLink class="nav-item" href="@node.Route"
+                                                      Match="@(node.Route == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+        @if (node.Icon is { } icon)
+        {
+            <Icon Name="icon" Size="IconSize.Md" />
+        }
+        <span>@node.Title</span>
+    </NavLink>;
+}

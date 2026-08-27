@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Dray.DevHost</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>
+      Runs Dray.Ui in a browser with ShellCapabilities.Web, so the component kit can be built,
+      reviewed in both themes and screenshot-tested without waiting on three native heads.
+      Never shipped.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Dray.Ui/Dray.Ui.csproj" />
+  </ItemGroup>
+
+</Project>

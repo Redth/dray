@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dray-devhost",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/Dray.DevHost", "--launch-profile", "dray"],
+      "port": 5199
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+.tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--s3);
+}
+
+.tile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--s3) var(--s4);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+}
+
+.tile__icon {
+    color: var(--muted);
+    margin-bottom: var(--s1);
+}
+
+.tile__value {
+    font-size: var(--text-xl);
+    font-weight: var(--text-xl-weight);
+    line-height: 1.1;
+}
+
+.tile__label {
+    font-size: var(--text-sm);
+    color: var(--muted);
+}

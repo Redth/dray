@@ -1,0 +1,82 @@
+@* One dialog for the whole app, over the native <dialog> element.
+   showModal() gives focus trapping, focus restore, Escape and the top layer for free — so none of
+   it is hand-rolled, and no page ever defines its own overlay CSS. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<dialog @ref="_el" class="dialog" @onclose="HandleClose" aria-labelledby="@_titleId">
+    <div class="dialog__head">
+        <h2 class="dialog__title" id="@_titleId">@Title</h2>
+    </div>
+    <div class="dialog__body">@ChildContent</div>
+    <div class="dialog__foot">
+        @if (Footer is not null)
+        {
+            @Footer
+        }
+        else
+        {
+            <Button Label="@CancelLabel" Variant="ButtonVariant.Ghost" OnClick="CancelAsync" />
+        }
+    </div>
+</dialog>
+
+@code {
+    ElementReference _el;
+    readonly string _titleId = $"dlg-{Guid.NewGuid():N}";
+    IJSObjectReference? _module;
+    bool _shown;
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    [Parameter] public string CancelLabel { get; set; } = "Cancel";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        _module ??= await JS.InvokeAsync<IJSObjectReference>(
+            "import", "./_content/Dray.Ui/js/dray.js");
+
+        if (Open && !_shown)
+        {
+            _shown = true;
+            await _module.InvokeVoidAsync("dialog.show", _el);
+        }
+        else if (!Open && _shown)
+        {
+            _shown = false;
+            await _module.InvokeVoidAsync("dialog.close", _el);
+        }
+    }
+
+    async Task CancelAsync() => await SetOpen(false);
+
+    // Fires for Escape and for the backdrop close, so state stays correct however it was dismissed.
+    async Task HandleClose()
+    {
+        _shown = false;
+        await SetOpen(false);
+    }
+
+    async Task SetOpen(bool value)
+    {
+        if (Open == value) return;
+        Open = value;
+        await OpenChanged.InvokeAsync(value);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null) return;
+        try
+        {
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The WebView went away first. Nothing to release.
+        }
+    }
+}

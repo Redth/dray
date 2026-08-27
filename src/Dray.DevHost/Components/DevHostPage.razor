@@ -1,0 +1,22 @@
+@using Dray.Ui
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dray</title>
+    @* Vendored, local. No CDN links, no webfonts — the app must render with the network
+       unplugged (docs/ARCHITECTURE.md section 1.1). *@
+    <link rel="stylesheet" href="_content/Dray.Ui/css/app.css" />
+    @* Blazor bundles every .razor.css in the app and its RCLs into one file named after the
+       host project. Each app head links its own: Dray.MacOS.styles.css, and so on. *@
+    <link rel="stylesheet" href="Dray.DevHost.styles.css" />
+    <link rel="icon" href="data:," />
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+<body>
+    <App @rendermode="InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

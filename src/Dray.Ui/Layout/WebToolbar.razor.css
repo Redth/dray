@@ -1,0 +1,62 @@
+.toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s4);
+    min-height: 44px;
+    padding: var(--s2) var(--s5);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+}
+
+/* The title holds its ground and truncates; the items give way. Without the explicit basis the
+   title is the first thing flexbox crushes, which is backwards. */
+.toolbar__titles {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.toolbar__title {
+    font-size: var(--text-md);
+    font-weight: var(--text-md-weight);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 0 1 auto;
+    min-width: 4ch;
+}
+
+.toolbar__subtitle {
+    font-size: var(--text-sm);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.toolbar__items {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+/* Grows to a comfortable 200px when there is room and gives that up before the title has to
+   truncate. `flex-basis: 90px` is what makes it the first thing to yield. */
+.toolbar__search {
+    flex: 1 1 90px;
+    max-width: 200px;
+    min-width: 80px;
+}
+
+/* Below this the subtitle is the least useful thing on screen, so it goes first. */
+@media (max-width: 900px) {
+    .toolbar__subtitle {
+        display: none;
+    }
+}

@@ -1,0 +1,575 @@
+/* Dray application styles.
+   Colour, type, space, radius, z and motion all come from tokens.css, which is generated from
+   design/tokens.json. Never write a literal colour or px font-size here — CI rejects it. */
+
+@import url("./tokens.css");
+
+/* ---------------------------------------------------------------- reset */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* The platform's own UI face. A shared webfont is the single loudest tell that the content
+     area is a website embedded in a native window (DESIGN.md section 3). Nothing is downloaded. */
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI Variable Text", "Segoe UI",
+    "Adwaita Sans", Cantarell, Inter,
+    system-ui, sans-serif;
+  font-size: var(--text-base);
+  line-height: var(--text-base-lh);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.mono,
+code,
+kbd,
+pre {
+  font-family:
+    ui-monospace, "SF Mono", Menlo,
+    "Cascadia Mono", Consolas,
+    "JetBrains Mono", "Source Code Pro", monospace;
+  font-size: 0.95em;
+}
+
+h1, h2, h3, h4, h5, h6, p, figure, ul, ol {
+  margin: 0;
+}
+
+ul, ol {
+  padding: 0;
+  list-style: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+input, textarea, select {
+  font: inherit;
+  color: inherit;
+}
+
+/* Selection is ON by default and disabled only on chrome. Sherpa inverted this — a global
+   user-select:none plus a growing allowlist — which broke selection on every new surface until
+   someone noticed (DESIGN.md section 8). */
+.chrome,
+.nav-item,
+.table-header,
+.pill,
+.btn,
+.tab {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ---------------------------------------------------------------- a11y utilities */
+
+/* Present to assistive technology, absent from the page. Used for the per-page <h1>, which is
+   real content but would duplicate the title already visible in the chrome. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------- focus */
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Programmatic focus moves after navigation for screen-reader users; it should not paint a ring
+   for pointer users who never asked for it. */
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
+/* ---------------------------------------------------------------- scaffolding */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* The native window supplies chrome on macOS/Windows/Linux. This is the fallback shell used in
+   the browser-hosted gallery and on any head without a native sidebar. */
+.app--webchrome {
+  flex-direction: row;
+}
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s5);
+}
+
+.page--flush {
+  padding: 0;
+}
+
+.page-title {
+  font-size: var(--text-lg);
+  font-weight: var(--text-lg-weight);
+  line-height: var(--text-lg-lh);
+  letter-spacing: -0.01em;
+}
+
+.page-subtitle {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.stack-v {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.row-h {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+/* ---------------------------------------------------------------- icon */
+
+.icon {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  display: inline-block;
+  vertical-align: -0.125em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon--sm { width: 14px; height: 14px; }
+.icon--md { width: 16px; height: 16px; }
+.icon--lg { width: 20px; height: 20px; }
+.icon--xl { width: 28px; height: 28px; }
+
+/* ---------------------------------------------------------------- button */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: 28px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  font-size: var(--text-base);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn--primary {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--brand-hi);
+}
+
+.btn--secondary {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.btn--ghost {
+  background: transparent;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+/* Danger is a tone over a variant, not a variant of its own.
+   Ghost + danger is what chrome uses; primary + danger is the committing button in a
+   confirmation. DESIGN.md section 2.5 forbids a saturated destructive fill in dark mode, so the
+   filled case degrades to a tinted one there — the compensating control for the declared
+   brand-vs-danger exception. */
+
+.btn--ghost.btn--danger,
+.btn--secondary.btn--danger {
+  color: var(--danger);
+}
+
+.btn--ghost.btn--danger:hover:not(:disabled),
+.btn--secondary.btn--danger:hover:not(:disabled) {
+  background: var(--danger-tint);
+  border-color: var(--danger);
+}
+
+.btn--primary.btn--danger {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.btn--primary.btn--danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger) 88%, var(--ink));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .btn--primary.btn--danger {
+    background: var(--danger-tint);
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+
+  :root:not([data-theme="light"]) .btn--primary.btn--danger:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--danger) 28%, var(--bg));
+  }
+}
+
+:root[data-theme="dark"] .btn--primary.btn--danger {
+  background: var(--danger-tint);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+:root[data-theme="dark"] .btn--primary.btn--danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger) 28%, var(--bg));
+}
+
+.btn--icon {
+  width: 28px;
+  padding: 0;
+}
+
+/* ---------------------------------------------------------------- state pill */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px var(--s2) 2px 6px;
+  border-radius: var(--r-sm);
+  font-size: var(--text-xs);
+  font-weight: var(--text-xs-weight);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Tint + glyph + word. The glyph is not decoration: it is what keeps state legible in greyscale
+   and for the ~8% of men with a colour vision deficiency (DESIGN.md section 2.4). */
+.pill__glyph {
+  font-size: 0.9em;
+  line-height: 1;
+}
+
+.pill--ok       { background: var(--ok-tint);      color: var(--ok-ink); }
+.pill--warn     { background: var(--warn-tint);    color: var(--warn-ink); }
+.pill--danger   { background: var(--danger-tint);  color: var(--danger-ink); }
+.pill--neutral  { background: var(--neutral-tint); color: var(--neutral-ink); }
+
+/* ---------------------------------------------------------------- panel & separators */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.panel__title {
+  font-size: var(--text-md);
+  font-weight: var(--text-md-weight);
+}
+
+.panel__body {
+  padding: var(--s4);
+}
+
+.hr {
+  height: 1px;
+  background: var(--line);
+  border: 0;
+}
+
+/* ---------------------------------------------------------------- table */
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--table-text);
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--row-pad-y) var(--s3);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--text-xs-weight);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.table tbody tr {
+  height: var(--row-h);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.table tbody tr[aria-selected="true"] {
+  background: color-mix(in oklab, var(--brand) 14%, var(--bg));
+}
+
+/* A row whose host is unreachable: every other column is stale rather than wrong. */
+.table tbody tr.is-stale {
+  opacity: 0.55;
+}
+
+.table .num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The signature moment: when the event stream reports a transition, the row pulses once so the
+   user sees that it changed without anything moving (DESIGN.md section 7). */
+@keyframes row-pulse {
+  from { background: color-mix(in oklab, var(--brand) 12%, var(--bg)); }
+  to   { background: transparent; }
+}
+
+.table tbody tr.just-changed {
+  animation: row-pulse 400ms var(--motion-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table tbody tr.just-changed {
+    animation: none;
+    background: color-mix(in oklab, var(--brand) 8%, var(--bg));
+  }
+}
+
+/* ---------------------------------------------------------------- empty state */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s3);
+  padding: var(--s7) var(--s5);
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty__icon {
+  color: var(--line-strong);
+}
+
+.empty__title {
+  font-size: var(--text-md);
+  font-weight: var(--text-md-weight);
+  color: var(--ink);
+}
+
+.empty__body {
+  max-width: 46ch;
+  font-size: var(--text-sm);
+}
+
+.empty__actions {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s1);
+}
+
+/* ---------------------------------------------------------------- skeleton */
+
+/* Shape-aware placeholders, not a spinner in the middle of a content area
+   (DESIGN.md section 6). */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    color-mix(in oklab, var(--surface-2) 60%, var(--bg)) 37%,
+    var(--surface-2) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+  border-radius: var(--r-sm);
+  height: 0.85em;
+}
+
+@keyframes skeleton-sweep {
+  from { background-position: 100% 50%; }
+  to   { background-position: 0 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--surface-2);
+  }
+}
+
+/* ---------------------------------------------------------------- dialog */
+
+/* One dialog, over the native <dialog> element, styled globally. Sherpa required every page to
+   paste its own modal CSS or dialogs rendered inline with no overlay — a defect promoted to a
+   documented convention (docs/ARCHITECTURE.md section 1.1). */
+.dialog {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-dialog);
+  max-width: min(560px, calc(100vw - var(--s6)));
+  width: 100%;
+}
+
+.dialog::backdrop {
+  background: var(--scrim);
+}
+
+.dialog__head {
+  padding: var(--s4) var(--s5) var(--s2);
+}
+
+.dialog__title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.dialog__body {
+  padding: 0 var(--s5) var(--s4);
+  font-size: var(--text-base);
+  color: var(--muted);
+}
+
+.dialog__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  padding: var(--s3) var(--s5) var(--s4);
+}
+
+/* ---------------------------------------------------------------- form controls */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field__label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.input {
+  height: 28px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  font-size: var(--text-base);
+}
+
+.input::placeholder {
+  /* Held to the same 4.5:1 as body text — no light grey "for elegance". */
+  color: var(--muted);
+}
+
+.input:focus-visible {
+  border-color: var(--focus);
+  outline-offset: 0;
+}

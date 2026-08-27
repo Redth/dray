@@ -1,0 +1,9 @@
+.cell-name {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+}
+
+.cell-name .mono {
+    font-size: var(--text-xs);
+}

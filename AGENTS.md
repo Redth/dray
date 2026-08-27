@@ -50,7 +50,15 @@ node build/lint-tokens.mjs             # raw colour / type / z-index literals
 
 dotnet build                           # all projects
 dotnet test                            # all tests
+
+dotnet run --project src/Dray.DevHost --launch-profile dray   # http://localhost:5199
 ```
+
+**`Dray.DevHost` runs the whole UI in a browser** with `ShellCapabilities.Web`, so components can
+be built and reviewed in both themes without waiting on three native heads. It is never shipped.
+`/gallery` renders every component against fixtures, including all seven interaction states — that
+page is how UI changes get checked. Restart the host after a build: the scoped-CSS bundle is
+content-hashed, so a running server keeps serving the previous one.
 
 `tokens.css`, `sprite.svg`, `Tokens.g.cs` and `Icons.g.cs` are **generated and gitignored** — run
 both generators after a fresh clone, before building. `Dray.Core` fails the build with a readable
@@ -67,6 +75,12 @@ message if either is absent.
 - A page **declares** its native chrome via `PageChrome`; it never imperatively mutates a toolbar.
 - Nav entries live once, in `NavigationManifest`. Never duplicate them into a head.
 - Icons are `IconRef` values resolved per platform — never an SF Symbol string in shared code.
+- Buttons have three weights (`Primary`/`Secondary`/`Ghost`) and a separate `Danger` tone. A
+  destructive action in chrome is ghost + danger; the filled danger treatment belongs only to the
+  committing button in a confirmation.
+- Each app head links its own scoped-CSS bundle: `Dray.MacOS.styles.css`, `Dray.DevHost.styles.css`.
+- The page `<h1>` is emitted by `PageChromeScope` into the content area, visually hidden. It cannot
+  live in the toolbar: on native heads the toolbar has no DOM.
 
 ## Verifying UI work
 

@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Dray.Core/Dray.Core.csproj" />
+    <Project Path="src/Dray.DevHost/Dray.DevHost.csproj" />
+    <Project Path="src/Dray.Ui/Dray.Ui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Dray.Core.Tests/Dray.Core.Tests.csproj" />

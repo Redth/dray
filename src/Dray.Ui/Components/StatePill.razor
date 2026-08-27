@@ -1,0 +1,19 @@
+@* The only component allowed to render container state (DESIGN.md section 2.4).
+   Tint + glyph + word, always all three. *@
+
+<span class="pill pill--@Tone" title="@(Status.Detail is null ? null : Status.Label)">
+    <span class="pill__glyph" aria-hidden="true">@Status.Glyph</span>
+    <span>@Status.Label</span>
+</span>
+
+@code {
+    [Parameter, EditorRequired] public ContainerStatus Status { get; set; } = default!;
+
+    string Tone => Status.Tone switch
+    {
+        StateTone.Ok => "ok",
+        StateTone.Warn => "warn",
+        StateTone.Danger => "danger",
+        _ => "neutral",
+    };
+}

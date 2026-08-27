@@ -1,0 +1,56 @@
+@page "/"
+@using Dray.Ui.Fixtures
+
+<PageChromeScope Chrome="@(new PageChrome("Dashboard", Subtitle: "docker-desktop",
+    Actions: [ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh, "⌘R")]))" />
+
+<div class="page stack-v">
+    <div class="tiles">
+        @foreach (var (label, value, icon) in Tiles)
+        {
+            <div class="tile">
+                <Icon Name="icon" Size="IconSize.Lg" Class="tile__icon" />
+                <div class="tile__value num">@value</div>
+                <div class="tile__label">@label</div>
+            </div>
+        }
+    </div>
+
+    <div class="panel">
+        <div class="panel__head">
+            <span class="panel__title">Needs attention</span>
+        </div>
+        <div class="table-wrap" style="border: 0; border-radius: 0;">
+            <table class="table">
+                <tbody>
+                    @foreach (var c in Attention)
+                    {
+                        <tr>
+                            <td style="width: 1%"><StatePill Status="c.Status" /></td>
+                            <td>@c.Name</td>
+                            <td class="muted">@Humanize.ImageName(c.Image)</td>
+                            <td class="num muted">@Humanize.Since(c.Since, DemoData.Clock)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@code {
+    static IReadOnlyList<ContainerSummary> All => DemoData.Containers;
+
+    static IEnumerable<ContainerSummary> Attention => All.Where(c =>
+        c.Health == DockerHealth.Unhealthy
+        || c.State is DockerState.Dead or DockerState.Restarting or DockerState.Unknown
+        || c.ExitCode is not null and not 0);
+
+    static (string Label, string Value, IconRef Icon)[] Tiles =>
+    [
+        ("Running", All.Count(c => c.State == DockerState.Running).ToString(), IconRef.Play),
+        ("Stopped", All.Count(c => c.State is DockerState.Exited or DockerState.Dead).ToString(), IconRef.Stop),
+        ("Stacks", All.Where(c => c.Stack is not null).Select(c => c.Stack).Distinct().Count().ToString(), IconRef.Stack),
+        ("Reclaimable", Humanize.Bytes(4_820_000_000), IconRef.Volume),
+    ];
+}

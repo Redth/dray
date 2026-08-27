@@ -1,0 +1,73 @@
+@* Fallback chrome for hosts without a native toolbar. Renders exactly what the current page
+   declared — no route tables, no feature services (docs/NATIVE-SHELL.md 2.1 and 2.5). *@
+@implements IDisposable
+@inject IShellState Shell
+
+<header class="toolbar chrome">
+    <div class="toolbar__titles">
+        @* Chrome, not the document heading. The real <h1> lives in the content area so it
+           exists on native heads too — see PageChromeScope. *@
+        <div class="toolbar__title">@Chrome.Title</div>
+        @if (Chrome.Subtitle is { } sub)
+        {
+            <span class="toolbar__subtitle">@sub</span>
+        }
+    </div>
+
+    <div class="toolbar__items">
+        @if (Chrome.Search is { } search)
+        {
+            <input class="input toolbar__search" type="search" placeholder="@search.Placeholder"
+                   value="@search.Text" @oninput="OnSearchInput" />
+        }
+
+        @foreach (var filter in Chrome.FilterList)
+        {
+            <select class="input" aria-label="@filter.Label"
+                    @onchange="e => OnFilterChange(filter.Id, e)">
+                @for (var i = 0; i < filter.Options.Count; i++)
+                {
+                    <option value="@i" selected="@(i == filter.SelectedIndex)">@filter.Options[i].Label</option>
+                }
+            </select>
+        }
+
+        @foreach (var action in Chrome.ActionList)
+        {
+            <Button Label="@action.Label"
+                    Icon="action.Icon"
+                    Variant="@Variant(action.Kind)"
+                    Danger="@(action.Kind == ChromeActionKind.Destructive)"
+                    Disabled="@(!action.IsEnabled)"
+                    Tooltip="@action.Tooltip"
+                    OnClick="() => Shell.InvokeAction(action.Id)" />
+        }
+    </div>
+</header>
+
+@code {
+    PageChrome Chrome => Shell.Chrome;
+
+    protected override void OnInitialized() => Shell.ChromeChanged += HandleChanged;
+
+    void HandleChanged(PageChrome chrome) => InvokeAsync(StateHasChanged);
+
+    void OnSearchInput(ChangeEventArgs e) => Shell.SetSearchText(e.Value?.ToString() ?? string.Empty);
+
+    void OnFilterChange(string filterId, ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var index)) Shell.SetFilter(filterId, index);
+    }
+
+    // A destructive action in chrome is quiet: ghost weight, danger tone. The filled danger
+    // treatment belongs to the committing button in the confirmation, not to a toolbar sitting
+    // next to a brand-filled primary.
+    static ButtonVariant Variant(ChromeActionKind kind) => kind switch
+    {
+        ChromeActionKind.Primary => ButtonVariant.Primary,
+        ChromeActionKind.Destructive => ButtonVariant.Ghost,
+        _ => ButtonVariant.Secondary,
+    };
+
+    public void Dispose() => Shell.ChromeChanged -= HandleChanged;
+}

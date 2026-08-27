@@ -1,0 +1,10 @@
+@* A shape-aware placeholder. A spinner in the middle of a content area is a placeholder for a
+   design decision nobody made (DESIGN.md section 6). *@
+
+<div class="skeleton @Class" style="width: @Width; height: @Height" aria-hidden="true"></div>
+
+@code {
+    [Parameter] public string Width { get; set; } = "100%";
+    [Parameter] public string Height { get; set; } = "0.85em";
+    [Parameter] public string? Class { get; set; }
+}

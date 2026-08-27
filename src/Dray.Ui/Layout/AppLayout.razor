@@ -1,0 +1,51 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject IShellState Shell
+@inject ShellCapabilities Caps
+@inject NavigationManager Nav
+
+<div class="app @(Caps.HasNativeSidebar ? null : "app--webchrome")">
+    @if (!Caps.HasNativeSidebar)
+    {
+        <WebSidebar />
+    }
+
+    <div class="content">
+        @if (!Caps.HasNativeToolbar)
+        {
+            <WebToolbar />
+        }
+        @Body
+    </div>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Native chrome asks to navigate; the router is the only thing that actually can.
+        Shell.NavigationRequested += HandleNavigationRequested;
+        Nav.LocationChanged += HandleLocationChanged;
+
+        Shell.NotifyRouteChanged(CurrentRoute());
+    }
+
+    string CurrentRoute()
+    {
+        var relative = Nav.ToBaseRelativePath(Nav.Uri);
+        var path = relative.Split('?', '#')[0];
+        return "/" + path.TrimStart('/');
+    }
+
+    void HandleNavigationRequested(string route) => _ = InvokeAsync(() => Nav.NavigateTo(route));
+
+    // Feeds the native sidebar's selection. ShellState swallows any echo back through
+    // RequestNavigation, so a head may sync its selection freely here.
+    void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => Shell.NotifyRouteChanged(CurrentRoute());
+
+    public void Dispose()
+    {
+        Shell.NavigationRequested -= HandleNavigationRequested;
+        Nav.LocationChanged -= HandleLocationChanged;
+    }
+}
