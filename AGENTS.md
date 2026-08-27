@@ -42,7 +42,9 @@ render correctly with the network unplugged.
 
 ```bash
 node build/gen-tokens.mjs              # regenerate tokens.css, Tokens.g.cs, DESIGN.md tables
+node build/gen-icons.mjs               # regenerate sprite.svg + Icons.g.cs
 node build/gen-tokens.mjs --check      # fail if any generated file is stale
+node build/gen-icons.mjs --check
 node build/verify-contrast.mjs         # contrast + gamut + stale-exception report
 node build/lint-tokens.mjs             # raw colour / type / z-index literals
 
@@ -50,8 +52,9 @@ dotnet build                           # all projects
 dotnet test                            # all tests
 ```
 
-`src/Dray.Ui/wwwroot/css/tokens.css` and `src/Dray.Core/Theme/Tokens.g.cs` are **generated and
-gitignored** — run the generator after a fresh clone, before building.
+`tokens.css`, `sprite.svg`, `Tokens.g.cs` and `Icons.g.cs` are **generated and gitignored** — run
+both generators after a fresh clone, before building. `Dray.Core` fails the build with a readable
+message if either is absent.
 
 ## Conventions
 

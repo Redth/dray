@@ -21,8 +21,13 @@ node_modules/
 
 # Generated — regenerate with `node build/gen-tokens.mjs`
 src/Dray.Ui/wwwroot/css/tokens.css
+src/Dray.Ui/wwwroot/icons/sprite.svg
 src/Dray.Core/Theme/Tokens.g.cs
+src/Dray.Core/Shell/Icons.g.cs
 
 # macOS app bundles
 *.app/
 *.dmg
+
+# Local design previews
+.preview/

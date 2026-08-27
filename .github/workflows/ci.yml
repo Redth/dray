@@ -29,6 +29,10 @@ jobs:
       - name: Check generated files are current
         run: node build/gen-tokens.mjs --check
 
+      # Every icon must map to an SF Symbol, a GTK name and sprite geometry.
+      - name: Check icons are current
+        run: node build/gen-icons.mjs --check
+
       # DESIGN.md section 11, gate 2 — no raw colour or type literals in UI source.
       - name: Token lint
         run: node build/lint-tokens.mjs
@@ -57,8 +61,10 @@ jobs:
           node-version: '22'
 
       # Generated sources are gitignored, so they must be produced before build.
-      - name: Generate tokens
-        run: node build/gen-tokens.mjs
+      - name: Generate tokens and icons
+        run: |
+          node build/gen-tokens.mjs
+          node build/gen-icons.mjs
 
       - name: Restore
         run: dotnet restore
