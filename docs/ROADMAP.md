@@ -5,8 +5,12 @@ criteria** that must hold before the next phase starts. Phases 1–7 are v1.
 
 Assumptions taken (see PRODUCT.md for the reasoning; say the word and any of these can change):
 Dray is a **client**, not an engine host, with the runtime seam in place for Apple `container` later ·
-**all Docker contexts** including `ssh://` are in v1 · identity is **Freight & Fired Clay** ·
-this ships as a **public, open-source product** with real release engineering.
+identity is **Freight & Fired Clay** · this ships as a **public, open-source product** with real
+release engineering.
+
+**Local engines are the primary target.** Remote hosts over `ssh://` remain a first-class idea in
+the architecture — every host is the same type behind the same picker — but the transport is
+deferred rather than shipped in v1. Nothing about the design changes; only the order.
 
 ---
 

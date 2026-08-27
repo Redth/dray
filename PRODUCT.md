@@ -21,8 +21,9 @@ Their context is a side window: they are in an editor or a terminal, something i
 switch to Dray to find out *why* — a port that isn't mapped, a container that exited 137, a stack
 where one service never became healthy. They are back in the editor within ninety seconds.
 
-A meaningful minority also keep a home server, a NAS, or a VPS with a Docker daemon on it, reachable
-over SSH. Today they manage it by SSHing in and typing `docker ps`. That is the same job, one hop away.
+Some also keep a home server, a NAS, or a VPS with a Docker daemon on it. That is the same job one
+hop away, and the architecture treats it as the same job — but it is not the job Dray is designed
+around. The machine in front of them is.
 
 The job to be done: **see the true state of my containers and change it, without leaving the keyboard
 or losing the thread of what I was actually doing.**
@@ -44,11 +45,17 @@ without a rewrite.
 
 ## Positioning
 
-**The Docker GUI that treats a remote host exactly like the local one.**
+**The Docker GUI for whichever engine you already have.**
 
-Every competitor is a front end for the daemon on this machine, with remote hosts bolted on or absent.
-Dray's host switcher is the first control in the sidebar, and every screen behind it works the same
-whether the engine is a Unix socket, a WSL2 distro, or an SSH tunnel to a box in a closet.
+Every other desktop tool in this space owns an engine and wants you on theirs — Docker Desktop,
+OrbStack and Rancher each ship a runtime and a GUI welded together, so the GUI is really the shop
+window for the runtime. Dray ships no runtime. It connects to Docker Desktop, OrbStack, Colima,
+Rancher, a bare `dockerd`, a WSL2 distro or podman's compatible socket, probes what that engine
+actually supports, and says plainly what it cannot do rather than failing at it.
+
+That indifference is also why remote hosts cost almost nothing: a host is a host, so an engine
+across the network is the same code path as the socket on this machine. Local is the job Dray is
+built for; remote is what falls out of building it honestly.
 
 ## Brand Personality
 
