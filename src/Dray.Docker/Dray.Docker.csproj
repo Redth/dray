@@ -10,8 +10,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The X509 companion package targets the 3.x credentials model; 4.x configures TLS
+         through the transport's ConfigureHandler instead, so it is not needed. -->
     <PackageReference Include="Docker.DotNet.Enhanced" />
-    <PackageReference Include="Docker.DotNet.Enhanced.X509" />
   </ItemGroup>
 
   <ItemGroup>

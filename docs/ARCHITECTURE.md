@@ -117,6 +117,31 @@ Running stacks are discovered from the `com.docker.compose.project`, `.service`,
 automatically. User-added compose files are tracked separately so a stack that is *down* is still
 visible — the thing Docker Desktop gets wrong.
 
+### 2.6 What a real non-Docker engine actually does
+
+Verified against podman 6.0.2 speaking API 1.44. These are the concrete gaps behind
+`RuntimeCapabilities`, not hypotheticals.
+
+- **Extra event verbs.** Podman emits `init`, `sync` and `cleanup`, which Docker does not. Anything
+  consuming the stream must ignore unknown actions rather than assume a closed set.
+- **`restart` is not causally ordered.** A restart was observed emitting `restart`, `start`, and
+  *then* the `die` belonging to the instance that was replaced. Applying that `die` would leave a
+  running container reading "Exited 137", so the store reconciles a restart from the API instead of
+  trusting the stream for that one sequence.
+- **Exit codes arrive twice**, as `exitCode` and `containerExitCode`. Reading either works.
+- **Compose labels ride along on events**, so a stack is identifiable without a fetch.
+- **No `system df`.** `Docker.DotNet.Enhanced` does not expose it either, so the disk-usage
+  breakdown needs a direct call in phase 4.
+- **Stats and BuildKit are absent or partial**, which is why `SupportsStats` and `SupportsBuildKit`
+  are off for this flavor rather than assumed.
+
+A leftover from an uninstalled engine is a recurring hazard on a real machine, not an edge case.
+This one had `/var/run/docker.sock` dangling at a socket that no longer existed, *and*
+`credsStore: osxkeychain` in `config.json` pointing at
+`/Applications/OrbStack.app/.../docker-credential-osxkeychain` after OrbStack had been removed —
+which makes every registry operation fail. Phase 6 must treat a missing credential helper as a
+condition to explain, not an exception to propagate.
+
 ---
 
 ## 3. State: the event stream is the source of truth

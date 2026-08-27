@@ -143,9 +143,16 @@ public sealed class EntityStore
         // first means the switch below does not have to know that.
         var action = e.Action.Contains(':') ? e.Action[..e.Action.IndexOf(':')].Trim() : e.Action;
 
+        // A restart is a stop and a start, and the engine does not guarantee the two events
+        // arrive in causal order — podman was observed emitting `restart`, `start`, then the
+        // `die` belonging to the instance that was replaced. Applying that `die` would leave a
+        // running container reading "Exited 137". The sequence is rare and ambiguous, so trust
+        // the API for it rather than the stream.
+        if (action == "restart") return true;
+
         var updated = action switch
         {
-            "start" or "unpause" or "restart" => existing with { State = DockerState.Running, ExitCode = null, Since = e.Timestamp },
+            "start" or "unpause" => existing with { State = DockerState.Running, ExitCode = null, Since = e.Timestamp },
             "pause" => existing with { State = DockerState.Paused, Since = e.Timestamp },
             "kill" => existing,   // "die" follows with the exit code; acting now would flicker.
             "die" => existing with { State = DockerState.Exited, ExitCode = ParseExitCode(e), Since = e.Timestamp },

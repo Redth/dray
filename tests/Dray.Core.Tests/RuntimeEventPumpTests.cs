@@ -220,10 +220,27 @@ public class RuntimeEventPumpTests
 
     [Theory]
     [InlineData(SocketError.ConnectionRefused, "The engine is not running.")]
+    // What a missing unix socket actually produces — verified against a stopped Docker Desktop,
+    // where the assumed FileNotFoundException never appears.
+    [InlineData(SocketError.AddressNotAvailable, "The engine is not running.")]
     [InlineData(SocketError.HostNotFound, "Host not found.")]
     [InlineData(SocketError.TimedOut, "Timed out reaching the host.")]
+    [InlineData(SocketError.NetworkUnreachable, "The host is unreachable from this network.")]
+    [InlineData(SocketError.ConnectionReset, "The engine closed the connection.")]
     public void SocketFailuresGetPlainLanguage(SocketError error, string expected)
         => Assert.Equal(expected, RuntimeEventPump.Describe(new SocketException((int)error)));
+
+    [Fact]
+    public void ARealStoppedEngineFailureReadsCorrectly()
+    {
+        // The exact shape observed connecting to a stopped Docker Desktop: the transport wraps a
+        // SocketException in HttpRequestException("Connection failed.").
+        var actual = new HttpRequestException(
+            "Connection failed.",
+            new SocketException((int)SocketError.AddressNotAvailable));
+
+        Assert.Equal("The engine is not running.", RuntimeEventPump.Describe(actual));
+    }
 
     [Fact]
     public void PermissionDeniedNamesTheSocket()

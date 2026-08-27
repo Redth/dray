@@ -151,12 +151,29 @@ public sealed class RuntimeEventPump : IAsyncDisposable
         RuntimeConnectionException r => r.Message,
 
         // The engine is installed but not running — by far the most common case.
-        System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused }
+        //
+        // AddressNotAvailable is what a missing unix socket actually produces, verified against a
+        // stopped Docker Desktop. It is not FileNotFoundException, which is what one would assume:
+        // the connect() fails on the path rather than the runtime opening a file.
+        System.Net.Sockets.SocketException
+        {
+            SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused
+                or System.Net.Sockets.SocketError.AddressNotAvailable,
+        }
             => "The engine is not running.",
+
         System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.HostNotFound }
             => "Host not found.",
         System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.TimedOut }
             => "Timed out reaching the host.",
+        System.Net.Sockets.SocketException
+        {
+            SocketErrorCode: System.Net.Sockets.SocketError.NetworkUnreachable
+                or System.Net.Sockets.SocketError.HostUnreachable,
+        }
+            => "The host is unreachable from this network.",
+        System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionReset }
+            => "The engine closed the connection.",
 
         UnauthorizedAccessException => "Permission denied on the Docker socket.",
         TimeoutException => "Timed out reaching the host.",

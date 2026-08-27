@@ -82,7 +82,7 @@ public class EntityStoreTests
     }
 
     [Fact]
-    public void RestartClearsAStaleExitCode()
+    public void StartClearsAStaleExitCode()
     {
         var store = new EntityStore();
         store.Reset([Container("a", "web", DockerState.Exited) with { ExitCode = 137 }]);
@@ -92,6 +92,18 @@ public class EntityStoreTests
         var c = store.Find("a")!;
         Assert.Equal(DockerState.Running, c.State);
         Assert.Null(c.ExitCode);
+    }
+
+    [Fact]
+    public void RestartAsksForAFetchRatherThanGuessing()
+    {
+        // Observed against podman: a restart emits `restart`, `start`, and then the `die`
+        // belonging to the instance that was replaced. Applying that die would leave a running
+        // container reading "Exited 137", so the one ambiguous sequence goes to the API.
+        var store = new EntityStore();
+        store.Reset([Container("a", "web")]);
+
+        Assert.True(store.Apply(Event("restart", "a")));
     }
 
     [Theory]
