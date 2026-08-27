@@ -104,6 +104,22 @@ public interface IContainerRuntime : IAsyncDisposable
     /// </summary>
     IAsyncEnumerable<LogLine> StreamLogsAsync(string containerId, LogOptions options, CancellationToken ct = default);
 
+    /// <summary>
+    /// List one directory inside a container.
+    /// <para>
+    /// The Engine API has no listing endpoint, so implementations build this out of what is
+    /// available. <see cref="DirectoryListing.Method"/> records which route was taken, because the
+    /// two have different costs and the UI sometimes needs to say so.
+    /// </para>
+    /// </summary>
+    Task<DirectoryListing> ListDirectoryAsync(string containerId, string path, bool containerIsRunning, CancellationToken ct = default);
+
+    /// <summary>Read one file's bytes. Works on a stopped container.</summary>
+    Task<byte[]> ReadFileAsync(string containerId, string path, CancellationToken ct = default);
+
+    /// <summary>Write one file back, preserving its mode. Works on a stopped container.</summary>
+    Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default);
+
     Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default);
 
     Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default);

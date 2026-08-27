@@ -311,6 +311,15 @@ sealed class TrackedRuntime(string endpoint) : IContainerRuntime
     public IAsyncEnumerable<LogLine> StreamLogsAsync(string containerId, LogOptions options, CancellationToken ct = default)
         => AsyncEnumerable.Empty<LogLine>();
 
+    public Task<DirectoryListing> ListDirectoryAsync(string containerId, string path, bool containerIsRunning, CancellationToken ct = default)
+        => Task.FromResult(new DirectoryListing(path, [], ListingMethod.Exec));
+
+    public Task<byte[]> ReadFileAsync(string containerId, string path, CancellationToken ct = default)
+        => Task.FromResult(Array.Empty<byte>());
+
+    public Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default)
+        => Task.CompletedTask;
+
     public Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
         => Task.FromResult(new SystemInfo(0, 0, 0, 0, null, null));
 

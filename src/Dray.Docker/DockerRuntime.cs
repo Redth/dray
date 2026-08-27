@@ -233,6 +233,15 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public IAsyncEnumerable<LogLine> StreamLogsAsync(string containerId, LogOptions options, CancellationToken ct = default)
         => DockerLogStream.ReadAsync(Client, containerId, options, ct);
 
+    public Task<DirectoryListing> ListDirectoryAsync(string containerId, string path, bool containerIsRunning, CancellationToken ct = default)
+        => DockerFileSystem.ListAsync(Client, containerId, path, containerIsRunning, ct);
+
+    public Task<byte[]> ReadFileAsync(string containerId, string path, CancellationToken ct = default)
+        => DockerFileSystem.ReadFileAsync(Client, containerId, path, ct);
+
+    public Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default)
+        => DockerFileSystem.WriteFileAsync(Client, containerId, path, content, ct);
+
     public async Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
     {
         var info = await Client.System.GetSystemInfoAsync(ct).ConfigureAwait(false);
