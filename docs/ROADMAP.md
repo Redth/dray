@@ -20,7 +20,7 @@ Establish the contract before any UI exists, because retrofitting it is what wen
 - ✔ `design/tokens.json` → generated `tokens.css`, `Tokens.g.cs`, and DESIGN.md's palette tables
 - ✔ `build/verify-contrast.mjs` — 42 pairs, plus sRGB gamut and stale-exception checks
 - ✔ `build/lint-tokens.mjs` — 5 rules over `.css`/`.razor`/`.cs`/`.html`/`.js`
-- ✔ Repo scaffold: `Dray.sln`, `Dray.Core`, `Dray.Core.Tests` (54 passing), central package
+- ✔ Repo scaffold: `Dray.slnx`, `Dray.Core`, `Dray.Core.Tests` (54 passing), central package
   management, CI with a design gate feeding a 3-OS build matrix
 
 **Demo:** CI fails a PR that introduces `#ff0000` in a `.razor` file. *(Verified by negative test —
