@@ -19,6 +19,7 @@ public sealed class BlazorContentPage : ContentPage
 
     readonly MacOSBlazorWebView _webView;
     readonly IShellState _shell;
+    readonly MacToolbarProjector _toolbar;
 
     NSView? _loadingOverlay;
     TitlebarDragView? _dragOverlay;
@@ -28,6 +29,9 @@ public sealed class BlazorContentPage : ContentPage
     {
         Title = string.Empty;
         _shell = services.GetRequiredService<IShellState>();
+
+        // Whatever the current page declared, rendered as real NSToolbar items.
+        _toolbar = new MacToolbarProjector(this, _shell);
 
         _webView = new MacOSBlazorWebView
         {

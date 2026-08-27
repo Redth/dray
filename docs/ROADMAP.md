@@ -48,8 +48,10 @@ places that pattern frays. The work here is re-expressing the proven mechanics a
   skeletons, toasts, command palette
 - Vendored icon sprite, vendored xterm.js. Zero network calls at boot.
 
-**Progress:** Core abstractions, the RCL, the component kit and `Dray.DevHost` are done; the three
-native heads are next. Greyscale and both-theme checks pass on `/gallery`.
+**Progress:** Core abstractions, the RCL, the component kit, `Dray.DevHost` and the **macOS head**
+are done — native `NSOutlineView` sidebar and `NSToolbar` both projected from the manifest and from
+`PageChrome`, with the theme handoff verified in light and dark. Windows and GTK heads are next.
+Greyscale and both-theme checks pass on `/gallery`.
 
 **Demo:** all three platforms open a window with a native sidebar and a fake container table, in light
 and dark, and you cannot see where native chrome ends and the WebView begins.

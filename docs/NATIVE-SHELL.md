@@ -75,13 +75,45 @@ them the hard way; take them as given.
   cannot be dragged by its titlebar. A transparent `NSView` over that strip restores it. Non-obvious,
   and users notice immediately.
 
-### 1.4 NSToolbar: build a superset once, then toggle visibility
+### 1.4 NSToolbar: rebuild only when the shape changes
 
-`NSToolbar` does not like being rebuilt per navigation. Sherpa builds every possible item once and
-then shows/hides — and because Blazor initializes *before* the window handler is connected, the first
-attempt finds `nsWindow.Toolbar == null` and must be retried. Keep both halves; they are real.
+`NSToolbar` does not like being rebuilt per navigation — it flickers, and it silently drops the
+search field's native subscription (§1.5). Sherpa's answer is a hardcoded superset of every action
+in the app, built once and then shown/hidden. That works, but it means the head carries a list of
+every page's commands.
 
-### 1.5 Keep native callback targets alive
+Dray does not need the superset, because `PageChrome.Signature` says exactly when a rebuild is
+required: it changes when the chrome's *structure* changes and not when a label, tooltip, enabled
+flag or filter selection does. So navigation between two similarly-shaped pages does not rebuild at
+all, and everything else updates in place. `MacToolbarProjector` is the whole implementation and it
+knows nothing about any page.
+
+Two mechanics still apply either way:
+
+- **Attached properties first, `ToolbarItems` last.** Every mutation triggers a `RefreshToolbar`,
+  and only the final one should see complete state. Set `MacOSToolbar.SetSearchItem` and
+  `SetContentLayout` before touching `ToolbarItems`, or macOS inserts and removes items mid-build.
+- **Retry the first attach.** Blazor declares chrome before the window handler is connected, so the
+  first attempt finds `nsWindow.Toolbar == null`.
+
+Native toolbar items are not all `ToolbarItem`: search and menus are `MacOSSearchToolbarItem` and
+`MacOSMenuToolbarItem`, attached through `MacOSToolbar.SetContentLayout` with
+`MacOSToolbarLayoutItem.Item / .Menu / .Search / .FlexibleSpace`.
+
+### 1.5 The search field's event dies after the first refresh
+
+Upstream, `ToolbarHandler.CleanupSearchItem` unsubscribes from the native `NSSearchField` change
+event on every `RefreshToolbar`, but only re-subscribes when macOS inserts a *new* toolbar item.
+After the first insertion the managed `TextChanged` event is silently dead — search stops working
+with no error anywhere. Subscribe to the native field directly instead, after two dispatch hops (the
+item must be inserted before `NSSearchToolbarItem` exists to find):
+
+```csharp
+NSNotificationCenter.DefaultCenter.AddObserver(
+    NSTextField.TextDidChangeNotification, …, searchToolbarItem.SearchField);
+```
+
+### 1.5b Keep native callback targets alive
 
 Two GC traps, one per platform, both already solved:
 

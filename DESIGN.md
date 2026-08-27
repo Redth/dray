@@ -338,10 +338,18 @@ This section is what separates Dray from an Electron app with a nice theme.
 
 The Blazor content sits inside a native window. At the boundary, these must match exactly:
 
-- **Background.** The WebView is transparent and the native window background shows through. On
-  macOS `--bg` is overridden at runtime from `NSColor.windowBackgroundColor` /
-  `NSColor.controlBackgroundColor`; on Windows from the Mica/`ApplicationBackdrop` resolved colour;
-  on GTK from the Adwaita `@window_bg_color`. The table values in §2 are the fallbacks, not the truth.
+- **The ground comes from the OS; the surfaces above it are ours.** The WebView is transparent and
+  the native window background shows through, so `--bg` is overridden at runtime from
+  `NSColor.windowBackgroundColor` / the Mica-resolved colour / Adwaita `@window_bg_color`, and
+  `--line` and `--focus` likewise. `--surface` and `--surface-2` stay on the generated palette:
+  they are Dray's own hierarchy of panels and chrome, and the platforms have no colour that means
+  the same thing. On macOS, `controlBackgroundColor` is *identical* to the window colour in a
+  full-size-content window (panels lose all separation) and `underPageBackgroundColor` is the
+  mid-grey shown *behind* a document, which renders table headers as a dark band. Both were tried;
+  both were wrong.
+- **Resolve platform colours inside the current appearance.** AppKit's semantic colours are
+  dynamic and resolve against the *default* appearance outside a drawing context, so a naive read
+  returns light values in dark mode.
 - **Accent.** Where the OS exposes a user accent colour (macOS `NSColor.controlAccentColor`, Windows
   `UISettings.GetColorValue(Accent)`), selection highlight uses it. `--brand` remains the app's
   identity — icon, splash, primary buttons — but the *selected row* follows the user's OS preference,

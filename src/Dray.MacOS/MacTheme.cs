@@ -68,11 +68,16 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
 
         NSApplication.SharedApplication.EffectiveAppearance.PerformAsCurrentDrawingAppearance(() =>
         {
-            // The ground the WebView composites onto. Getting this even slightly wrong is the
-            // single most visible way the seam shows.
+            // The rule: the GROUND comes from the OS, the surfaces above it are ours.
+            //
+            // `--bg` is what the WebView composites onto, so it must be exactly what AppKit
+            // painted — getting it even slightly wrong is the most visible way the seam shows.
+            // `--surface` and `--surface-2` are Dray's own hierarchy of panels and chrome, and
+            // AppKit has no colours that mean the same thing: controlBackgroundColor is identical
+            // to the window colour in a full-size-content window (so panels lose all separation),
+            // and underPageBackgroundColor is the mid-grey shown BEHIND a document, which renders
+            // table headers as a dark band. Both stay on the generated palette.
             Add(overrides, "bg", NSColor.WindowBackground);
-            Add(overrides, "surface", NSColor.ControlBackground);
-            Add(overrides, "surface-2", NSColor.UnderPageBackground);
             Add(overrides, "line", NSColor.Separator);
 
             // Selection follows the user's system accent, because that is what every native list
@@ -80,6 +85,11 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
             // buttons.
             Add(overrides, "focus", NSColor.KeyboardFocusIndicator);
         });
+
+#if DEBUG
+        Console.Error.WriteLine($"[dray:theme] {(IsDark ? "dark" : "light")} " +
+            string.Join("  ", overrides.Select(kv => $"{kv.Key}={kv.Value}")));
+#endif
 
         return overrides;
     }
