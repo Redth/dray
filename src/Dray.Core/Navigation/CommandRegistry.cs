@@ -46,11 +46,11 @@ public sealed record Command(
 public sealed record CommandMatch(Command Command, int Score, IReadOnlyList<int> Highlights);
 
 /// <summary>
-/// Ranking palette entries against what has been typed.
+/// Ranking palette entries.
 /// <para>
-/// Subsequence matching rather than substring, because that is what people expect of a palette:
-/// "rsc" should find "Restart container". Scoring favours matches at the start of a word, so
-/// "stop" ranks "Stop" above "Prune stopped".
+/// The scoring lives in <see cref="FuzzySearch"/> now: the image picker wants exactly the same
+/// behaviour over a different type, and two copies of a ranking function drift. This is the
+/// palette's binding to it, kept so callers and tests still speak in commands.
 /// </para>
 /// </summary>
 public static class CommandSearch
@@ -60,88 +60,18 @@ public static class CommandSearch
     /// order, which is how the palette shows its default list.
     /// </summary>
     public static IReadOnlyList<CommandMatch> Rank(IEnumerable<Command> commands, string query)
-    {
-        var needle = query.Trim().ToLowerInvariant();
-
-        if (needle.Length == 0)
-            return [.. commands.Select(c => new CommandMatch(c, 0, []))];
-
-        return
+        =>
         [
-            .. commands
-                .Select(c => Match(c, needle))
-                .Where(m => m is not null)
-                .Select(m => m!)
-                .OrderByDescending(m => m.Score)
-
-                // Ties broken by title so the list does not reshuffle between identical queries.
-                .ThenBy(m => m.Command.Title, StringComparer.OrdinalIgnoreCase),
+            .. FuzzySearch
+                .Rank(commands, query, c => c.Title, c => c.Haystack)
+                .Select(m => new CommandMatch(m.Value, m.Score, m.Highlights)),
         ];
-    }
 
-    /// <summary>
-    /// Score one command, or null when the query is not a subsequence of it.
-    /// </summary>
+    /// <summary>Score one command, or null when the query is not a subsequence of it.</summary>
     internal static CommandMatch? Match(Command command, string needle)
-    {
-        // Matched against the title first so the highlights land on what the user can see; the
-        // wider haystack only decides whether the row appears at all.
-        var titleScore = Subsequence(command.Title.ToLowerInvariant(), needle, out var highlights);
-
-        if (titleScore is { } score)
-        {
-            // A command whose title starts with the query is almost always the one meant.
-            if (command.Title.StartsWith(needle, StringComparison.OrdinalIgnoreCase)) score += 60;
-
-            return new CommandMatch(command, score, highlights);
-        }
-
-        // Not in the title, but perhaps in the image name or the id. Worth offering, ranked below
-        // anything that matched visibly — a row that matched on text the user cannot see looks
-        // like a bug if it outranks one that did.
-        return Subsequence(command.Haystack, needle, out _) is { } hidden
-            ? new CommandMatch(command, hidden - 200, [])
+        => FuzzySearch.Match(command, needle, c => c.Title, c => c.Haystack) is { } m
+            ? new CommandMatch(m.Value, m.Score, m.Highlights)
             : null;
-    }
-
-    /// <summary>
-    /// Whether every character of <paramref name="needle"/> appears in order, and how good the fit
-    /// is. Higher is better.
-    /// </summary>
-    static int? Subsequence(string haystack, string needle, out IReadOnlyList<int> highlights)
-    {
-        var positions = new List<int>(needle.Length);
-        var score = 0;
-        var at = 0;
-
-        foreach (var c in needle)
-        {
-            var found = haystack.IndexOf(c, at);
-            if (found < 0)
-            {
-                highlights = [];
-                return null;
-            }
-
-            // A character beginning a word is worth far more than one in the middle: it is what
-            // makes an acronym like "rsc" rank above an accidental scatter of the same letters.
-            var atWordStart = found == 0 || haystack[found - 1] is ' ' or '-' or '_' or '·' or '/' or ':';
-            score += atWordStart ? 12 : 2;
-
-            // Consecutive characters are a stronger signal than scattered ones.
-            if (positions.Count > 0 && found == positions[^1] + 1) score += 6;
-
-            positions.Add(found);
-            at = found + 1;
-        }
-
-        // A short haystack that matched is a tighter fit than a long one — "Stop" beats
-        // "Prune stopped" for the query "stop".
-        score += Math.Max(0, 40 - haystack.Length);
-
-        highlights = positions;
-        return score;
-    }
 }
 
 /// <summary>

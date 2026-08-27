@@ -1,0 +1,68 @@
+.cb {
+    position: relative;
+}
+
+.cb__input {
+    width: 100%;
+}
+
+/* Overlays what follows rather than pushing it down: a dropdown that reflows the form moves the
+   very field the user is typing into. */
+.cb__list {
+    position: absolute;
+    z-index: var(--z-dropdown);
+    inset-inline: 0;
+    top: calc(100% + var(--s1));
+
+    margin: 0;
+    padding: var(--s1);
+    list-style: none;
+
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-popover);
+
+    /* Bounded: thirty rows is already more than anyone reads, and a list that grows past the
+       window cannot be scrolled back to the field. */
+    max-height: min(22rem, 50vh);
+    overflow-y: auto;
+}
+
+.cb__list[hidden] {
+    display: none;
+}
+
+.cb__empty {
+    padding: var(--s3);
+    font-size: var(--text-sm);
+}
+
+.cb__row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+    cursor: default;
+}
+
+/* One selected state driven by the keyboard, and hover moves the keyboard selection rather than
+   painting a second highlight — two highlights in one list is the classic combobox bug. */
+.cb__row.is-selected {
+    background: var(--surface-2);
+}
+
+.cb__row.is-selected::after {
+    content: "↵";
+    margin-left: auto;
+    color: var(--muted);
+    font-size: var(--text-xs);
+}
+
+/* The characters that matched. Weight rather than colour: the runs are scattered through a word,
+   and colouring every other character turns a name into confetti. */
+::deep .cb__mark {
+    font-weight: 700;
+    color: var(--ink);
+}

@@ -14,21 +14,27 @@
     <ChildContent>
         <div class="field">
             <label class="field__label" for="run-image">Image</label>
-            <input id="run-image" class="input mono" placeholder="postgres:16"
-                   @bind="_image" @bind:event="oninput" autocomplete="off" spellcheck="false" />
 
-            @if (_suggestions.Count > 0)
-            {
-                @* The images already on this host. Typing a tag that is not here is allowed — the
-                   engine pulls it — but most runs are of something already pulled, and a list
-                   beats remembering the exact tag. *@
-                <div class="run__suggestions">
-                    @foreach (var tag in _suggestions)
-                    {
-                        <button type="button" class="run__chip mono" @onclick="() => _image = tag">@tag</button>
-                    }
-                </div>
-            }
+            @* Free text is a valid answer — an image not on this host is pulled — so this ranks
+               what is here rather than restricting to it. *@
+            <Combobox TItem="ImageChoice"
+                      Label="Image"
+                      Placeholder="postgres:16"
+                      InputClass="mono"
+                      Query="@_image"
+                      QueryChanged="@(v => _image = v)"
+                      Source="SearchImagesAsync"
+                      LabelOf="i => i.Reference"
+                      HaystackOf="i => i.Haystack"
+                      KeyOf="i => i.Reference"
+                      EmptyText="Not on this host — running it will pull it first.">
+                <Row Context="match">
+                    <span class="mono run__opt-name">
+                        <Highlighted Text="@match.Value.Reference" Highlights="match.Highlights" />
+                    </span>
+                    <span class="muted run__opt-meta">@match.Value.Detail</span>
+                </Row>
+            </Combobox>
         </div>
 
         <div class="field">
@@ -103,7 +109,13 @@
     bool _running;
 
     string? _failure;
-    IReadOnlyList<string> _suggestions = [];
+    IReadOnlyList<ImageChoice> _local = [];
+
+    /// <summary>
+    /// One offerable image. Carries its own haystack so a search matches on the repository and the
+    /// short id as well as on the reference the row shows.
+    /// </summary>
+    sealed record ImageChoice(string Reference, string Detail, string Haystack);
 
     /// <summary>
     /// What is wrong right now — the first unreadable line, or the engine's refusal.
@@ -136,19 +148,35 @@
     {
         if (Image is { Length: > 0 } image && _image.Length == 0) _image = image;
 
-        if (Open && _suggestions.Count == 0)
-        {
-            var images = await Engine.ListImagesAsync();
-
-            _suggestions =
-            [
-                .. images
-                    .SelectMany(i => i.Tags.Select(t => t.Display))
-                    .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
-                    .Take(8),
-            ];
-        }
+        if (Open && _local.Count == 0) await LoadLocalAsync();
     }
+
+    /// <summary>
+    /// The images on this host, read once when the dialog opens.
+    /// <para>
+    /// Not re-read per keystroke: the list does not change while a dialog is open, and the
+    /// combobox ranks it locally. A registry search — which does need a call per query — is the
+    /// outstanding Phase 6 item and slots in below these.
+    /// </para>
+    /// </summary>
+    async Task LoadLocalAsync()
+    {
+        var images = await Engine.ListImagesAsync();
+
+        _local =
+        [
+            .. images
+                .SelectMany(i => i.Tags.Select(t => new ImageChoice(
+                    t.Display,
+                    $"{Humanize.Bytes(i.SizeBytes)}{(i.IsInUse is true ? $" · {i.ContainerCount} in use" : "")}",
+                    $"{t.Display} {t.ShortRepository} {i.ShortId}".ToLowerInvariant())))
+                .Where(c => !c.Reference.StartsWith("<untagged>", StringComparison.Ordinal))
+                .DistinctBy(c => c.Reference),
+        ];
+    }
+
+    Task<IReadOnlyList<ImageChoice>> SearchImagesAsync(string query, CancellationToken ct)
+        => Task.FromResult(_local);
 
     async Task SubmitAsync()
     {
@@ -203,6 +231,6 @@
         _env = "";
         _mounts = "";
         _start = true;
-        _suggestions = [];
+        _local = [];
     }
 }

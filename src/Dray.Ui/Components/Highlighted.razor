@@ -1,0 +1,25 @@
+@* A label with the characters that matched marked.
+
+   The ranking has always computed these positions and nothing ever drew them, so a fuzzy match
+   looked arbitrary — "rsc" finding "Restart container" reads as a guess until you can see which
+   letters it caught. Segmentation lives in FuzzySearch so every list marks them identically. *@
+
+@foreach (var (text, matched) in FuzzySearch.Segment(Text, Highlights))
+{
+    if (matched)
+    {
+        <span class="cb__mark">@text</span>
+    }
+    else
+    {
+        @text
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+
+    /// <summary>Indexes into <see cref="Text"/>. Empty renders the text plainly, which is the
+    /// honest rendering of a row that matched on something the user cannot see.</summary>
+    [Parameter] public IReadOnlyList<int> Highlights { get; set; } = [];
+}

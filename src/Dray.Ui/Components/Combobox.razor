@@ -1,0 +1,277 @@
+@* A text field with a ranked dropdown under it.
+
+   Built rather than vendored, and the reasoning is worth stating because "don't reimplement a
+   solved front-end problem" (AGENTS.md) points the other way at first glance. It does not apply
+   here: the hard part — subsequence ranking with word-start scoring, stable ties, and the keyboard
+   model — was already written for the command palette and is already shipped. Vendoring Tom Select
+   or Choices.js would not avoid an implementation, it would add a *second* one beside the working
+   one, and both of them replace the element with a generated tree that Blazor no longer owns. Their
+   stylesheets would also land in wwwroot/lib, which `lint-tokens.mjs` skips — so raw colours would
+   walk straight past the one gate built to stop them.
+
+   What a library would have given us for free is correct ARIA, and the palette did not have it: the
+   input had no role, no aria-expanded, no aria-controls, no aria-activedescendant, and the list had
+   no id to point at. That is eight attributes in one file, and they are here.
+
+   Generic over the row type, so the palette and the image picker are the same component with
+   different templates. *@
+@typeparam TItem
+@implements IAsyncDisposable
+
+<div class="cb @Class">
+    <input class="input cb__input @InputClass"
+           type="text"
+           role="combobox"
+           aria-expanded="@IsOpen.ToString().ToLowerInvariant()"
+           aria-controls="@_listId"
+           aria-autocomplete="list"
+           aria-activedescendant="@(IsOpen && _selected >= 0 && _selected < _matches.Count ? RowId(_selected) : null)"
+           aria-label="@Label"
+           placeholder="@Placeholder"
+           autocomplete="off"
+           spellcheck="false"
+           disabled="@Disabled"
+           @ref="_input"
+           value="@Query"
+           @oninput="OnInputAsync"
+           @onkeydown="OnKeyDownAsync"
+           @onkeydown:preventDefault="_swallowKey"
+           @onfocus="OnFocusAsync"
+           @onblur="OnBlur" />
+
+    @* Always rendered so aria-controls points at something real, which it must even while
+       collapsed. Hidden rather than absent. *@
+    <ul class="cb__list" id="@_listId" role="listbox" aria-label="@Label" hidden="@(!IsOpen)">
+        @for (var i = 0; i < _matches.Count; i++)
+        {
+            var index = i;
+            var match = _matches[i];
+
+            <li @key="Key(match.Value)"
+                id="@RowId(index)"
+                class="cb__row @(index == _selected ? "is-selected" : null)"
+                role="option"
+                aria-selected="@((index == _selected).ToString().ToLowerInvariant())"
+                @onmousedown:preventDefault="true"
+                @onmousedown="() => ChooseAsync(match.Value)"
+                @onmousemove="() => _selected = index">
+
+                @Row(match)
+            </li>
+        }
+    </ul>
+
+    @if (IsOpen && _matches.Count == 0 && !_loading)
+    {
+        <div class="cb__list cb__empty muted">@EmptyText</div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// How many rows are shown. A dropdown listing four hundred things is a list, not a picker:
+    /// the ranking puts the intended one near the top and anything past this is reached by typing.
+    /// </summary>
+    const int MaxRows = 30;
+
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    [Parameter] public string? Placeholder { get; set; }
+
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Extra classes for the input itself — <c>mono</c>, usually.</summary>
+    [Parameter] public string? InputClass { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>The text in the field. Free text is a valid answer, so this is the value.</summary>
+    [Parameter] public string Query { get; set; } = "";
+
+    [Parameter] public EventCallback<string> QueryChanged { get; set; }
+
+    /// <summary>
+    /// Where rows come from. Async and cancellable because a registry search is a network call;
+    /// a purely local source ignores the token and returns immediately.
+    /// </summary>
+    [Parameter, EditorRequired] public Func<string, CancellationToken, Task<IReadOnlyList<TItem>>> Source { get; set; } = default!;
+
+    /// <summary>The text a row is ranked and highlighted on — what the user reads.</summary>
+    [Parameter, EditorRequired] public Func<TItem, string> LabelOf { get; set; } = default!;
+
+    /// <summary>
+    /// Everything worth matching on, including what is not displayed. Defaults to the label.
+    /// Should be lowercase.
+    /// </summary>
+    [Parameter] public Func<TItem, string>? HaystackOf { get; set; }
+
+    /// <summary>Stable identity for <c>@key</c>. Defaults to the label.</summary>
+    [Parameter] public Func<TItem, string>? KeyOf { get; set; }
+
+    /// <summary>How one row draws. Gets the match so it can render highlights.</summary>
+    [Parameter, EditorRequired] public RenderFragment<SearchMatch<TItem>> Row { get; set; } = default!;
+
+    /// <summary>Raised when a row is chosen, by click or by Enter.</summary>
+    [Parameter] public EventCallback<TItem> OnChosen { get; set; }
+
+    [Parameter] public string EmptyText { get; set; } = "Nothing matches.";
+
+    /// <summary>
+    /// Rank locally as well as fetching.
+    /// <para>
+    /// True for a local list — the source hands over everything and this orders it. False when the
+    /// source has already ranked, as a registry search has; re-ranking a server's results by our
+    /// own heuristic would fight it.
+    /// </para>
+    /// </summary>
+    [Parameter] public bool RankLocally { get; set; } = true;
+
+    /// <summary>How long to wait after a keystroke before asking the source. Zero for local lists.</summary>
+    [Parameter] public int DebounceMs { get; set; }
+
+    readonly string _listId = $"cb-{Guid.NewGuid():N}";
+
+    ElementReference _input;
+    IReadOnlyList<SearchMatch<TItem>> _matches = [];
+    IReadOnlyList<TItem> _items = [];
+    int _selected;
+    bool _open;
+    bool _loading;
+    bool _swallowKey;
+    CancellationTokenSource? _fetch;
+
+    /// <summary>Open only when there is something to show; an empty box below the field is noise.</summary>
+    bool IsOpen => _open && (_matches.Count > 0 || (Query.Length > 0 && !_loading));
+
+    string RowId(int index) => $"{_listId}-{index}";
+
+    string Key(TItem item) => KeyOf?.Invoke(item) ?? LabelOf(item);
+
+    public async Task FocusAsync() => await _input.FocusAsync();
+
+    async Task OnFocusAsync()
+    {
+        _open = true;
+        await FetchAsync(Query);
+    }
+
+    /// <summary>
+    /// Closing is deferred, because a click on a row blurs the input before the click lands.
+    /// The rows use mousedown with preventDefault so the blur never happens for them; this
+    /// handles every other way focus leaves.
+    /// </summary>
+    void OnBlur() => _open = false;
+
+    async Task OnInputAsync(ChangeEventArgs e)
+    {
+        Query = e.Value?.ToString() ?? "";
+        await QueryChanged.InvokeAsync(Query);
+
+        _open = true;
+        _selected = 0;
+
+        await FetchAsync(Query);
+    }
+
+    async Task FetchAsync(string query)
+    {
+        // One in flight at a time: a slow registry search must not land after a newer one and
+        // replace the results for text the user has already moved past.
+        if (_fetch is { } previous)
+        {
+            await previous.CancelAsync();
+            previous.Dispose();
+        }
+
+        var cts = new CancellationTokenSource();
+        _fetch = cts;
+
+        try
+        {
+            if (DebounceMs > 0) await Task.Delay(DebounceMs, cts.Token);
+
+            _loading = true;
+            _items = await Source(query, cts.Token);
+            _loading = false;
+
+            Rerank(query);
+            StateHasChanged();
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer keystroke. The newer call owns the results.
+        }
+        catch (Exception)
+        {
+            // A source that cannot answer leaves the list as it was rather than emptying it: an
+            // offline registry should not erase the local images already listed.
+            _loading = false;
+        }
+    }
+
+    void Rerank(string query)
+    {
+        _matches = RankLocally
+            ? [.. FuzzySearch.Rank(_items, query, LabelOf, HaystackOf ?? (i => LabelOf(i).ToLowerInvariant())).Take(MaxRows)]
+            : [.. _items.Take(MaxRows).Select(i => new SearchMatch<TItem>(i, 0, []))];
+
+        if (_selected >= _matches.Count) _selected = Math.Max(0, _matches.Count - 1);
+    }
+
+    async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        // Only navigation keys are swallowed. Preventing default on every key stops the field
+        // receiving what is typed — a bug the command palette shipped with once already.
+        _swallowKey = e.Key is "ArrowDown" or "ArrowUp" or "Enter" or "Home" or "End";
+
+        switch (e.Key)
+        {
+            case "ArrowDown" when _matches.Count > 0:
+                _open = true;
+                _selected = (_selected + 1) % _matches.Count;
+                break;
+
+            case "ArrowUp" when _matches.Count > 0:
+                _open = true;
+                _selected = (_selected - 1 + _matches.Count) % _matches.Count;
+                break;
+
+            case "Home" when _matches.Count > 0:
+                _selected = 0;
+                break;
+
+            case "End" when _matches.Count > 0:
+                _selected = _matches.Count - 1;
+                break;
+
+            case "Enter" when IsOpen && _selected >= 0 && _selected < _matches.Count:
+                await ChooseAsync(_matches[_selected].Value);
+                break;
+
+            case "Escape":
+                // Closes the list, not the dialog around it. A picker that dismissed its parent
+                // would lose everything else the user had typed.
+                _open = false;
+                break;
+        }
+    }
+
+    async Task ChooseAsync(TItem item)
+    {
+        Query = LabelOf(item);
+        _open = false;
+
+        await QueryChanged.InvokeAsync(Query);
+        await OnChosen.InvokeAsync(item);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_fetch is { } cts)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+            _fetch = null;
+        }
+    }
+}

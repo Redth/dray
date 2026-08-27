@@ -81,3 +81,10 @@
     background: var(--surface-2);
     font-size: var(--text-xs);
 }
+
+/* Shared with Combobox: the matched characters, marked by weight rather than colour. Scattered
+   runs coloured individually turn a name into confetti. */
+::deep .cb__mark {
+    font-weight: 700;
+    color: var(--ink);
+}

@@ -12,7 +12,17 @@
 
 <Dialog Title="" Open="_open" OpenChanged="OnOpenChanged" Class="palette" HideFooter="true">
     <ChildContent>
+        @* A combobox, and now labelled as one. It was listbox-shaped but not combobox-shaped:
+           the input carried no role, no aria-expanded, no aria-controls and no
+           aria-activedescendant, and the list had no id to point at — so a screen reader could
+           see the options but never learn which one was current. *@
         <input class="input palette__input" type="search" placeholder="Search containers, images, actions…"
+               role="combobox"
+               aria-expanded="true"
+               aria-controls="@ListId"
+               aria-autocomplete="list"
+               aria-activedescendant="@(_matches.Count > 0 ? RowId(_selected) : null)"
+               aria-label="Search containers, images and actions"
                autocomplete="off" spellcheck="false"
                @ref="_input"
                value="@_query"
@@ -28,13 +38,15 @@
         }
         else
         {
-            <ul class="palette__list" role="listbox">
+            <ul class="palette__list" id="@ListId" role="listbox"
+                aria-label="Search results">
                 @for (var i = 0; i < _matches.Count; i++)
                 {
                     var index = i;
                     var match = _matches[i];
 
                     <li @key="match.Command.Id"
+                        id="@RowId(index)"
                         class="palette__row @(index == _selected ? "is-selected" : null) @(match.Command.IsDestructive ? "is-destructive" : null)"
                         role="option"
                         aria-selected="@((index == _selected).ToString().ToLowerInvariant())"
@@ -43,7 +55,12 @@
 
                         <Icon Name="match.Command.Icon" Size="IconSize.Sm" />
 
-                        <span class="palette__title">@match.Command.Title</span>
+                        @* The ranking has always computed which characters matched and nothing
+                           ever drew them, so a fuzzy hit looked arbitrary — "rsc" finding
+                           "Restart container" reads as a guess until you can see the letters. *@
+                        <span class="palette__title">
+                            <Highlighted Text="@match.Command.Title" Highlights="match.Highlights" />
+                        </span>
 
                         @if (match.Command.Detail is { } detail)
                         {
@@ -71,6 +88,11 @@
     /// </para>
     /// </summary>
     const int MaxRows = 40;
+
+    /// <summary>Stable ids so aria-controls and aria-activedescendant have something to point at.</summary>
+    const string ListId = "palette-list";
+
+    static string RowId(int index) => $"palette-row-{index}";
 
     ElementReference _input;
     bool _open;
