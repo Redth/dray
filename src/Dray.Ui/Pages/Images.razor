@@ -124,6 +124,17 @@
                                                     OnClick="() => _runFrom = image.Tags[0].Display" />
                                         }
 
+                                        @if (!image.IsDangling)
+                                        {
+                                            <Button Label="@($"Tag {image.DisplayName}")" Icon="IconRef.Inspect"
+                                                    IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                    OnClick="() => _tagging = image" />
+
+                                            <Button Label="@($"Push {image.DisplayName}")" Icon="IconRef.Push"
+                                                    IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                    OnClick="() => _pushing = image.Tags[0].Display" />
+                                        }
+
                                         <Button Label="@($"Copy ID of {image.DisplayName}")" Icon="IconRef.Copy"
                                                 IconOnly="true" Variant="ButtonVariant.Ghost"
                                                 OnClick="() => Shell.WriteClipboardAsync(image.Id)" />
@@ -140,6 +151,18 @@
             </div>
         }
     </div>
+
+    @if (_tagging is { } tagging)
+    {
+        <TagDialog @key="tagging.Id" Image="tagging" Open="true"
+                   OpenChanged="open => _tagging = open ? tagging : null" OnTagged="LoadAsync" />
+    }
+
+    @if (_pushing is { } pushing)
+    {
+        <PushDialog @key="pushing" Reference="pushing" Open="true"
+                    OpenChanged="open => _pushing = open ? pushing : null" />
+    }
 
     @if (_runFrom is { } runFrom)
     {
@@ -175,6 +198,9 @@
 
     /// <summary>The image reference the run dialog was opened for, or null when it is closed.</summary>
     string? _runFrom;
+
+    ImageSummary? _tagging;
+    string? _pushing;
     bool _buildDialog;
 
     protected override Task OnInitializedAsync() => LoadAsync();

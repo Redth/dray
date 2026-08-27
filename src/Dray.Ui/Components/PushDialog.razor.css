@@ -1,20 +1,20 @@
-.pull__hint,
-.pull__error,
-.pull__done {
+.push__hint,
+.push__error,
+.push__done {
     margin-top: var(--s2);
     font-size: var(--text-xs);
     line-height: var(--text-sm-lh);
     max-width: 52ch;
 }
 
-.pull__error {
+.push__error {
     color: var(--danger-ink);
     background: var(--danger-tint);
     padding: var(--s2) var(--s3);
     border-radius: var(--r-sm);
 }
 
-.pull__done {
+.push__done {
     color: var(--ok-ink);
     background: var(--ok-tint);
     padding: var(--s2) var(--s3);

@@ -1,0 +1,46 @@
+/* Bounded and scrolling: a large image has forty layers, and a dialog that grows to fit them all
+   pushes its own buttons off the screen. */
+.layers {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    margin-top: var(--s3);
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.layers__row {
+    display: grid;
+    grid-template-columns: 7ch 1fr 14ch;
+    align-items: center;
+    gap: var(--s2);
+    font-size: var(--text-xs);
+}
+
+.layers__id {
+    color: var(--muted);
+}
+
+.layers__track {
+    height: 4px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    overflow: hidden;
+}
+
+.layers__fill {
+    height: 100%;
+    background: var(--brand);
+    transition: width var(--motion-fast) var(--motion-ease);
+}
+
+/* A finished layer stops competing for attention with the ones still moving. */
+.layers__fill.is-done {
+    background: var(--ok);
+}
+
+.layers__status {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

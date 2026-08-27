@@ -172,6 +172,71 @@ public static class DockerImages
         }
     }
 
+    /// <summary>
+    /// Push an image, streaming the same per-layer progress a pull reports.
+    /// <para>
+    /// The engine reports a push in exactly the shape it reports a pull — a status per layer, out
+    /// of order — so this reuses <see cref="PullProgress"/> rather than inventing a second type
+    /// that would need a second progress component to render it.
+    /// </para>
+    /// </summary>
+    public static async IAsyncEnumerable<PullProgress> PushAsync(
+        DockerClient client,
+        string reference,
+        RegistryCredential? credential,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var image = ImageTag.Parse(reference);
+
+        var channel = Channel.CreateUnbounded<PullProgress>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true,
+        });
+
+        var progress = new Progress<JSONMessage>(m => channel.Writer.TryWrite(Map(m)));
+
+        // Built here and not held: the secret lives in this local for the length of the call and
+        // is never returned, logged or rendered (docs/CREDENTIALS.md).
+        var auth = credential is null
+            ? null
+            : new AuthConfig
+            {
+                ServerAddress = credential.Server,
+                Username = credential.Username,
+                Password = credential.Secret,
+            };
+
+        var monitor = Task.Run(async () =>
+        {
+            try
+            {
+                await client.Images.PushImageAsync(
+                    image.Repository,
+                    new ImagePushParameters { Tag = image.Tag },
+                    auth,
+                    progress,
+                    ct).ConfigureAwait(false);
+
+                channel.Writer.TryComplete();
+            }
+            catch (Exception ex)
+            {
+                channel.Writer.TryComplete(ex);
+            }
+        }, CancellationToken.None);
+
+        try
+        {
+            await foreach (var step in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                yield return step;
+        }
+        finally
+        {
+            await monitor.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
     internal static PullProgress Map(JSONMessage m) => new(
         LayerId: string.IsNullOrEmpty(m.ID) ? null : m.ID,
         Status: m.Status ?? m.Stream?.Trim() ?? string.Empty,

@@ -358,6 +358,10 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public Task TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default)
         => DockerImages.TagAsync(Client, imageId, repository, tag, ct);
 
+    public IAsyncEnumerable<PullProgress> PushImageAsync(
+        string reference, RegistryCredential? credential, CancellationToken ct = default)
+        => DockerImages.PushAsync(Client, reference, credential, ct);
+
     public IAsyncEnumerable<PullProgress> PullImageAsync(string reference, CancellationToken ct = default)
         => DockerImages.PullAsync(Client, reference, ct);
 

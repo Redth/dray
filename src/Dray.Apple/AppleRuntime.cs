@@ -549,6 +549,24 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
         }
     }
 
+    /// <summary>
+    /// <c>container image push</c>. The credential is ignored: this CLI reads the same
+    /// <c>~/.docker/config.json</c> and system helpers, so passing one would be handing it a
+    /// secret it is about to look up itself.
+    /// </summary>
+    public async IAsyncEnumerable<PullProgress> PushImageAsync(
+        string reference,
+        RegistryCredential? credential,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await foreach (var line in _runner
+            .StreamAsync(Executable, ["image", "push", reference], null, ct)
+            .ConfigureAwait(false))
+        {
+            yield return new PullProgress(null, line.Text);
+        }
+    }
+
     public async IAsyncEnumerable<BuildProgress> BuildImageAsync(
         BuildRequest request, [EnumeratorCancellation] CancellationToken ct = default)
     {

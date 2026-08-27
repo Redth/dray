@@ -182,6 +182,18 @@ public interface IContainerRuntime : IAsyncDisposable
     IAsyncEnumerable<PullProgress> PullImageAsync(string reference, CancellationToken ct = default);
 
     /// <summary>
+    /// Push an image to its registry, reporting progress per layer as the engine reports it.
+    /// <para>
+    /// The credential is passed in rather than looked up here: the runtime's job is to talk to the
+    /// engine, and reading a secret out of the system store is a different concern that
+    /// docs/CREDENTIALS.md keeps in one place. Null pushes anonymously, which works for a local
+    /// registry and fails clearly everywhere else.
+    /// </para>
+    /// </summary>
+    IAsyncEnumerable<PullProgress> PushImageAsync(
+        string reference, RegistryCredential? credential, CancellationToken ct = default);
+
+    /// <summary>
     /// Build an image from a directory containing a Dockerfile, streaming the engine's output.
     /// <para>
     /// The context is tarred and sent to the engine, which is why this takes a directory rather

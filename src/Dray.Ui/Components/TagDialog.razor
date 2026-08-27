@@ -1,0 +1,97 @@
+@* Point another tag at an existing image.
+
+   A tag is a name, not a copy: this adds a second label to the same layers and costs nothing on
+   disk. Saying so matters, because "tag" reads like an operation that duplicates something and
+   users hesitate over it. *@
+@inject EngineManager Engine
+
+<Dialog Title="Tag this image" Open="Open" OpenChanged="OpenChanged">
+    <ChildContent>
+        <p class="tag__from muted">
+            <span class="mono">@Image.DisplayName</span>
+        </p>
+
+        <div class="field">
+            <label class="field__label" for="tag-ref">New tag</label>
+            <input id="tag-ref" class="input mono" placeholder="ghcr.io/owner/app:1.2"
+                   @bind="_reference" @bind:event="oninput" @onkeydown="OnKeyDown"
+                   autocomplete="off" spellcheck="false" disabled="@_saving" />
+        </div>
+
+        @if (_problem is { } problem)
+        {
+            <p class="tag__problem" role="alert">@problem</p>
+        }
+        else
+        {
+            <p class="tag__hint muted">
+                A tag is a name, not a copy — this points a second name at the same layers and uses
+                no extra disk. Prefix a registry host to make it pushable there.
+            </p>
+        }
+    </ChildContent>
+    <Footer>
+        <Button Label="Cancel" Variant="ButtonVariant.Ghost" Disabled="_saving"
+                OnClick="() => OpenChanged.InvokeAsync(false)" />
+        <Button Label="Tag" Variant="ButtonVariant.Primary" Busy="_saving"
+                Disabled="@(_saving || _reference.Trim().Length == 0)" OnClick="SubmitAsync" />
+    </Footer>
+</Dialog>
+
+@code {
+    [Parameter, EditorRequired] public ImageSummary Image { get; set; } = default!;
+
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Raised once the engine has accepted the tag, so the list behind can refresh.</summary>
+    [Parameter] public EventCallback OnTagged { get; set; }
+
+    string _reference = "";
+    string? _problem;
+    bool _saving;
+
+    async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_saving && _reference.Trim().Length > 0) await SubmitAsync();
+    }
+
+    async Task SubmitAsync()
+    {
+        var parsed = ImageTag.Parse(_reference.Trim());
+
+        if (parsed.Repository.Length == 0)
+        {
+            _problem = "Write the new name as repository:tag.";
+            return;
+        }
+
+        // A tag identical to one the image already carries would succeed and change nothing, which
+        // reads as the dialog having done nothing.
+        if (Image.Tags.Any(t => string.Equals(t.Display, parsed.Display, StringComparison.Ordinal)))
+        {
+            _problem = "This image already has that tag.";
+            return;
+        }
+
+        _saving = true;
+        _problem = null;
+
+        try
+        {
+            _problem = await Engine.TagImageAsync(Image.Id, parsed.Repository, parsed.Tag);
+
+            if (_problem is null)
+            {
+                await OnTagged.InvokeAsync();
+                await OpenChanged.InvokeAsync(false);
+                _reference = "";
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

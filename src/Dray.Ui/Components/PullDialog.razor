@@ -30,23 +30,7 @@
 
         @if (_layers.Count > 0)
         {
-            <div class="pull__layers">
-                @foreach (var layer in _layers.Values.OrderBy(l => l.Order))
-                {
-                    <div class="pull__layer" @key="layer.Id">
-                        <span class="pull__id mono">@layer.Id</span>
-
-                        <div class="pull__track" role="progressbar"
-                             aria-valuemin="0" aria-valuemax="100"
-                             aria-valuenow="@((int)((layer.Progress.Fraction ?? (layer.Progress.IsComplete ? 1 : 0)) * 100))">
-                            <div class="pull__fill @(layer.Progress.IsComplete ? "is-done" : null)"
-                                 style="width: @(((layer.Progress.Fraction ?? (layer.Progress.IsComplete ? 1 : 0)) * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></div>
-                        </div>
-
-                        <span class="pull__status muted">@layer.Progress.Status</span>
-                    </div>
-                }
-            </div>
+            <LayerProgress Layers="Ordered" />
         }
 
         @if (_done is { } done)
@@ -80,7 +64,10 @@
     /// Layers keyed by id, with the order first seen. The engine reports them out of order and
     /// repeatedly; sorting by arrival keeps a row from jumping around as it updates.
     /// </summary>
-    readonly Dictionary<string, LayerRow> _layers = new(StringComparer.Ordinal);
+    readonly Dictionary<string, PullProgress> _layers = new(StringComparer.Ordinal);
+    readonly List<string> _order = [];
+
+    IReadOnlyList<PullProgress> Ordered => [.. _order.Select(id => _layers[id])];
 
     async Task OnKeyDown(KeyboardEventArgs e)
     {
@@ -96,6 +83,7 @@
         _error = null;
         _done = null;
         _layers.Clear();
+        _order.Clear();
 
         _cts = new CancellationTokenSource();
 
@@ -113,8 +101,8 @@
 
                 if (step.LayerId is { } id)
                 {
-                    if (_layers.TryGetValue(id, out var existing)) existing.Progress = step;
-                    else _layers[id] = new LayerRow(id, _layers.Count, step);
+                    if (!_layers.ContainsKey(id)) _order.Add(id);
+                    _layers[id] = step;
                 }
 
                 StateHasChanged();
@@ -163,12 +151,5 @@
             await cts.CancelAsync();
             cts.Dispose();
         }
-    }
-
-    sealed class LayerRow(string id, int order, PullProgress progress)
-    {
-        public string Id { get; } = id;
-        public int Order { get; } = order;
-        public PullProgress Progress { get; set; } = progress;
     }
 }

@@ -26,6 +26,38 @@ public sealed record ImageTag(string Repository, string Tag)
 
     static readonly string[] Noise = ["docker.io/library/", "docker.io/", "library/"];
 
+    /// <summary>
+    /// The registry this tag pushes to, in the form <c>config.json</c> keys by.
+    /// <para>
+    /// The rule is the Docker CLI's and is not guessable from the shape alone: the first path
+    /// segment is a registry only when it contains a dot or a colon, or is exactly
+    /// <c>localhost</c>. Without that, <c>team/app</c> would push to a registry called "team"
+    /// rather than to Docker Hub, and the credential lookup would find nothing.
+    /// </para>
+    /// </summary>
+    public string Registry
+    {
+        get
+        {
+            var slash = Repository.IndexOf('/');
+            if (slash <= 0) return RegistryEntryDockerHub;
+
+            var head = Repository[..slash];
+
+            return head.Contains('.', StringComparison.Ordinal)
+                   || head.Contains(':', StringComparison.Ordinal)
+                   || head == "localhost"
+                ? head
+                : RegistryEntryDockerHub;
+        }
+    }
+
+    /// <summary>
+    /// Docker Hub's key in <c>config.json</c>. A long legacy URL nobody would recognise, and the
+    /// only string a helper will match for a Hub credential.
+    /// </summary>
+    public const string RegistryEntryDockerHub = "https://index.docker.io/v1/";
+
     /// <summary>Parse <c>registry:5000/team/app:1.2</c> without mistaking the port for a tag.</summary>
     public static ImageTag Parse(string reference)
     {

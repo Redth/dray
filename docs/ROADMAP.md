@@ -357,6 +357,84 @@ Still outstanding: writing files into a container (the CLI copies paths, not str
 attachable shell (its `exec` is a terminal command). Both are reported as unsupported rather than
 half-implemented.
 
+## Phase 8.5 — Composing a container is the hard part
+
+The run dialog and the stack editor are where someone *authors* something, and authoring is
+different from browsing: it is the one place where a text box is the lazy answer. Three multiline
+textareas ask the user to be a parser. This phase replaces them with editors that know what they
+are editing.
+
+**Ports.** A row — host, container, protocol — and an Add button, producing a chip list. Each chip
+removable, each conflict caught as it is added rather than on submit. `RunParser` does not go away:
+pasting `8080:80/udp` into the host field splits it across the fields, so a line from a README still
+works and the tested code still earns its keep.
+
+**Environment, with an explicit secret flag.** Key, value, and a checkbox that marks the value
+hidden everywhere it is ever shown — the detail tab, the inspect panel, a copy action.
+
+`EnvVar.IsSecret` is currently *derived*, from the variable's name and from values carrying inline
+credentials. That heuristic stays as the floor and the flag becomes the override, because both parts
+are load-bearing and each catches what the other misses:
+
+- The heuristic catches what nobody thought to mark. Reading a real stack through Dockhand's API
+  during this design turned up a JWT API key stored with `isSecret: false` — a manual flag nobody
+  had set. Dray's name rule would have masked that one on sight.
+- The flag catches what no heuristic can know. `LICENCE_BLOB` is a secret and does not look like
+  one; `BUILD_KEY_ID` looks like one and is not.
+
+**Where the flag lives** is the design question, and the answer is the engine, not Dray. At create
+time the marked keys are written as a container label — the same place compose keeps its own
+metadata — so the marking survives restarts, is visible to anyone running `inspect`, and needs no
+database on Dray's side. Labels are immutable after creation, so toggling the flag on a container
+that already exists cannot be written back; that case is honest about being a local view preference
+rather than pretending to change the container.
+
+**Mounts, by type.** A type selector first, because the three are genuinely different things and a
+single `source:destination` box hides that:
+
+- **Volume** — a combobox of the volumes that exist, plus creating one inline.
+- **Bind** — a host path with completion as you type and a real folder picker.
+  `IShellBridge.PickFolderAsync` is already there and already used by the file browser.
+- **tmpfs** — a size, and no source at all.
+
+The destination completes too, from the image's declared volumes and from a running container's
+filesystem when there is one to read — Dray can already enumerate a container's directories, and
+this is the same call.
+
+**The image field becomes a real combobox**: local images ranked first, then registry search. That
+merges with Phase 6's outstanding Docker Hub / GHCR search rather than being a second search box —
+the same dropdown, with local results above remote ones.
+
+### The stack's `.env`
+
+Verified against a real Dockhand-managed stack: the convention is a `.env` beside `compose.yaml` in
+the stack's directory, and **nothing in the YAML refers to it**. That is not Dockhand's invention —
+Compose loads `.env` from the project directory automatically and uses it to interpolate `${VAR}`
+anywhere in the compose file. Dray knows that directory already: compose writes it onto every
+container as `com.docker.compose.project.working_dir`.
+
+Two mechanisms get conflated constantly and Dray should not conflate them:
+
+| | reads | affects |
+|---|---|---|
+| `.env` in the project directory | automatic, no YAML | `${VAR}` interpolation **in the compose file** |
+| `env_file:` on a service | declared in YAML | that **container's** environment |
+
+So: an environment panel beside the compose editor, writing the stack's `.env`, with the same
+key/value/secret rows the run dialog uses.
+
+**And the compose editor shows the substitutions inline.** Monaco decorations render the resolved
+value in muted text after each `${VAR}`, so a stack file reads as what it will actually become. A
+variable with nothing behind it gets a warning: Compose substitutes an **empty string** for an
+undefined variable and carries on, which is the quietest way a stack has to break — an image tag
+that becomes `myapp:` or a port that becomes `:80`. Showing that before it is deployed is the whole
+point of the annotation.
+
+**Exit:** nobody has to know a mapping syntax to publish a port · a variable marked secret is masked
+everywhere without exception · a `${VAR}` with nothing behind it is visible before deploy, not after.
+
+---
+
 **Phase 9 — considered, not committed.** Machine lifecycle (creating the VM rather than driving it) ·
 `docker scout` vulnerability surfacing · Swarm · Kubernetes. Kubernetes and pods are explicitly out of
 v1 scope. Each of these is a product decision, not a backlog item.

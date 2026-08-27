@@ -1,0 +1,192 @@
+@* Push an image to its registry.
+
+   The reference decides the registry — `ghcr.io/owner/app:1.2` pushes to ghcr.io, a bare name to
+   Docker Hub — so there is no registry field. Adding one would let the two disagree, and the
+   engine would follow the reference regardless.
+
+   The credential is fetched from the system helper at the moment of the push and never held; see
+   docs/CREDENTIALS.md. Dray does not ask for a password here, because it has nowhere to put one. *@
+@implements IAsyncDisposable
+@inject EngineManager Engine
+@inject RegistryReader Registries
+
+<Dialog Title="Push an image" Open="Open" OpenChanged="OnOpenChanged">
+    <ChildContent>
+        <div class="field">
+            <label class="field__label" for="push-ref">Image</label>
+            <input id="push-ref" class="input mono" placeholder="ghcr.io/owner/app:1.2"
+                   @bind="_reference" @bind:event="oninput" @onkeydown="OnKeyDown"
+                   autocomplete="off" spellcheck="false" disabled="@_pushing" />
+        </div>
+
+        @if (_error is { } error)
+        {
+            <p class="push__error">@error</p>
+        }
+        else if (!_pushing && _layers.Count == 0)
+        {
+            <p class="push__hint muted">
+                Pushing to <span class="mono">@Destination</span>@(_signedInAs is { } who
+                    ? $" as {who}." : ", which you are not signed in to — the registry will decide.")
+                @if (_signedInAs is null)
+                {
+                    <span> Sign in on the Registries page first if it is private.</span>
+                }
+            </p>
+        }
+
+        @if (_layers.Count > 0)
+        {
+            <LayerProgress Layers="Ordered" />
+        }
+
+        @if (_done is { } done)
+        {
+            <p class="push__done">@done</p>
+        }
+    </ChildContent>
+    <Footer>
+        <Button Label="@(_pushing ? "Cancel" : "Close")" Variant="ButtonVariant.Ghost" OnClick="CloseAsync" />
+        <Button Label="@(_pushing ? "Pushing…" : "Push")" Variant="ButtonVariant.Primary"
+                Disabled="@(_pushing || string.IsNullOrWhiteSpace(_reference))"
+                Busy="_pushing" OnClick="StartAsync" />
+    </Footer>
+</Dialog>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>The image to push, pre-filled from the row this was opened on.</summary>
+    [Parameter] public string? Reference { get; set; }
+
+    string _reference = "";
+    string? _error;
+    string? _done;
+    string? _signedInAs;
+    bool _pushing;
+    CancellationTokenSource? _cts;
+
+    readonly Dictionary<string, PullProgress> _layers = new(StringComparer.Ordinal);
+    readonly List<string> _order = [];
+
+    /// <summary>Layers in the order first seen, so a row does not jump around as it updates.</summary>
+    IReadOnlyList<PullProgress> Ordered => [.. _order.Select(id => _layers[id])];
+
+    string Destination => ImageTag.Parse(_reference.Trim()).Registry is { } r
+        && r == ImageTag.RegistryEntryDockerHub ? "Docker Hub" : ImageTag.Parse(_reference.Trim()).Registry;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Reference is { Length: > 0 } reference && _reference.Length == 0) _reference = reference;
+
+        if (Open) await RefreshSignInAsync();
+    }
+
+    /// <summary>
+    /// Who the push will be made as, from the helper's <c>list</c> — which returns usernames and no
+    /// secrets at all. The secret itself is only read at the moment of the push.
+    /// </summary>
+    async Task RefreshSignInAsync()
+    {
+        var registry = ImageTag.Parse(_reference.Trim()).Registry;
+
+        try
+        {
+            var entries = await Registries.ListAsync();
+            _signedInAs = entries.FirstOrDefault(e => RegistryReaderMatches(e.Server, registry))?.Username;
+        }
+        catch (Exception)
+        {
+            // Not knowing who you are signed in as must not stop a push; the registry is the
+            // authority on that and will say so.
+            _signedInAs = null;
+        }
+    }
+
+    static bool RegistryReaderMatches(string a, string b)
+        => string.Equals(a.TrimEnd('/'), b.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+           || a.Contains(b, StringComparison.OrdinalIgnoreCase);
+
+    async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_pushing && !string.IsNullOrWhiteSpace(_reference)) await StartAsync();
+    }
+
+    async Task StartAsync()
+    {
+        var reference = _reference.Trim();
+        if (reference.Length == 0 || _pushing) return;
+
+        _pushing = true;
+        _error = null;
+        _done = null;
+        _layers.Clear();
+        _order.Clear();
+
+        _cts = new CancellationTokenSource();
+
+        try
+        {
+            await foreach (var step in Engine.PushImageAsync(reference, Registries, _cts.Token))
+            {
+                if (step.IsError)
+                {
+                    // The engine reports failures inside the stream rather than by failing the
+                    // request, so an unauthorised push shows here and nowhere else.
+                    _error = step.Error;
+                    break;
+                }
+
+                if (step.LayerId is { } id)
+                {
+                    if (!_layers.ContainsKey(id)) _order.Add(id);
+                    _layers[id] = step;
+                }
+
+                StateHasChanged();
+            }
+
+            if (_error is null) _done = $"Pushed {reference}.";
+        }
+        catch (OperationCanceledException)
+        {
+            _done = "Push cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _pushing = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    async Task CloseAsync()
+    {
+        // Cancelling stops Dray reading the stream; the engine finishes what it started. Saying
+        // otherwise would be a lie, and a half-pushed image is not a state Dray can create.
+        if (_cts is { } cts) await cts.CancelAsync();
+
+        await OpenChanged.InvokeAsync(false);
+    }
+
+    async Task OnOpenChanged(bool open)
+    {
+        if (!open) await CloseAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_cts is { } cts)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+            _cts = null;
+        }
+    }
+}

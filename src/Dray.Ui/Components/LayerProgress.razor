@@ -1,0 +1,36 @@
+@* Per-layer transfer progress, as the engine reports it.
+
+   Not a single bar. A pull or a push is a dozen layers moving at once, and averaging them into one
+   number produces a bar that jumps backwards whenever a new layer starts — which reads as a bug
+   rather than as progress.
+
+   Shared by pull and push because the engine reports both in exactly the same shape: a status per
+   layer, out of order, repeatedly. *@
+
+<div class="layers">
+    @foreach (var layer in Layers)
+    {
+        var fraction = layer.Fraction ?? (layer.IsComplete ? 1 : 0);
+
+        <div class="layers__row" @key="layer.LayerId">
+            <span class="layers__id mono">@layer.LayerId</span>
+
+            <div class="layers__track" role="progressbar"
+                 aria-label="@($"Layer {layer.LayerId}")"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)(fraction * 100))">
+                <div class="layers__fill @(layer.IsComplete ? "is-done" : null)"
+                     style="width: @Percent(fraction)"></div>
+            </div>
+
+            <span class="layers__status muted">@layer.Status</span>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>One entry per layer, already in the order they should stay in.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<PullProgress> Layers { get; set; } = [];
+
+    static string Percent(double fraction)
+        => (fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
+}

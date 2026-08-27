@@ -352,6 +352,29 @@ public sealed class EngineManager : IAsyncDisposable
             yield return step;
     }
 
+    /// <summary>
+    /// Push an image, streaming per-layer progress.
+    /// <para>
+    /// The credential is fetched here, from the system helper, and lives only for the length of
+    /// this call — see <see cref="RegistryReader.GetAsync"/>. A registry with nothing stored
+    /// pushes anonymously, which works for a local registry and fails clearly everywhere else,
+    /// rather than Dray refusing before the registry has had a chance to answer.
+    /// </para>
+    /// </summary>
+    public async IAsyncEnumerable<PullProgress> PushImageAsync(
+        string reference,
+        RegistryReader registries,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) yield break;
+
+        var credential = await registries.FindForAsync(ImageTag.Parse(reference).Registry, ct)
+            .ConfigureAwait(false);
+
+        await foreach (var step in runtime.PushImageAsync(reference, credential, ct).ConfigureAwait(false))
+            yield return step;
+    }
+
     /// <summary>Build an image, streaming the engine's output.</summary>
     public async IAsyncEnumerable<BuildProgress> BuildImageAsync(
         BuildRequest request,

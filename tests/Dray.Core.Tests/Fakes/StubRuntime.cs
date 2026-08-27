@@ -26,6 +26,10 @@ public abstract class StubRuntime : IContainerRuntime
     public virtual Task<string> RunAsync(RunRequest request, CancellationToken ct = default)
         => Task.FromResult("stub");
 
+    public virtual IAsyncEnumerable<PullProgress> PushImageAsync(
+        string reference, RegistryCredential? credential, CancellationToken ct = default)
+        => AsyncEnumerable.Empty<PullProgress>();
+
     public virtual Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
         => Task.CompletedTask;
 

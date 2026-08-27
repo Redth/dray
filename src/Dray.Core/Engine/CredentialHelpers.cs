@@ -53,6 +53,29 @@ public sealed record RegistryEntry(
 }
 
 /// <summary>
+/// One credential, in memory for the length of one engine call.
+/// <para>
+/// Never logged, never rendered, never written anywhere. Its <see cref="ToString"/> is overridden
+/// because a record's generated one prints every property — so a stray interpolation into a log
+/// line or an exception message would print the secret.
+/// </para>
+/// </summary>
+public sealed record RegistryCredential(string Server, string Username, string Secret)
+{
+    public override string ToString() => $"RegistryCredential {{ Server = {Server}, Username = {Username} }}";
+}
+
+/// <summary>What a credential helper's <c>get</c> returns on stdout.</summary>
+internal sealed class HelperCredential
+{
+    [JsonPropertyName("Username")]
+    public string? Username { get; set; }
+
+    [JsonPropertyName("Secret")]
+    public string? Secret { get; set; }
+}
+
+/// <summary>
 /// The shape of <c>~/.docker/config.json</c> that Dray reads.
 /// </summary>
 public sealed class DockerConfigFile
@@ -314,6 +337,65 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
         {
             return $"Could not run {Executable(helper)}: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// Fetch a credential from the helper, for the length of one operation.
+    /// <para>
+    /// <b>The only read path in Dray, and deliberately narrow.</b> docs/CREDENTIALS.md says Dray
+    /// stores no secrets, and it still does not: this returns one, the caller hands it to the
+    /// engine, and nothing keeps it. Every other screen uses <c>list</c>, which returns usernames
+    /// and no secrets at all, precisely so that rendering a table never puts a token in memory.
+    /// </para>
+    /// <para>
+    /// Pushing an image is the one operation that cannot be done without the secret: the engine
+    /// needs an auth header, and there is no way to delegate that to the helper. Anything that can
+    /// be done without calling this must not call it.
+    /// </para>
+    /// </summary>
+    /// <returns>The credential, or null when the helper has none for this registry.</returns>
+    public async Task<RegistryCredential?> GetAsync(string helper, string server, CancellationToken ct = default)
+    {
+        try
+        {
+            var result = await _runner
+                .RunWithInputAsync(Executable(helper), ["get"], server, ct)
+                .ConfigureAwait(false);
+
+            if (result.ExitCode != 0) return null;
+
+            var payload = JsonSerializer.Deserialize<HelperCredential>(result.StandardOutput);
+
+            return payload?.Secret is { Length: > 0 } secret
+                ? new RegistryCredential(server, payload.Username ?? string.Empty, secret)
+                : null;
+        }
+        catch (Exception)
+        {
+            // A helper that is gone or refuses is the same to the caller as one with nothing
+            // stored: the push proceeds anonymously and the registry decides.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The credential for one registry, found by whichever helper is configured for it.
+    /// <para>
+    /// Wraps <see cref="GetAsync"/> with the config lookup, so a caller pushing an image does not
+    /// have to know which helper holds what — the same per-registry-beats-default precedence
+    /// <see cref="ListAsync"/> applies.
+    /// </para>
+    /// </summary>
+    public async Task<RegistryCredential?> FindForAsync(string server, CancellationToken ct = default)
+    {
+        var config = ReadConfig();
+        if (config is null) return null;
+
+        var helper = config.CredHelpers?
+            .FirstOrDefault(kv => SameServer(kv.Key, server)).Value
+            ?? config.CredsStore;
+
+        return helper is null ? null : await GetAsync(helper, server, ct).ConfigureAwait(false);
     }
 
     /// <summary>Remove a credential from the helper's store.</summary>
