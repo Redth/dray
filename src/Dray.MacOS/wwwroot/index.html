@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Dray</title>
+    <base href="/" />
+    <link rel="icon" href="data:," />
+
+    <!-- Everything is local. No CDN, no webfont: the app must render with the network
+         unplugged, and a strict WebView CSP would block it anyway. -->
+    <link rel="stylesheet" href="_content/Dray.Ui/css/app.css" />
+    <!-- Blazor bundles every .razor.css in the app and its RCLs into one file named after the
+         host project. -->
+    <link rel="stylesheet" href="Dray.MacOS.styles.css" />
+
+    <style>
+        /* The WKWebView is transparent so the native window colour shows through; the host
+           replaces --bg with the resolved NSColor before first paint. A background here would
+           paint over the very thing that makes the seam invisible. */
+        html, body {
+            background: transparent;
+        }
+
+        #blazor-error-ui {
+            position: fixed;
+            inset: auto 0 0 0;
+            padding: 12px 16px;
+            background: Canvas;
+            color: CanvasText;
+            border-top: 1px solid GrayText;
+            font: 13px/1.5 -apple-system, system-ui, sans-serif;
+            /* A modal <dialog> lives in the top layer and outranks any z-index, so
+               reaching for a magic number here buys nothing. */
+            z-index: var(--z-tooltip);
+        }
+
+        #dray-error-detail {
+            display: none;
+            max-height: 40vh;
+            margin: 8px 0 0;
+            overflow: auto;
+            white-space: pre-wrap;
+            font: 11px/1.45 ui-monospace, Menlo, monospace;
+            user-select: text;
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+
+    <div id="blazor-error-ui" role="alert" aria-live="assertive" hidden>
+        <span>Dray hit an unhandled error and needs to reload.</span>
+        <a href="." class="reload">Reload</a>
+        <pre id="dray-error-detail"></pre>
+    </div>
+
+    <script>
+        // A WebView has no devtools by default, so an unhandled error otherwise reads as a bare
+        // "something went wrong" with the actual cause only in a console nobody can open.
+        // Debug-only detail, shown in place.
+        (function () {
+            var detail = document.getElementById('dray-error-detail');
+            function show(text) {
+                if (!detail) return;
+                detail.textContent = String(text).slice(0, 4000);
+                detail.style.display = 'block';
+            }
+            window.addEventListener('error', function (e) {
+                show((e.error && (e.error.stack || e.error.message)) || e.message);
+            });
+            window.addEventListener('unhandledrejection', function (e) {
+                var r = e.reason;
+                show((r && (r.stack || r.message)) || r);
+            });
+        })();
+    </script>
+
+    <script src="_framework/blazor.webview.js" autostart="false"></script>
+</body>
+</html>

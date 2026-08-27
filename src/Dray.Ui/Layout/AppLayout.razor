@@ -3,6 +3,9 @@
 @inject IShellState Shell
 @inject ShellCapabilities Caps
 @inject NavigationManager Nav
+@inject IShellReadySignal Ready
+
+<PlatformThemeSync />
 
 <div class="app @(Caps.HasNativeSidebar ? null : "app--webchrome")">
     @if (!Caps.HasNativeSidebar)
@@ -20,6 +23,12 @@
 </div>
 
 @code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Tells the host to drop its native loading overlay and fade the WebView in.
+        if (firstRender) Ready.MarkReady();
+    }
+
     protected override void OnInitialized()
     {
         // Native chrome asks to navigate; the router is the only thing that actually can.

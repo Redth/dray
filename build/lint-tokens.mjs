@@ -50,8 +50,22 @@ const RULES = [
   },
 ];
 
-// `// design-lint-ok: <reason>` on the same or previous line suppresses one finding.
-const ALLOW = /(?:\/\/|\/\*|<!--)\s*design-lint-ok\b/;
+// `design-lint-ok: <reason>` suppresses a finding when it appears on the same line, or anywhere
+// in the contiguous comment block immediately above it — so a justification may span lines
+// without silently losing its effect.
+const ALLOW = /(?:\/\/|\/\*|\*|<!--)\s*design-lint-ok\b/;
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*|<!--|\*\/)/;
+
+function isSuppressed(lines, index) {
+  if (ALLOW.test(lines[index])) return true;
+
+  for (let i = index - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (ALLOW.test(line)) return true;
+    if (!COMMENT_LINE.test(line)) return false;
+  }
+  return false;
+}
 
 function* walk(dir) {
   let entries;
@@ -81,7 +95,7 @@ for (const root of SCAN) {
 
     const lines = readFileSync(file, 'utf8').split('\n');
     lines.forEach((line, i) => {
-      if (ALLOW.test(line) || (i > 0 && ALLOW.test(lines[i - 1]))) return;
+      if (isSuppressed(lines, i)) return;
       for (const rule of RULES) {
         rule.re.lastIndex = 0;
         let m;

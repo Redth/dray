@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Dray.Core/Dray.Core.csproj" />
     <Project Path="src/Dray.DevHost/Dray.DevHost.csproj" />
+    <Project Path="src/Dray.MacOS/Dray.MacOS.csproj" />
     <Project Path="src/Dray.Ui/Dray.Ui.csproj" />
   </Folder>
   <Folder Name="/tests/">

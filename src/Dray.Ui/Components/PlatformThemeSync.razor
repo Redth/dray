@@ -1,0 +1,54 @@
+@* Pushes the host's resolved window colours into the token layer.
+
+   Rendered once by AppLayout. On the browser dev host this is a no-op and prefers-color-scheme
+   decides; on a native head it is what makes the seam invisible (DESIGN.md section 9.1). *@
+@implements IAsyncDisposable
+@inject IPlatformTheme Theme
+@inject ShellCapabilities Caps
+@inject IJSRuntime JS
+
+@code {
+    IJSObjectReference? _module;
+    bool _subscribed;
+
+    protected override void OnInitialized()
+    {
+        if (!Caps.HasNativeSidebar) return;
+
+        Theme.Changed += OnThemeChanged;
+        _subscribed = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !Caps.HasNativeSidebar) return;
+
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+        await ApplyAsync();
+    }
+
+    void OnThemeChanged() => _ = InvokeAsync(ApplyAsync);
+
+    async Task ApplyAsync()
+    {
+        if (_module is null) return;
+
+        var mode = Theme.Current == DrayTheme.Dark ? "dark" : "light";
+        await _module.InvokeVoidAsync("theme.apply", mode, Theme.TokenOverrides());
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_subscribed) Theme.Changed -= OnThemeChanged;
+
+        if (_module is null) return;
+        try
+        {
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The WebView went away first.
+        }
+    }
+}

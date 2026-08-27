@@ -89,11 +89,110 @@ Two GC traps, one per platform, both already solved:
   held in a `List<NSObject>` field. Managed targets are otherwise collected and menus silently die.
 - GTK: a `List<Gtk.Widget> _retainedWidgets` for widgets removed from the header bar.
 
-### 1.6 Persist sidebar width
+### 1.6 Five things that are not in Sherpa's docs, only its source
+
+Each of these cost a debugging cycle here. Together they are the difference between a window that
+works and one that shows a bare "unhandled error" banner with nothing in any log.
+
+**Register `NativeSidebarFlyoutPageHandler` explicitly.** `MacOSFlyoutPage.SetUseNativeSidebar` is
+inert on its own — the default `FlyoutPageHandler` has no `NSSplitViewController` to configure, so
+the flag is read by nobody and you silently get MAUI's own flyout.
+
+```csharp
+builder.ConfigureMauiHandlers(h => h.AddHandler<FlyoutPage, NativeSidebarFlyoutPageHandler>());
+```
+
+**Call both BlazorWebView registrations.** `.AddMacOSBlazorWebView()` registers the platform
+handler; `builder.Services.AddMauiBlazorWebView()` registers the services components resolve. With
+only the first, the app boots and then dies on the first component that injects
+`NavigationManager` — and the failure surfaces as an unobserved task exception, not a startup error.
+
+**Swallow the activation exception.** `MacOSMauiApplication.ApplicationDidBecomeActive` calls
+`IWindow.Activated()` unconditionally and MAUI throws when the window is already active — which it
+is on every re-activation, including the first once the WebView takes focus. The throw crosses back
+into Objective-C, aborts activation, and leaves the Blazor content dead:
+
+```csharp
+[Export("applicationDidBecomeActive:")]
+public new void ApplicationDidBecomeActive(NSNotification n)
+{
+    try { base.ApplicationDidBecomeActive(n); }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("already activated")) { }
+}
+```
+
+**Resolve `NSColor`s inside the effective appearance.** AppKit's semantic colours are dynamic:
+outside a drawing context they resolve against the *default* (light) appearance no matter what the
+app is showing. Skip this and switching to dark repaints the pills and text but leaves every surface
+on its light value — light-grey text on a white panel inside a dark window.
+
+```csharp
+NSApplication.SharedApplication.EffectiveAppearance.PerformAsCurrentDrawingAppearance(() => { … });
+```
+
+**Give the mount point a height.** `#app { height: 100% }`. Without it `.app { height: 100% }`
+resolves against an auto-height parent, the shell stops at its content, and bare window background
+shows below — a seam in exactly the place the whole approach is trying to hide one.
+
+### 1.7 Install global exception handlers on day one
+
+A WebView app has no visible stack trace. An unhandled exception renders as a bare banner with the
+cause in a console nobody can open, and MAUI's own logging does not catch the paths that matter.
+Three handlers in `Main` cover them, and they found every bug above:
+
+```csharp
+AppDomain.CurrentDomain.UnhandledException += …
+TaskScheduler.UnobservedTaskException += …          // where Blazor DI failures land
+ObjCRuntime.Runtime.MarshalManagedException += …    // managed exceptions crossing into Obj-C
+```
+
+Pair them with a `window.onerror` / `unhandledrejection` hook in `index.html` that prints into the
+error banner, so a JS-side failure is visible in the window rather than only in a screenshot of it.
+
+### 1.8 Persist sidebar width
 
 Read it from `NativeSidebarFlyoutPageHandler.SplitViewController.SplitView.ArrangedSubviews[0]`,
 save on `NSApplication.WillTerminateNotification`, and **cache the split view reference before
 terminate** — the handler chain is already torn down by the time the notification fires.
+
+---
+
+## 1.9 Driving the app: MAUI DevFlow
+
+There is no devtools in a WebView and no screen-recording permission in a headless session, so the
+app is otherwise unobservable. DevFlow gives screenshots, logs and CDP access to the Blazor DOM.
+
+Both packages are Debug-only and **neither self-starts** — without these two calls the agent never
+listens:
+
+```csharp
+builder.AddMauiDevFlowAgent();        // on the MauiAppBuilder, not Services
+builder.AddMauiBlazorDevFlowTools();
+```
+
+The port comes from `MauiDevFlowPort` in `Directory.Build.props`; the CLI defaults to 9223, so pass
+it explicitly:
+
+```bash
+dotnet maui devflow -ap 9241 ui status
+dotnet maui devflow -ap 9241 ui screenshot --output shot.png --overwrite
+dotnet maui devflow -ap 9241 theme set dark
+```
+
+`dotnet maui devflow logs` reads a shared store and can return a *different* app's history — check
+the log entries actually belong to this app before trusting them.
+
+## 1.10 Environment gotchas that block a first build
+
+None of these are Dray's code, and all four cost time:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `NU1103` naming only feeds you can see | A machine-level config disabled nuget.org; `<clear/>` on `packageSources` does not undo that | `<disabledPackageSources><clear /></disabledPackageSources>` |
+| `NU1507` with central package management | More than one feed configured | One feed, or package source mapping |
+| `CS0246` on every platform type | Platform packages ship only a `net10.0-macos26.0` lib, so the bare `net10.0-macos` TFM references nothing | Target `net10.0-macos26.0` |
+| `requires Xcode 26.0. The current version is 26.6` | The SDK pack pins an exact Xcode and rejects newer ones too | `<ValidateXcodeVersion>false</ValidateXcodeVersion>` |
+| `IL1015: Unrecognized command-line option: 'Support/dotnetup/…'` | The SDK appends an unquoted link-attributes path; `dotnetup` installs under `~/Library/Application Support` | Requote `_ExtraTrimmerArgs` before `PrepareForILLink` (see `Dray.MacOS.csproj`) |
 
 ---
 

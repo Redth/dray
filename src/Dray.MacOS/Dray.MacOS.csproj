@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <!-- The platform packages ship only a net10.0-macos26.0 lib, so the bare `net10.0-macos`
+         TFM resolves to an older platform version and silently references nothing. -->
+    <TargetFramework>net10.0-macos26.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Dray.MacOS</RootNamespace>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <EnableDefaultCssItems>false</EnableDefaultCssItems>
+    <EnableDefaultRazorItems>false</EnableDefaultRazorItems>
+    <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+
+    <ApplicationTitle>Dray</ApplicationTitle>
+    <ApplicationId>codes.redth.dray</ApplicationId>
+    <ApplicationDisplayVersion>$(AppVersion)</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+
+    <EnableHardenedRuntime>true</EnableHardenedRuntime>
+
+    <!-- The macOS SDK pack (26.0.11017) pins itself to Xcode 26.0 exactly, and the check fails on
+         a NEWER Xcode as readily as an older one. Locally that means 26.6 is rejected despite
+         being fine. CI pins its own Xcode, so this only affects developer machines.
+         Revisit when a pack matching the installed Xcode ships. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
+    <PackageReference Include="Microsoft.Maui.Platforms.MacOS" />
+    <PackageReference Include="Microsoft.Maui.Platforms.MacOS.BlazorWebView" />
+    <PackageReference Include="Microsoft.Maui.Platforms.MacOS.Essentials" />
+
+    <!-- MAUI DevFlow: screenshots and Blazor DOM snapshots of the running app, driven by
+         `dotnet maui devflow`. Debug only; never shipped. -->
+    <PackageReference Include="Microsoft.Maui.DevFlow.Agent" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Microsoft.Maui.DevFlow.Blazor" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Condition="'$(Configuration)' == 'Debug'" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Dray.Ui/Dray.Ui.csproj" />
+  </ItemGroup>
+
+  <!--
+    The macOS SDK appends a link-attributes argument to the trimmer command line without quoting
+    the path.
+    When the .NET installation lives under a path containing a space, ILLink splits the argument
+    and fails with IL1015. `dotnetup` installs to ~/Library/Application Support/dotnetup, so this
+    hits any developer using it.
+
+    Requote the argument between the SDK computing it and ILLink consuming it. Harmless where the
+    path has no space, so it is unconditional rather than machine-specific.
+    Remove once the SDK quotes it (dotnet/macios).
+  -->
+  <Target Name="_QuoteTrimmerLinkAttributesPath" BeforeTargets="PrepareForILLink">
+    <PropertyGroup>
+      <_ExtraTrimmerArgs
+        Condition="$(_ExtraTrimmerArgs.Contains(' ')) And !$(_ExtraTrimmerArgs.Contains('--link-attributes &quot;'))"
+        >$(_ExtraTrimmerArgs.Replace('--link-attributes ', '--link-attributes &quot;').Replace('.LinkDescription.xml', '.LinkDescription.xml&quot;'))</_ExtraTrimmerArgs>
+    </PropertyGroup>
+  </Target>
+
+</Project>

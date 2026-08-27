@@ -18,6 +18,13 @@ body {
   margin: 0;
 }
 
+/* The mount point a host renders into. Without an explicit height here, `.app { height: 100% }`
+   resolves against an auto-height parent and the shell stops at its content, leaving bare window
+   background below it — visible as a seam on any head that mounts into a div. */
+#app {
+  height: 100%;
+}
+
 body {
   /* The platform's own UI face. A shared webfont is the single loudest tell that the content
      area is a website embedded in a native window (DESIGN.md section 3). Nothing is downloaded. */

@@ -8,6 +8,8 @@ builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 // The browser draws its own sidebar and toolbar; there is no native chrome here.
 builder.Services.AddSingleton(ShellCapabilities.Web(debug: true));
 builder.Services.AddScoped<IShellState, ShellState>();
+builder.Services.AddSingleton<IShellReadySignal, NoOpShellReadySignal>();
+builder.Services.AddSingleton<IPlatformTheme, GeneratedPaletteTheme>();
 
 var app = builder.Build();
 

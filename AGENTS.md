@@ -52,6 +52,17 @@ dotnet build                           # all projects
 dotnet test                            # all tests
 
 dotnet run --project src/Dray.DevHost --launch-profile dray   # http://localhost:5199
+
+# macOS head. `dotnet run` does not work for MAUI apps; run the built binary directly so
+# stdout/stderr are visible.
+dotnet build src/Dray.MacOS
+src/Dray.MacOS/bin/Debug/net10.0-macos26.0/osx-arm64/Dray.app/Contents/MacOS/Dray.MacOS
+
+# Drive and inspect the running app (Debug builds only). The CLI defaults to port 9223;
+# Dray's agent is on MauiDevFlowPort from Directory.Build.props.
+dotnet maui devflow -ap 9241 ui status
+dotnet maui devflow -ap 9241 ui screenshot --output shot.png --overwrite
+dotnet maui devflow -ap 9241 theme set dark
 ```
 
 **`Dray.DevHost` runs the whole UI in a browser** with `ShellCapabilities.Web`, so components can
@@ -86,3 +97,8 @@ message if either is absent.
 
 Both themes, every time. Attach light and dark screenshots to any PR touching UI, plus a greyscale
 check on state pills. "It looks right on my machine in dark mode" is half the work.
+
+Use `Dray.DevHost` for fast component iteration and **MAUI DevFlow for anything about the native
+shell** — the seam, the sidebar, theme handoff. A WebView has no devtools, so a failure there is
+invisible without it; `docs/NATIVE-SHELL.md` §1.9 has the commands and §1.7 the exception handlers
+that make errors surface at all.

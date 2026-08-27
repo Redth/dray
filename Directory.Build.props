@@ -14,6 +14,10 @@
     <Version>$(AppVersion)</Version>
     <InformationalVersion>$(AppVersion)+$(AppCommitSha)</InformationalVersion>
 
+    <!-- MAUI DevFlow agent port. The `dotnet maui devflow` CLI reads this from the project, so
+         run it from src/Dray.MacOS (or pass the port explicitly). -->
+    <MauiDevFlowPort>9241</MauiDevFlowPort>
+
     <Authors>Jon Dick</Authors>
     <Product>Dray</Product>
     <RepositoryUrl>https://github.com/Redth/dray</RepositoryUrl>
