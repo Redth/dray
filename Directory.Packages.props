@@ -26,6 +26,12 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.5" />
   </ItemGroup>
 
+  <ItemGroup Label="Docker">
+    <!-- The maintained fork. dotnet/Docker.DotNet has had no development for years. -->
+    <PackageVersion Include="Docker.DotNet.Enhanced" Version="4.3.3" />
+    <PackageVersion Include="Docker.DotNet.Enhanced.X509" Version="4.3.3" />
+  </ItemGroup>
+
   <ItemGroup Label="Runtime">
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />

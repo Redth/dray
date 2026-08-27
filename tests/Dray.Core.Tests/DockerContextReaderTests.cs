@@ -142,6 +142,19 @@ public class DockerContextReaderTests
     }
 
     [Fact]
+    public void TwoPathsToTheSameSocketAreOneHost()
+    {
+        // Real case: podman publishes at ~/.local/share/.../podman.sock and symlinks
+        // /var/run/docker.sock to it. Comparing raw strings listed one engine twice.
+        var source = new FakeConfigSource()
+            .WithContext("a", "unix:///real.sock")
+            .WithContext("b", "unix:///alias.sock")
+            .WithSocketSymlink("/alias.sock", "/real.sock");
+
+        Assert.Single(new DockerContextReader(source).Discover());
+    }
+
+    [Fact]
     public void ADanglingSocketSymlinkIsNotOfferedAsAHost()
     {
         // Real case from the development machine: podman leaves /var/run/docker.sock pointing at
@@ -174,6 +187,7 @@ sealed class FakeConfigSource : IDockerConfigSource
 
     readonly Dictionary<string, string> _files = [];
     readonly HashSet<string> _sockets = [];
+    readonly Dictionary<string, string> _symlinks = [];
     readonly HashSet<string> _dirs = [Root, $"{Root}/contexts", $"{Root}/contexts/meta"];
     readonly Dictionary<string, string> _env = [];
 
@@ -186,6 +200,9 @@ sealed class FakeConfigSource : IDockerConfigSource
     public bool FileExists(string path) => _files.ContainsKey(Normalize(path));
 
     public bool SocketExists(string path) => _sockets.Contains(Normalize(path));
+
+    public string ResolveSocketPath(string path)
+        => _symlinks.GetValueOrDefault(Normalize(path), Normalize(path));
 
     public bool DirectoryExists(string path) => _dirs.Contains(Normalize(path));
 
@@ -203,6 +220,14 @@ sealed class FakeConfigSource : IDockerConfigSource
     public FakeConfigSource WithLiveSocket(string path)
     {
         _sockets.Add(Normalize(path));
+        return this;
+    }
+
+    /// <summary>A socket path that is really a symlink to another.</summary>
+    public FakeConfigSource WithSocketSymlink(string from, string to)
+    {
+        _symlinks[Normalize(from)] = Normalize(to);
+        _sockets.Add(Normalize(from));
         return this;
     }
 

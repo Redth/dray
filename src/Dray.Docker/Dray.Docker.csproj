@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Dray.Docker</RootNamespace>
+    <Description>
+      IContainerRuntime over the Docker Engine API. One implementation of the seam; Apple's
+      container framework can be another without touching a page.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Docker.DotNet.Enhanced" />
+    <PackageReference Include="Docker.DotNet.Enhanced.X509" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Dray.Core/Dray.Core.csproj" />
+  </ItemGroup>
+
+</Project>

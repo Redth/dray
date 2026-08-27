@@ -25,6 +25,18 @@ public interface IDockerConfigSource
     /// </summary>
     bool SocketExists(string path);
 
+    /// <summary>
+    /// The canonical path a socket resolves to, following symlinks. Returns <paramref name="path"/>
+    /// unchanged when it is not a link.
+    /// <para>
+    /// Needed for deduplication: podman publishes its API at
+    /// <c>~/.local/share/containers/podman/machine/podman.sock</c> and symlinks
+    /// <c>/var/run/docker.sock</c> to it, so the two paths are one engine. Comparing raw strings
+    /// would list it twice in the host picker.
+    /// </para>
+    /// </summary>
+    string ResolveSocketPath(string path);
+
     bool DirectoryExists(string path);
 
     IEnumerable<string> EnumerateDirectories(string path);
@@ -67,6 +79,18 @@ public sealed class SystemDockerConfigSource : IDockerConfigSource
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             return false;
+        }
+    }
+
+    public string ResolveSocketPath(string path)
+    {
+        try
+        {
+            return File.ResolveLinkTarget(path, returnFinalTarget: true)?.FullName ?? path;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return path;
         }
     }
 
@@ -135,13 +159,13 @@ public sealed class DockerContextReader(IDockerConfigSource source)
                 Origin = HostOrigin.Environment,
                 IsCurrent = true,
             });
-            seen.Add(envEndpoint.Raw);
+            seen.Add(Identity(envEndpoint));
             currentClaimed = true;
         }
 
         foreach (var context in ReadContexts(configDir))
         {
-            if (!seen.Add(context.Endpoint.Raw)) continue;
+            if (!seen.Add(Identity(context.Endpoint))) continue;
 
             // Only mark a context current when nothing in the environment has overridden it.
             var isCurrent = !currentClaimed
@@ -156,7 +180,7 @@ public sealed class DockerContextReader(IDockerConfigSource source)
         // context says otherwise, and it never appears in the contexts directory.
         foreach (var probed in ProbeWellKnown())
         {
-            if (seen.Add(probed.Endpoint.Raw)) hosts.Add(probed);
+            if (seen.Add(Identity(probed.Endpoint))) hosts.Add(probed);
         }
 
         // Nothing is current yet if the selected context was missing; fall back to the first host
@@ -166,6 +190,15 @@ public sealed class DockerContextReader(IDockerConfigSource source)
 
         return hosts;
     }
+
+    /// <summary>
+    /// What makes two endpoints the same engine. Unix sockets resolve through symlinks first;
+    /// everything else is its own raw string.
+    /// </summary>
+    string Identity(DockerEndpoint endpoint)
+        => endpoint is { Scheme: EndpointScheme.Unix, Path: { } path }
+            ? "unix:" + source.ResolveSocketPath(path)
+            : endpoint.Raw;
 
     string? ReadCurrentContextName(string? configDir)
     {
