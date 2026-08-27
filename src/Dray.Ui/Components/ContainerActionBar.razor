@@ -1,0 +1,64 @@
+@* The actions available for one container, already filtered by its state.
+
+   While an action is in flight the row says so ("Stopping") rather than optimistically showing the
+   state the user asked for — the event stream reports what actually happened. *@
+@inject EngineManager Engine
+@inject IShellBridge Shell
+
+@if (Engine.Store.PendingAction(Container.Id) is { } pending)
+{
+    <span class="pending">
+        <span class="pending__spinner" aria-hidden="true"></span>
+        @ContainerActions.PendingLabel(pending)…
+    </span>
+}
+else
+{
+    <div class="actions">
+        @foreach (var action in ContainerActions.For(Container.State))
+        {
+            var captured = action;
+            <Button Label="@ContainerActions.Label(captured)"
+                    Icon="@IconFor(captured)"
+                    IconOnly="true"
+                    Variant="ButtonVariant.Ghost"
+                    Danger="@ContainerActions.IsDestructive(captured)"
+                    OnClick="() => RunAsync(captured)" />
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ContainerSummary Container { get; set; } = default!;
+
+    /// <summary>Raised with a sentence when the engine refuses. Null is never raised.</summary>
+    [Parameter] public EventCallback<string> OnError { get; set; }
+
+    static IconRef IconFor(ContainerAction action) => action switch
+    {
+        ContainerAction.Start => IconRef.Play,
+        ContainerAction.Stop => IconRef.Stop,
+        ContainerAction.Restart => IconRef.Restart,
+        ContainerAction.Pause => IconRef.Pause,
+        ContainerAction.Unpause => IconRef.Play,
+        ContainerAction.Kill => IconRef.Warning,
+        ContainerAction.Remove => IconRef.Trash,
+        _ => IconRef.More,
+    };
+
+    async Task RunAsync(ContainerAction action)
+    {
+        if (ContainerActions.IsDestructive(action))
+        {
+            var (title, body) = ContainerActions.Confirmation(action, Container.Name);
+
+            var answer = await Shell.ConfirmDestructiveAsync(
+                new DestructiveConfirm(title, body, ContainerActions.Label(action)));
+
+            if (answer != ConfirmResult.Confirm) return;
+        }
+
+        if (await Engine.PerformAsync(Container.Id, action) is { } error)
+            await OnError.InvokeAsync(error);
+    }
+}

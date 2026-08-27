@@ -167,6 +167,69 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             .OrderBy(p => p.HostPort)];
     }
 
+    public async Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
+    {
+        var containers = Client.Containers;
+
+        try
+        {
+            switch (action)
+            {
+                case ContainerAction.Start:
+                    await containers.StartContainerAsync(containerId, new ContainerStartParameters(), ct).ConfigureAwait(false);
+                    break;
+
+                case ContainerAction.Stop:
+                    await containers.StopContainerAsync(containerId, new ContainerStopParameters(), ct).ConfigureAwait(false);
+                    break;
+
+                case ContainerAction.Restart:
+                    await containers.RestartContainerAsync(containerId, new ContainerRestartParameters(), ct).ConfigureAwait(false);
+                    break;
+
+                case ContainerAction.Pause:
+                    await containers.PauseContainerAsync(containerId, ct).ConfigureAwait(false);
+                    break;
+
+                case ContainerAction.Unpause:
+                    await containers.UnpauseContainerAsync(containerId, ct).ConfigureAwait(false);
+                    break;
+
+                case ContainerAction.Kill:
+                    await containers.KillContainerAsync(containerId, new ContainerKillParameters(), ct).ConfigureAwait(false);
+                    break;
+
+                case ContainerAction.Remove:
+                    await containers.RemoveContainerAsync(containerId, new ContainerRemoveParameters(), ct).ConfigureAwait(false);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown container action.");
+            }
+        }
+        catch (DockerApiException ex)
+        {
+            throw new RuntimeConnectionException(DescribeActionFailure(action, ex), ex);
+        }
+    }
+
+    /// <summary>
+    /// What went wrong, in terms of the action the user asked for rather than the HTTP status.
+    /// </summary>
+    static string DescribeActionFailure(ContainerAction action, DockerApiException ex) => (int)ex.StatusCode switch
+    {
+        // The engine rejects an action that does not apply — starting something already running.
+        // ContainerActions.AppliesTo should have prevented offering it, so this means the row was
+        // stale when the user clicked.
+        304 => "The container is already in that state.",
+
+        404 => "That container no longer exists.",
+        409 when action == ContainerAction.Remove => "The container is still running. Stop it first.",
+        409 => "The engine could not do that right now.",
+        500 => "The engine reported an internal error.",
+        _ => $"The engine returned {(int)ex.StatusCode}.",
+    };
+
     public async Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
     {
         var info = await Client.System.GetSystemInfoAsync(ct).ConfigureAwait(false);

@@ -84,6 +84,16 @@ public interface IContainerRuntime : IAsyncDisposable
 
     Task<IReadOnlyList<ContainerSummary>> ListContainersAsync(bool includeStopped = true, CancellationToken ct = default);
 
+    /// <summary>
+    /// Perform one action on one container.
+    /// <para>
+    /// Returning does not mean the container has reached the new state — it means the engine
+    /// accepted the request. What actually happened arrives on the event stream, which is the
+    /// same path an action taken in a terminal takes.
+    /// </para>
+    /// </summary>
+    Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default);
+
     Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default);
 
     Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default);

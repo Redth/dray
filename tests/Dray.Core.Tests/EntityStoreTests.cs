@@ -223,6 +223,60 @@ public class EntityStoreTests
         Assert.All(store.Containers, c => Assert.True(c.Status.IsStale));
     }
 
+    // ---------------------------------------------------------------- pending actions
+
+    [Fact]
+    public void AnyLifecycleEventClearsThePendingAction()
+    {
+        var store = new EntityStore();
+        store.Reset([Container("a", "web")]);
+        store.MarkPending("a", ContainerAction.Stop);
+
+        store.Apply(Event("die", "a", ("exitCode", "0")));
+
+        Assert.Null(store.PendingAction("a"));
+    }
+
+    [Fact]
+    public void AnUnexpectedOutcomeStillClearsThePendingAction()
+    {
+        // The user asked to stop and the container started instead — something else acted on it.
+        // The engine has spoken either way, so the row must stop claiming to be Stopping.
+        var store = new EntityStore();
+        store.Reset([Container("a", "web", DockerState.Exited)]);
+        store.MarkPending("a", ContainerAction.Stop);
+
+        store.Apply(Event("start", "a"));
+
+        Assert.Null(store.PendingAction("a"));
+        Assert.Equal(DockerState.Running, store.Find("a")!.State);
+    }
+
+    [Fact]
+    public void RemovingAContainerDropsItsPendingAction()
+    {
+        var store = new EntityStore();
+        store.Reset([Container("a", "web")]);
+        store.MarkPending("a", ContainerAction.Remove);
+
+        store.Apply(Event("destroy", "a"));
+
+        Assert.Null(store.PendingAction("a"));
+    }
+
+    [Fact]
+    public void ResetDropsEveryPendingAction()
+    {
+        // A host switch or reconnect invalidates anything that was in flight against the old one.
+        var store = new EntityStore();
+        store.Reset([Container("a", "web")]);
+        store.MarkPending("a", ContainerAction.Stop);
+
+        store.Reset([Container("a", "web")]);
+
+        Assert.Null(store.PendingAction("a"));
+    }
+
     // ---------------------------------------------------------------- change pulse
 
     [Fact]

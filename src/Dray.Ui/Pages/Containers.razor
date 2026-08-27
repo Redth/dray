@@ -5,6 +5,16 @@
 
 <EngineScope>
     <div class="page page--flush">
+        @if (_error is { } error)
+        {
+            <div class="banner" role="alert">
+                <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                <span>@error</span>
+                <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost"
+                        OnClick="() => _error = null" />
+            </div>
+        }
+
         @if (Engine.HasNoHosts)
         {
             <NoEngine />
@@ -54,6 +64,7 @@
                             <th>Ports</th>
                             <th>Stack</th>
                             <th class="num">Uptime</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -86,6 +97,9 @@
                                 </td>
                                 <td>@(c.Stack ?? "—")</td>
                                 <td class="num muted">@Humanize.Since(c.Since)</td>
+                                <td class="cell-actions">
+                                    <ContainerActionBar Container="c" OnError="ShowError" />
+                                </td>
                             </tr>
                         }
                     </tbody>
@@ -99,6 +113,7 @@
     static readonly string[] StateFilters = ["All", "Running", "Stopped", "Unhealthy"];
 
     string _search = "";
+    string? _error;
     int _stateFilter;
     string? _selected;
 
@@ -170,6 +185,8 @@
     }
 
     void Nav(string route) => Navigation.NavigateTo(route);
+
+    void ShowError(string message) => _error = message;
 
     void HandleSearch(string text) => _search = text;
 

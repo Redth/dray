@@ -7,6 +7,11 @@
 
 <PlatformThemeSync />
 
+@if (!Caps.HasNativeDialogs)
+{
+    <ConfirmHost />
+}
+
 <div class="app @(Caps.HasNativeSidebar ? null : "app--webchrome")">
     @if (!Caps.HasNativeSidebar)
     {

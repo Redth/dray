@@ -1,3 +1,5 @@
+using Dray.Core.Model;
+
 namespace Dray.Core.Engine;
 
 /// <summary>
@@ -130,6 +132,43 @@ public sealed class EngineManager : IAsyncDisposable
         Selected = updated;
         _hosts[updated.Id] = updated;
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Ask the engine to do something to a container.
+    /// <para>
+    /// The row shows the action in flight until an event settles it, rather than optimistically
+    /// flipping to the state the user asked for. An optimistic state is a guess, and a wrong guess
+    /// leaves the row quietly lying about the container.
+    /// </para>
+    /// </summary>
+    /// <returns>Null on success, or a sentence explaining what went wrong.</returns>
+    public async Task<string?> PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return "Not connected to an engine.";
+
+        Store.MarkPending(containerId, action);
+
+        try
+        {
+            await runtime.PerformAsync(containerId, action, ct).ConfigureAwait(false);
+
+            // Deliberately not clearing the pending mark here: the request was accepted, not
+            // completed. The event stream reports what actually happened, and that is what
+            // clears it — the same path an action taken in a terminal follows.
+            return null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Store.ClearPending(containerId);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // No event is coming, so nothing else will clear this.
+            Store.ClearPending(containerId);
+            return RuntimeEventPump.Describe(ex);
+        }
     }
 
     /// <summary>

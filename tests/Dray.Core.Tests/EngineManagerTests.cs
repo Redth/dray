@@ -177,6 +177,59 @@ public class EngineManagerTests
         Assert.Equal("beta", manager.Hosts[^1].Id);
     }
 
+    // ---------------------------------------------------------------- actions
+
+    [Fact]
+    public async Task AnActionMarksTheRowPendingUntilAnEventSettlesIt()
+    {
+        // Dray shows "Stopping" rather than optimistically flipping to Exited. An optimistic
+        // state is a guess, and a wrong guess leaves the row quietly lying.
+        var (reader, factory) = Setup(("alpha", "unix:///a.sock"));
+        factory.Containers["unix:///a.sock"] = [Container("1", "web")];
+
+        await using var manager = new EngineManager(reader, factory);
+        await manager.InitializeAsync(TestContext.Current.CancellationToken);
+        Assert.True(await WaitFor(() => manager.Store.Count == 1));
+
+        var error = await manager.PerformAsync("1", ContainerAction.Stop, TestContext.Current.CancellationToken);
+
+        Assert.Null(error);
+        Assert.Equal(ContainerAction.Stop, manager.Store.PendingAction("1"));
+
+        // The container is still Running: the request was accepted, not completed.
+        Assert.Equal(DockerState.Running, manager.Store.Find("1")!.State);
+    }
+
+    [Fact]
+    public async Task AFailedActionClearsThePendingMarkAndExplainsWhy()
+    {
+        // No event is coming, so nothing else would ever clear it and the row would say
+        // "Stopping" forever.
+        var (reader, factory) = Setup(("alpha", "unix:///a.sock"));
+        factory.Containers["unix:///a.sock"] = [Container("1", "web")];
+
+        await using var manager = new EngineManager(reader, factory);
+        await manager.InitializeAsync(TestContext.Current.CancellationToken);
+        Assert.True(await WaitFor(() => manager.Store.Count == 1));
+
+        factory.Created[0].ActionFailure = new SocketException((int)SocketError.ConnectionRefused);
+        var error = await manager.PerformAsync("1", ContainerAction.Stop, TestContext.Current.CancellationToken);
+
+        Assert.Equal("The engine is not running.", error);
+        Assert.Null(manager.Store.PendingAction("1"));
+    }
+
+    [Fact]
+    public async Task AnActionWithNoConnectionFailsWithoutThrowing()
+    {
+        var (reader, factory) = Setup();
+
+        await using var manager = new EngineManager(reader, factory);
+        await manager.InitializeAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("Not connected to an engine.", await manager.PerformAsync("1", ContainerAction.Stop, TestContext.Current.CancellationToken));
+    }
+
     // ---------------------------------------------------------------- re-discovery
 
     [Fact]
@@ -242,6 +295,18 @@ sealed class TrackedRuntime(string endpoint) : IContainerRuntime
 
     public Task<IReadOnlyList<ContainerSummary>> ListContainersAsync(bool includeStopped = true, CancellationToken ct = default)
         => Task.FromResult(Containers);
+
+    public List<(string Id, ContainerAction Action)> Performed { get; } = [];
+
+    public Exception? ActionFailure { get; set; }
+
+    public Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
+    {
+        if (ActionFailure is not null) throw ActionFailure;
+
+        Performed.Add((containerId, action));
+        return Task.CompletedTask;
+    }
 
     public Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
         => Task.FromResult(new SystemInfo(0, 0, 0, 0, null, null));

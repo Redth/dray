@@ -7,3 +7,40 @@
 .cell-name .mono {
     font-size: var(--text-xs);
 }
+
+.cell-actions {
+    width: 1%;
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* An engine refusal, shown where the user was working rather than as a modal — a failed Stop is
+   information, not a decision. */
+.banner {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    background: var(--danger-tint);
+    color: var(--danger-ink);
+    border-bottom: 1px solid var(--line);
+    font-size: var(--text-sm);
+}
+
+.banner span {
+    flex: 1 1 auto;
+}
+
+/* Actions are revealed on hover, on keyboard focus, and for the selected row, so a dense table
+   stays scannable without the controls being pointer-only. The selected row keeps them visible so
+   a keyboard user always has a stable target.
+
+   This rule lives here rather than in ContainerActionBar's own stylesheet because it selects on
+   the <tr>, which belongs to this component — scoped CSS attributes would not match from there. */
+.table tbody tr:not(:hover):not([aria-selected="true"]) ::deep .btn:not(:focus-visible) {
+    opacity: 0;
+}
+
+.table ::deep .btn {
+    transition: opacity var(--motion-fast) var(--motion-ease);
+}

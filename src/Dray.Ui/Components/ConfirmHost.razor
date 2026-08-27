@@ -1,0 +1,52 @@
+@* Renders the destructive confirmation for hosts without a native dialog. Mounted once by the
+   layout; the native heads use an NSAlert sheet instead and never render this. *@
+@implements IDisposable
+@inject WebConfirmService Confirms
+
+@if (Confirms.Request is { } request)
+{
+    <Dialog Title="@request.Title" Open="true" OpenChanged="OnOpenChanged">
+        <ChildContent>
+            <p>@request.Body</p>
+            @if (request.TypeToConfirm is { } phrase)
+            {
+                <div class="field" style="margin-top: var(--s3)">
+                    <label class="field__label" for="confirm-phrase">
+                        Type <strong>@phrase</strong> to confirm
+                    </label>
+                    <input id="confirm-phrase" class="input" @bind="_typed" @bind:event="oninput" autocomplete="off" />
+                </div>
+            }
+        </ChildContent>
+        <Footer>
+            <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => Answer(ConfirmResult.Cancel)" />
+            <Button Label="@request.ConfirmLabel"
+                    Variant="ButtonVariant.Primary"
+                    Danger="true"
+                    Disabled="@(request.TypeToConfirm is { } p && _typed != p)"
+                    OnClick="() => Answer(ConfirmResult.Confirm)" />
+        </Footer>
+    </Dialog>
+}
+
+@code {
+    string _typed = "";
+
+    protected override void OnInitialized() => Confirms.Changed += OnChanged;
+
+    void OnChanged()
+    {
+        _typed = "";
+        InvokeAsync(StateHasChanged);
+    }
+
+    // Escape and the backdrop both mean cancel.
+    void OnOpenChanged(bool open)
+    {
+        if (!open) Answer(ConfirmResult.Cancel);
+    }
+
+    void Answer(ConfirmResult result) => Confirms.Answer(result);
+
+    public void Dispose() => Confirms.Changed -= OnChanged;
+}

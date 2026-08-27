@@ -1,6 +1,7 @@
 using Dray.Core.Engine;
 using Dray.Core.Shell;
 using Dray.Docker;
+using Dray.Ui.Services;
 using Dray.DevHost.Components;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +20,10 @@ builder.Services.AddSingleton<IDockerConfigSource, SystemDockerConfigSource>();
 builder.Services.AddSingleton<DockerContextReader>();
 builder.Services.AddSingleton<IContainerRuntimeFactory, DockerRuntimeFactory>();
 builder.Services.AddSingleton<EngineManager>();
+
+// No native chrome here, so confirmations are rendered by ConfirmHost.
+builder.Services.AddScoped<WebConfirmService>();
+builder.Services.AddScoped<IShellBridge, WebShellBridge>();
 
 var app = builder.Build();
 

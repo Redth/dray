@@ -301,6 +301,14 @@ sealed class FakeRuntime : IContainerRuntime
         return Task.FromResult(Containers);
     }
 
+    public List<(string Id, ContainerAction Action)> Performed { get; } = [];
+
+    public Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
+    {
+        Performed.Add((containerId, action));
+        return Task.CompletedTask;
+    }
+
     public Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
         => Task.FromResult(new SystemInfo(0, 0, 0, 0, "fake", "1.0"));
 

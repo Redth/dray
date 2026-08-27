@@ -34,6 +34,9 @@ public sealed class EntityStore
     /// <summary>Ids whose row changed recently, so the view can pulse them once (DESIGN.md section 7).</summary>
     readonly ConcurrentDictionary<string, DateTimeOffset> _recentlyChanged = new(StringComparer.Ordinal);
 
+    /// <summary>Actions the user has started that the engine has not yet confirmed by an event.</summary>
+    readonly ConcurrentDictionary<string, ContainerAction> _pending = new(StringComparer.Ordinal);
+
     readonly TimeProvider _time;
 
     public EntityStore(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
@@ -57,6 +60,33 @@ public sealed class EntityStore
 
     public ContainerSummary? Find(string id) => _containers.GetValueOrDefault(id);
 
+    /// <summary>
+    /// The action in flight for a container, if any.
+    /// <para>
+    /// Dray shows "Stopping" rather than optimistically flipping the row to Exited. An optimistic
+    /// state is a guess, and a guess that turns out wrong — a stop that fails, a container that
+    /// restarts itself — leaves the user looking at a row that quietly lies. The pulse clears when
+    /// the engine's event says what really happened.
+    /// </para>
+    /// </summary>
+    public ContainerAction? PendingAction(string id)
+        => _pending.TryGetValue(id, out var action) ? action : null;
+
+    /// <summary>Record that the user has asked for something and the engine has not answered yet.</summary>
+    public void MarkPending(string id, ContainerAction action)
+    {
+        _pending[id] = action;
+        Changed?.Invoke(new StoreChange(StoreChangeKind.Updated, id));
+    }
+
+    /// <summary>Clear a pending action — the engine answered, or the request failed.</summary>
+    public void ClearPending(string id)
+    {
+        if (!_pending.TryRemove(id, out _)) return;
+
+        Changed?.Invoke(new StoreChange(StoreChangeKind.Updated, id));
+    }
+
     /// <summary>True while the row should carry the "just changed" pulse.</summary>
     public bool WasRecentlyChanged(string id)
         => _recentlyChanged.TryGetValue(id, out var at)
@@ -67,6 +97,7 @@ public sealed class EntityStore
     {
         _containers.Clear();
         _recentlyChanged.Clear();
+        _pending.Clear();
 
         foreach (var c in containers) _containers[c.Id] = c;
 
@@ -108,6 +139,7 @@ public sealed class EntityStore
         if (!_containers.TryRemove(id, out _)) return;
 
         _recentlyChanged.TryRemove(id, out _);
+        _pending.TryRemove(id, out _);
         Changed?.Invoke(new StoreChange(StoreChangeKind.Removed, id));
     }
 
@@ -129,6 +161,10 @@ public sealed class EntityStore
             Remove(e.Id);
             return false;
         }
+
+        // The engine has spoken, so whatever the user was waiting for is settled — including when
+        // the outcome is not the one they asked for.
+        _pending.TryRemove(e.Id, out _);
 
         var existing = _containers.GetValueOrDefault(e.Id);
         if (existing is null)
