@@ -1,0 +1,269 @@
+@page "/stacks/{Name}/logs"
+@implements IAsyncDisposable
+@inject EngineManager Engine
+@inject IShellBridge Shell
+@inject NavigationManager Nav
+@inject ShellCapabilities Caps
+
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
+<EngineScope>
+    <div class="detail">
+        <div class="detail__head">
+            <div class="detail__title">
+                @if (!Caps.HasNativeToolbar)
+                {
+                    <BackButton To="/stacks" Label="All stacks" />
+                }
+
+                <h2>@StackName</h2>
+            </div>
+
+            <div class="detail__meta">
+                @* The colour key is the point of this screen: with six services interleaved, the
+                   only way to read it is to be able to tell them apart at a glance. Each is a
+                   toggle, so one noisy service can be silenced without losing the others. *@
+                @foreach (var service in Services)
+                {
+                    var captured = service;
+                    <button type="button"
+                            class="slog__key @(_muted.Contains(captured) ? "is-muted" : null)"
+                            style="--key: @ColourFor(captured)"
+                            title="@(_muted.Contains(captured) ? $"Show {captured}" : $"Hide {captured}")"
+                            @onclick="() => Toggle(captured)">
+                        <span class="slog__swatch" aria-hidden="true"></span>
+                        @captured
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div class="detail__card card">
+            <div class="detail__body">
+                <div class="slog">
+                    <div class="slog__bar chrome">
+                        <label class="toggle">
+                            <input type="checkbox" @bind="_showTimestamps" />
+                            <span>Timestamps</span>
+                        </label>
+
+                        <label class="toggle">
+                            <input type="checkbox" @bind="_wrap" />
+                            <span>Wrap</span>
+                        </label>
+
+                        <input class="input slog__filter" type="search" placeholder="Filter lines"
+                               @bind="_filter" @bind:event="oninput" />
+
+                        <span class="slog__count muted">@Filtered.Count / @_lines.Count</span>
+
+                        <Button Label="Copy" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost" IconOnly="true"
+                                OnClick="CopyAsync" />
+                    </div>
+
+                    <div class="slog__body mono @(_wrap ? "is-wrapped" : null)">
+                        @if (_lines.Count == 0)
+                        {
+                            <div class="slog__empty muted">
+                                @(Services.Count == 0
+                                    ? "This stack has no running containers."
+                                    : "Waiting for output…")
+                            </div>
+                        }
+                        else
+                        {
+                            @foreach (var line in Filtered)
+                            {
+                                <div class="slog__line" @key="line.Key" style="--key: @ColourFor(line.Service)">
+                                    <span class="slog__service">@line.Service</span>
+
+                                    @if (_showTimestamps && line.Line.Timestamp is { } ts)
+                                    {
+                                        <span class="slog__ts">@ts.ToLocalTime().ToString("HH:mm:ss.fff")</span>
+                                    }
+
+                                    <span class="slog__text @(line.Line.Stream == LogStream.StdErr ? "is-stderr" : null)">@line.Line.Text</span>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</EngineScope>
+
+@code {
+    /// <summary>
+    /// How many distinct service colours exist.
+    /// <para>
+    /// The values themselves live in design/tokens.json as <c>--key-1</c>…<c>--key-8</c>, generated
+    /// and contrast-verified in both themes like every other colour. They are deliberately not the
+    /// semantic palette: these mean "a different service", not "good" or "broken", and reusing
+    /// danger red for a service called <c>api</c> would make every one of its lines look like an
+    /// error.
+    /// </para>
+    /// <para>
+    /// Past eight services the colours repeat. Adding more hues that people cannot reliably tell
+    /// apart would be worse than an honest repeat.
+    /// </para>
+    /// </summary>
+    const int KeyCount = 8;
+
+    [Parameter] public string Name { get; set; } = "";
+
+    string StackName => Uri.UnescapeDataString(Name);
+
+    readonly List<Entry> _lines = [];
+    readonly Dictionary<string, CancellationTokenSource> _streams = new(StringComparer.Ordinal);
+    readonly HashSet<string> _muted = new(StringComparer.Ordinal);
+
+    string _filter = "";
+    bool _showTimestamps = true;
+    bool _wrap;
+    long _sequence;
+    string? _startedFor;
+
+    StackSummary? Stack => Engine.Stacks.FirstOrDefault(s => s.Name == StackName);
+
+    IReadOnlyList<string> Services => Stack?.Services.Select(s => s.Name).ToList() ?? [];
+
+    /// <summary>
+    /// Merged, in arrival order rather than by timestamp.
+    /// <para>
+    /// Sorting by the engine's timestamps would be more truthful and much worse to read: containers
+    /// disagree about the clock by milliseconds, so a sort makes lines from one service shuffle
+    /// into the middle of another's stack trace. Arrival order keeps each service's output
+    /// contiguous, which is what makes an interleaved log readable at all.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<Entry> Filtered
+    {
+        get
+        {
+            IEnumerable<Entry> q = _lines.Where(l => !_muted.Contains(l.Service));
+
+            if (!string.IsNullOrWhiteSpace(_filter))
+            {
+                var needle = _filter.Trim();
+                q = q.Where(l => l.Line.Text.Contains(needle, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return [.. q];
+        }
+    }
+
+    /// <summary>The CSS variable holding this service's key colour.</summary>
+    string ColourFor(string service)
+    {
+        var index = Services.ToList().IndexOf(service);
+        return $"var(--key-{((index < 0 ? 0 : index) % KeyCount) + 1})";
+    }
+
+    void Toggle(string service)
+    {
+        if (!_muted.Add(service)) _muted.Remove(service);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_startedFor == StackName) return;
+
+        await StopAllAsync();
+        _startedFor = StackName;
+        _lines.Clear();
+
+        StartStreams();
+    }
+
+    /// <summary>
+    /// One stream per running container in the stack.
+    /// <para>
+    /// The engine has no endpoint that multiplexes a project's logs — <c>compose logs</c> opens one
+    /// per container too. Doing it here rather than shelling out means it works on a host with no
+    /// compose installed, and the lines arrive already parsed.
+    /// </para>
+    /// </summary>
+    void StartStreams()
+    {
+        if (Stack is not { } stack) return;
+
+        foreach (var service in stack.Services)
+        {
+            foreach (var replica in service.Replicas.Where(r => r.State == DockerState.Running))
+            {
+                if (_streams.ContainsKey(replica.Id)) continue;
+
+                var cts = new CancellationTokenSource();
+                _streams[replica.Id] = cts;
+
+                // Labelled by service rather than container: with one replica they are the same,
+                // and with three the service is what the reader is following.
+                _ = PumpAsync(service.Name, replica.Id, cts.Token);
+            }
+        }
+    }
+
+    async Task PumpAsync(string service, string containerId, CancellationToken ct)
+    {
+        try
+        {
+            var options = new LogOptions(Follow: true, Tail: 200, Timestamps: true);
+
+            await foreach (var line in Engine.StreamLogsAsync(containerId, options, ct))
+            {
+                _lines.Add(new Entry(_sequence++, service, line));
+
+                // Bounded. Six services at a hundred lines a second is how a log view turns into a
+                // memory leak.
+                if (_lines.Count > 5000) _lines.RemoveRange(0, _lines.Count - 5000);
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            // The container stopped, or the engine dropped the connection. The other services keep
+            // streaming; one ending is not the view failing.
+        }
+    }
+
+    async Task CopyAsync()
+    {
+        var text = string.Join(
+            '\n',
+            Filtered.Select(l => _showTimestamps && l.Line.Timestamp is { } ts
+                ? $"{l.Service} {ts.ToLocalTime():HH:mm:ss.fff} {l.Line.Text}"
+                : $"{l.Service} {l.Line.Text}"));
+
+        await Shell.WriteClipboardAsync(text);
+    }
+
+    async Task StopAllAsync()
+    {
+        foreach (var cts in _streams.Values)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+        }
+
+        _streams.Clear();
+    }
+
+    PageChrome Chrome => new(
+        $"{StackName} logs",
+        Subtitle: Engine.Selected?.Name,
+        Back: new ChromeBack("back", "All stacks"));
+
+    void HandleAction(string id)
+    {
+        if (id == "back") Nav.NavigateTo("/stacks");
+    }
+
+    public async ValueTask DisposeAsync() => await StopAllAsync();
+
+    sealed record Entry(long Key, string Service, LogLine Line);
+}

@@ -1,0 +1,223 @@
+@page "/images/{Id}"
+@inject EngineManager Engine
+@inject IShellBridge Shell
+@inject NavigationManager Nav
+@inject ShellCapabilities Caps
+
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
+<EngineScope>
+    <div class="detail">
+        <div class="detail__head">
+            <div class="detail__title">
+                @if (!Caps.HasNativeToolbar)
+                {
+                    <BackButton To="/images" Label="All images" />
+                }
+
+                <h2>@(Image?.DisplayName ?? "Image")</h2>
+
+                @if (Image is { IsDangling: true })
+                {
+                    <StatePill Status="DanglingStatus" />
+                }
+            </div>
+
+            <div class="detail__meta mono muted">
+                @if (Image is { } image)
+                {
+                    <span>@image.ShortId</span>
+                    <span>@Humanize.Bytes(image.SizeBytes)</span>
+
+                    @if (image.Created is { } created)
+                    {
+                        <span>built @Humanize.Since(created) ago</span>
+                    }
+                }
+            </div>
+        </div>
+
+        <div class="detail__card card">
+            <div class="detail__body">
+                @if (_error is { } error)
+                {
+                    <div class="page">
+                        <EmptyState Icon="IconRef.Warning" Title="Could not read this image" Body="@error">
+                            <Actions>
+                                <Button Label="Try again" Icon="IconRef.Refresh" OnClick="LoadAsync" />
+                            </Actions>
+                        </EmptyState>
+                    </div>
+                }
+                else if (Image is not { } current)
+                {
+                    <div class="page page--flush">
+                        <Skeleton Width="40%" />
+                        <Skeleton Width="65%" />
+                    </div>
+                }
+                else
+                {
+                    <div class="page page--flush">
+                        <section class="panel">
+                            <div class="panel__head">
+                                <h3 class="panel__title">Tags</h3>
+                                <span class="muted">@current.Tags.Count</span>
+                            </div>
+
+                            @if (current.Tags.Count == 0)
+                            {
+                                <p class="img__note muted">
+                                    Nothing points at this image. It is usually a previous build that has since
+                                    been replaced, and it is what <span class="mono">prune</span> removes.
+                                </p>
+                            }
+                            else
+                            {
+                                <dl class="kv">
+                                    @foreach (var tag in current.Tags)
+                                    {
+                                        <dt class="mono">@tag.ShortRepository</dt>
+                                        <dd class="mono">@tag.Tag</dd>
+                                    }
+                                </dl>
+                            }
+                        </section>
+
+                        <section class="panel">
+                            <div class="panel__head">
+                                <h3 class="panel__title">Layers</h3>
+
+                                @if (_layers is { } known)
+                                {
+                                    <span class="muted">
+                                        @known.Count · @known.Count(l => l.IsEmpty) carry no data
+                                    </span>
+                                }
+                            </div>
+
+                            @if (_layers is not { } layers)
+                            {
+                                <div class="page page--flush"><Skeleton Width="70%" /><Skeleton Width="55%" /></div>
+                            }
+                            else
+                            {
+                                @* Newest first, which is how the engine returns them and the order
+                                   someone debugging a build reads in: the last instruction is the
+                                   one that just changed. *@
+                                <table class="table img__layers">
+                                    <thead>
+                                        <tr><th class="num">Size</th><th>Instruction</th><th class="num">Age</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var layer in layers)
+                                        {
+                                            <tr @key="@($"{layer.Id}:{layer.Created}:{layer.SizeBytes}")"
+                                                class="@(layer.IsEmpty ? "is-empty" : null)">
+                                                <td class="num mono">
+                                                    @(layer.IsEmpty ? "—" : Humanize.Bytes(layer.SizeBytes))
+                                                </td>
+                                                @* Clamped, and expandable. A real RUN line can be
+                                                   two thousand characters of chained shell, and
+                                                   letting one row fill the screen buries the
+                                                   nineteen layers around it. *@
+                                                <td class="mono img__instruction @(_expanded.Contains(layer.Id) ? "is-open" : null)"
+                                                    title="Click to show the whole instruction"
+                                                    @onclick="() => Toggle(layer.Id)">@layer.Instruction</td>
+                                                <td class="num muted">
+                                                    @(layer.Created is { } c ? Humanize.Since(c) : "—")
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </section>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</EngineScope>
+
+@code {
+    static readonly ContainerStatus DanglingStatus = new(StateTone.Warn, "○", "Dangling");
+
+    [Parameter] public string Id { get; set; } = "";
+
+    IReadOnlyList<ImageSummary>? _images;
+    IReadOnlyList<ImageLayer>? _layers;
+    string? _error;
+    string? _loadedFor;
+
+    ImageSummary? Image
+    {
+        get
+        {
+            var id = Uri.UnescapeDataString(Id);
+
+            return _images?.FirstOrDefault(i => i.Id == id)
+                // Links from the list carry the full id, but a hand-typed or copied short id
+                // should still resolve rather than showing "not found".
+                ?? _images?.FirstOrDefault(i => i.ShortId.StartsWith(id, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>Layer ids whose full instruction is shown. Keyed by id so it survives a re-render.</summary>
+    readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
+
+    void Toggle(string layerId)
+    {
+        if (!_expanded.Add(layerId)) _expanded.Remove(layerId);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == Id) return;
+
+        _loadedFor = Id;
+        await LoadAsync();
+    }
+
+    async Task LoadAsync()
+    {
+        _error = null;
+        _layers = null;
+
+        try
+        {
+            // The list is what resolves the id to a name and size; there is no single-image
+            // endpoint that carries what the header shows.
+            _images = await Engine.ListImagesAsync();
+
+            if (Image is { } image) _layers = await Engine.GetImageHistoryAsync(image.Id);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    PageChrome Chrome => new(
+        Image?.DisplayName ?? "Image",
+        Subtitle: Engine.Selected?.Name,
+        Actions:
+        [
+            ChromeAction.Secondary("copy", "Copy ID", IconRef.Copy),
+        ],
+        Back: new ChromeBack("back", "All images"));
+
+    async Task HandleAction(string id)
+    {
+        switch (id)
+        {
+            case "back":
+                Nav.NavigateTo("/images");
+                break;
+
+            case "copy" when Image is { } image:
+                await Shell.WriteClipboardAsync(image.Id);
+                break;
+        }
+    }
+}

@@ -1,7 +1,310 @@
 @page "/images"
+@inject EngineManager Engine
+@inject IShellBridge Shell
+@inject PruneService Prune
 
-<PageChromeScope Chrome="@(new PageChrome("Images"))" />
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="s => _search = s" OnFilter="HandleFilter" />
 
-<div class="page">
-    <EmptyState Icon="IconRef.Image" Title="Images arrive in phase 4" Body="Layer history, pull with per-layer progress, and a prune that previews exactly what it will reclaim before you confirm." />
-</div>
+<EngineScope>
+    <div class="page page--flush">
+        @if (_notice is { } notice)
+        {
+            <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+                <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                <span>@notice</span>
+                <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost"
+                        OnClick="() => _notice = null" />
+            </div>
+        }
+
+        @if (Engine.HasNoHosts)
+        {
+            <NoEngine />
+        }
+        else if (_error is { } error)
+        {
+            <EmptyState Icon="IconRef.Warning" Title="Could not list images" Body="@error">
+                <Actions>
+                    <Button Label="Try again" Icon="IconRef.Refresh" OnClick="LoadAsync" />
+                </Actions>
+            </EmptyState>
+        }
+        else if (_images is null)
+        {
+            <div class="stack-v">
+                @for (var i = 0; i < 6; i++)
+                {
+                    <Skeleton Width="@($"{45 + (i * 11 % 40)}%")" />
+                }
+            </div>
+        }
+        else if (Visible.Count == 0)
+        {
+            <EmptyState Icon="IconRef.Image"
+                        Title="@(_search.Length > 0 ? "No images match" : "No images")"
+                        Body="@(_search.Length > 0
+                            ? "Nothing here matches the current search."
+                            : "This engine has no images. Pull one to get started.")">
+                <Actions>
+                    <Button Label="Pull an image…" Icon="IconRef.Pull" Variant="ButtonVariant.Primary"
+                            OnClick="() => _pulling = true" />
+                </Actions>
+            </EmptyState>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Image</th>
+                            <th>Tag</th>
+                            <th>ID</th>
+                            <th class="num">Size</th>
+                            <th>Used by</th>
+                            <th class="num">Created</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <Virtualize Items="Visible" Context="image" ItemSize="42" OverscanCount="6" SpacerElement="tr">
+                            <tr @key="@($"{image.Id}:{image.Tags.FirstOrDefault()?.Display}")"
+                                class="@(image.IsDangling ? "is-dangling" : null)">
+                                <td>
+                                    <div class="cell-name">
+                                        <a href="@($"/images/{Uri.EscapeDataString(image.Id)}")">
+                                            @(image.Tags.Count > 0 ? image.Tags[0].ShortRepository : "untagged")
+                                        </a>
+
+                                        @if (image.Tags.Count > 1)
+                                        {
+                                            @* Several tags on one image is normal — :latest and a
+                                               version usually point at the same bytes. *@
+                                            <span class="muted">+@(image.Tags.Count - 1) more tags</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="mono">@(image.Tags.Count > 0 ? image.Tags[0].Tag : "—")</td>
+                                <td class="mono muted">@image.ShortId</td>
+                                @* An engine that does not measure image size gets an em dash, not
+                                   "0 B" — a measured zero and an unknown are different answers. *@
+                                <td class="num mono">
+                                    @(image.SizeReported ? Humanize.Bytes(image.SizeBytes) : "—")
+                                </td>
+                                <td>
+                                    @if (image.IsInUse is true)
+                                    {
+                                        <span>@image.ContainerCount container@(image.ContainerCount == 1 ? "" : "s")</span>
+                                    }
+                                    else if (image.IsDangling)
+                                    {
+                                        <StatePill Status="DanglingStatus" />
+                                    }
+                                    else if (image.IsInUse is false)
+                                    {
+                                        <span class="muted">nothing</span>
+                                    }
+                                    else
+                                    {
+                                        @* The engine did not count. "nothing" would be a claim it
+                                           never made, and the one that makes Remove look safe. *@
+                                        <span class="muted">—</span>
+                                    }
+                                </td>
+                                <td class="num muted">@(image.Created is { } c ? Humanize.Since(c) : "—")</td>
+                                <td class="cell-actions">
+                                    <div class="row-actions">
+                                        @* The whole point of having an image. Offered only on a
+                                           tagged one: run takes a reference, and a dangling image
+                                           has none to give. *@
+                                        @if (!image.IsDangling)
+                                        {
+                                            <Button Label="@($"Run {image.DisplayName}")" Icon="IconRef.Play"
+                                                    IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                    OnClick="() => _runFrom = image.Tags[0].Display" />
+                                        }
+
+                                        <Button Label="@($"Copy ID of {image.DisplayName}")" Icon="IconRef.Copy"
+                                                IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                OnClick="() => Shell.WriteClipboardAsync(image.Id)" />
+
+                                        <Button Label="@($"Remove {image.DisplayName}")" Icon="IconRef.Trash"
+                                                IconOnly="true" Variant="ButtonVariant.Ghost" Danger="true"
+                                                OnClick="() => RemoveAsync(image)" />
+                                    </div>
+                                </td>
+                            </tr>
+                        </Virtualize>
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    @if (_runFrom is { } runFrom)
+    {
+        @* Keyed on the reference so opening it for a second image rebuilds the form rather than
+           leaving the first image's ports and environment behind. *@
+        <RunDialog @key="runFrom" Image="runFrom" Open="true"
+                   OpenChanged="open => _runFrom = open ? runFrom : null" />
+    }
+
+    @if (_pulling)
+    {
+        <PullDialog Open="true" OpenChanged="open => _pulling = open" OnPulled="LoadAsync" />
+    }
+
+    @if (_buildDialog)
+    {
+        <BuildDialog Open="true" OpenChanged="open => _buildDialog = open" OnBuilt="LoadAsync" />
+    }
+</EngineScope>
+
+@code {
+    static readonly string[] DanglingFilters = ["All images", "Tagged only", "Dangling only"];
+
+    static readonly ContainerStatus DanglingStatus = new(StateTone.Warn, "○", "Dangling");
+
+    IReadOnlyList<ImageSummary>? _images;
+    string? _error;
+    string? _notice;
+    bool _noticeOk;
+    string _search = "";
+    int _danglingFilter;
+    bool _pulling;
+
+    /// <summary>The image reference the run dialog was opened for, or null when it is closed.</summary>
+    string? _runFrom;
+    bool _buildDialog;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    List<ImageSummary> Visible
+    {
+        get
+        {
+            if (_images is null) return [];
+
+            IEnumerable<ImageSummary> q = _images;
+
+            q = _danglingFilter switch
+            {
+                1 => q.Where(i => !i.IsDangling),
+                2 => q.Where(i => i.IsDangling),
+                _ => q,
+            };
+
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                var needle = _search.Trim();
+                q = q.Where(i =>
+                    i.Tags.Any(t => t.Display.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                    || i.Id.Contains(needle, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return [.. q];
+        }
+    }
+
+    async Task LoadAsync()
+    {
+        _error = null;
+
+        try
+        {
+            _images = await Engine.ListImagesAsync();
+        }
+        catch (Exception ex)
+        {
+            _images = null;
+            _error = ex.Message;
+        }
+    }
+
+    async Task RemoveAsync(ImageSummary image)
+    {
+        var inUse = image.IsInUse is true;
+
+        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+            $"Remove {image.DisplayName}?",
+            inUse
+                // Forcing here would break a running container, so Dray declines rather than
+                // offering a button whose consequence is somewhere else entirely.
+                ? "A container is still using this image. Remove the container first."
+                : image.SizeReported
+                    ? $"The image is deleted. Pulling it again downloads {Humanize.Bytes(image.SizeBytes)}."
+
+                    // IsInUse is null on an engine that does not count containers per image, so
+                    // Dray cannot promise nothing is using this. Saying so beats implying it is
+                    // safe and letting the engine refuse a moment later.
+                    : "The image is deleted. Pulling it again downloads it in full. This engine "
+                      + "does not say whether a container is using it, so the removal may be refused.",
+            "Remove"));
+
+        if (answer != ConfirmResult.Confirm || inUse) return;
+
+        if (await Engine.RemoveImageAsync(image.Id) is { } failure) Notify(failure, ok: false);
+        else Notify($"Removed {image.DisplayName}.", ok: true);
+
+        await LoadAsync();
+    }
+
+    void Notify(string message, bool ok)
+    {
+        _notice = message;
+        _noticeOk = ok;
+    }
+
+    PageChrome Chrome => new(
+        "Images",
+        Subtitle: _images is null
+            ? Engine.Selected?.Name
+            : _images.All(i => i.SizeReported)
+                ? $"{_images.Count} · {Humanize.Bytes(_images.Sum(i => i.UniqueBytes))} on {Engine.Selected?.Name}"
+
+                // A total built from unmeasured images would be a number nobody could act on.
+                : $"{_images.Count} on {Engine.Selected?.Name}",
+        Search: new ChromeSearch("Filter images", _search),
+        Actions:
+        [
+            ChromeAction.Primary("pull", "Pull…", IconRef.Pull),
+            ChromeAction.Secondary("build", "Build…", IconRef.Build),
+            ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh),
+            ChromeAction.Destructive("prune", "Prune dangling", IconRef.Trash),
+        ],
+        Filters:
+        [
+            new ChromeFilter("dangling", "Show", [.. DanglingFilters.Select(f => new ChromeFilterOption(f))], _danglingFilter),
+        ]);
+
+    void HandleFilter((string FilterId, int Index) change)
+    {
+        if (change.FilterId == "dangling") _danglingFilter = change.Index;
+    }
+
+    async Task HandleAction(string id)
+    {
+        switch (id)
+        {
+            case "refresh":
+                await LoadAsync();
+                break;
+
+            case "pull":
+                _pulling = true;
+                break;
+
+            case "build":
+                _buildDialog = true;
+                break;
+
+            case "prune":
+                if (await Prune.RunAsync(PruneKind.Images) is { } outcome)
+                {
+                    Notify(outcome.Message, outcome.Ok);
+                    await LoadAsync();
+                }
+                break;
+        }
+    }
+}

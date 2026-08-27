@@ -61,14 +61,19 @@ public enum ListingMethod
 }
 
 /// <summary>The contents of one directory, and how Dray got them.</summary>
+/// <param name="Note">
+/// Why this listing looks the way it does, when that needs saying — which route was taken, or why
+/// it stopped early. Explanatory, never a signal: a note is attached to most archive listings, so
+/// inferring truncation from its presence would mark every one of them incomplete.
+/// </param>
+/// <param name="IsTruncated">True when the listing is incomplete — the archive path hit its budget.</param>
 public sealed record DirectoryListing(
     string Path,
     IReadOnlyList<FileEntry> Entries,
     ListingMethod Method,
-    string? Note = null)
+    string? Note = null,
+    bool IsTruncated = false)
 {
-    /// <summary>True when the listing is incomplete — the archive path stopped at its budget.</summary>
-    public bool IsTruncated => Note is not null;
 
     /// <summary>Directories first, then files, each alphabetically. What a file browser should do.</summary>
     public IReadOnlyList<FileEntry> Sorted =>

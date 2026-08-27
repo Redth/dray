@@ -1,0 +1,438 @@
+@* Browsing a filesystem, wherever it lives.
+
+   Deliberately transport-agnostic: it is given three delegates and never learns whether it is
+   looking at a container's rootfs or a volume mounted into a throwaway helper. Those are the same
+   screen with the same affordances, and building them twice would guarantee they drifted. *@
+@implements IAsyncDisposable
+@inject IShellBridge Shell
+@inject ShellCapabilities Caps
+
+<div class="fb">
+    <div class="fb__bar chrome">
+        <Button Label="Up" Icon="IconRef.FolderUp" Variant="ButtonVariant.Ghost" IconOnly="true"
+                Disabled="@(FileEntry.ParentOf(_path) is null)" OnClick="GoUpAsync" />
+
+        <nav class="fb__crumbs" aria-label="Path">
+            @foreach (var (label, target) in Crumbs)
+            {
+                <button type="button" class="fb__crumb @(target == _path ? "is-current" : null)"
+                        @onclick="() => NavigateAsync(target)">@label</button>
+
+                @if (target != _path)
+                {
+                    <span class="fb__sep" aria-hidden="true">/</span>
+                }
+            }
+        </nav>
+
+        <span class="fb__spacer"></span>
+
+        @if (_dirty)
+        {
+            <span class="fb__dirty" title="Save or revert before leaving this file">Unsaved changes</span>
+        }
+
+        @if (_listing is { } listing)
+        {
+            <span class="muted fb__count">@listing.Entries.Count items</span>
+        }
+
+        @* Both need a real file dialog, so they exist only where the host has one. A web head
+           would show two buttons that silently do nothing. *@
+        @if (Caps.HasNativeDialogs)
+        {
+            @if (_open is { } openFile)
+            {
+                <Button Label="Download" Icon="IconRef.Pull" Variant="ButtonVariant.Ghost"
+                        OnClick="() => DownloadAsync(openFile.Path)" />
+            }
+
+            @if (CanWrite)
+            {
+                <Button Label="Upload" Icon="IconRef.Push" Variant="ButtonVariant.Ghost"
+                        OnClick="UploadAsync" />
+            }
+        }
+
+        <Button Label="Refresh" Icon="IconRef.Refresh" Variant="ButtonVariant.Ghost" IconOnly="true"
+                OnClick="() => LoadAsync(_path, force: true)" />
+    </div>
+
+    <div class="fb__split @(_open is not null ? "is-split" : null)">
+        <div class="fb__list">
+            @if (_blocked is { } blocked)
+            {
+                <div class="banner" role="alert">
+                    <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                    <span>@blocked</span>
+                </div>
+            }
+
+            @if (_error is { } error)
+            {
+                <EmptyState Icon="IconRef.Warning" Title="Cannot read that folder" Body="@error">
+                    <Actions>
+                        <Button Label="Go up" Icon="IconRef.FolderUp" OnClick="GoUpAsync"
+                                Disabled="@(FileEntry.ParentOf(_path) is null)" />
+                    </Actions>
+                </EmptyState>
+            }
+            else if (_loading && _listing is null)
+            {
+                <div class="fb__loading">
+                    @for (var i = 0; i < 8; i++)
+                    {
+                        <Skeleton Width="@($"{40 + (i * 7 % 45)}%")" />
+                    }
+                </div>
+            }
+            else if (_listing is { Entries.Count: 0, Note: { Length: > 0 } reason })
+            {
+                @* An engine that could not read the directory returns no entries *and* a reason.
+                   Rendering "this really is empty" over that reason would state as fact the one
+                   thing the engine explicitly declined to tell us — and a stopped container on an
+                   engine with no offline file access hits this every time. *@
+                <EmptyState Icon="IconRef.Warning" Title="Cannot read this folder" Body="@reason">
+                    <Actions>
+                        <Button Label="Try again" Icon="IconRef.Refresh" OnClick="() => LoadAsync(_path, force: true)" />
+                    </Actions>
+                </EmptyState>
+            }
+            else if (_listing is { Entries.Count: 0 })
+            {
+                <EmptyState Icon="IconRef.Folder" Title="This folder is empty"
+                            Body="Nothing here. Hidden files are shown, so this really is empty." />
+            }
+            else if (_listing is { } current)
+            {
+                <table class="table fb__table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th class="num">Size</th>
+                            <th>Mode</th>
+                            <th class="num">Modified</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in current.Sorted)
+                        {
+                            <tr @key="entry.Path"
+                                class="@(entry.Path == _open?.Path ? "is-selected" : null)"
+                                @onclick="() => ActivateAsync(entry)">
+                                <td>
+                                    <div class="fb__name">
+                                        <Icon Name="@IconFor(entry)" Size="IconSize.Sm" />
+                                        <span>@entry.Name</span>
+
+                                        @if (entry.LinkTarget is { } target)
+                                        {
+                                            <span class="muted mono fb__link">→ @target</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="num mono muted">@(entry.IsDirectory ? "—" : Humanize.Bytes(entry.Size))</td>
+                                <td class="mono muted fb__mode">@(entry.Mode ?? "—")</td>
+                                <td class="num muted">@(entry.Modified is { } m ? Humanize.Since(m) : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                @if (current.Note is { } note)
+                {
+                    <p class="note muted">
+                        <Icon Name="@(current.IsTruncated ? IconRef.Warning : IconRef.Info)" Size="IconSize.Sm" />
+                        <span>@note</span>
+                    </p>
+                }
+            }
+        </div>
+
+        @if (_open is { } file)
+        {
+            <div class="fb__editor">
+                @if (file.CanEdit)
+                {
+                    <CodeEditor File="file" ReadOnly="!CanWrite" OnSave="SaveAsync" OnClose="CloseFile"
+                                OnDirtyChanged="d => _dirty = d" />
+                }
+                else
+                {
+                    <div class="fb__refusal">
+                        <EmptyState Icon="IconRef.File"
+                                    Title="@RefusalTitle(file)"
+                                    Body="@RefusalBody(file)">
+                            <Actions>
+                                <Button Label="Close" Icon="IconRef.Close" OnClick="CloseFile" />
+                            </Actions>
+                        </EmptyState>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>List one directory.</summary>
+    [Parameter, EditorRequired] public Func<string, CancellationToken, Task<DirectoryListing>> ListAsync { get; set; } = default!;
+
+    /// <summary>Read one file's bytes.</summary>
+    [Parameter, EditorRequired] public Func<string, CancellationToken, Task<byte[]>> ReadAsync { get; set; } = default!;
+
+    /// <summary>Write one file back. Returns null on success, or a sentence for the user.</summary>
+    [Parameter] public Func<string, byte[], CancellationToken, Task<string?>>? WriteAsync { get; set; }
+
+    /// <summary>Where to start.</summary>
+    [Parameter] public string RootPath { get; set; } = "/";
+
+    /// <summary>
+    /// Identifies what is being browsed. Changing it resets the view — otherwise switching
+    /// container would leave the previous one's directory on screen.
+    /// </summary>
+    [Parameter] public string? SourceKey { get; set; }
+
+    [Parameter] public bool ReadOnly { get; set; }
+
+    string _path = "/";
+    string? _loadedFor;
+    DirectoryListing? _listing;
+    FileContent? _open;
+    string? _error;
+    string? _blocked;
+    bool _loading;
+    bool _dirty;
+
+    readonly CancellationTokenSource _cts = new();
+
+    bool CanWrite => !ReadOnly && WriteAsync is not null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == SourceKey) return;
+
+        _loadedFor = SourceKey;
+        _open = null;
+        _dirty = false;
+
+        await LoadAsync(RootPath, force: true);
+    }
+
+    IEnumerable<(string Label, string Path)> Crumbs
+    {
+        get
+        {
+            // The root is labelled with a slash rather than the empty string a split would give.
+            yield return ("/", "/");
+
+            var built = "";
+
+            foreach (var segment in _path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+            {
+                built += "/" + segment;
+                yield return (segment, built);
+            }
+        }
+    }
+
+    static IconRef IconFor(FileEntry entry) => entry.IsDirectory ? IconRef.Folder : IconRef.File;
+
+    async Task LoadAsync(string path, bool force = false)
+    {
+        if (_loading && !force) return;
+
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            _listing = await ListAsync(FileEntry.Normalize(path), _cts.Token);
+            _path = _listing.Path;
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away mid-request.
+        }
+        catch (Exception ex)
+        {
+            _listing = null;
+            _error = ex.Message;
+            _path = FileEntry.Normalize(path);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    Task NavigateAsync(string path) => Guarded(() => LoadAsync(path));
+
+    Task GoUpAsync() => FileEntry.ParentOf(_path) is { } parent ? Guarded(() => LoadAsync(parent)) : Task.CompletedTask;
+
+    async Task ActivateAsync(FileEntry entry)
+    {
+        if (entry.IsDirectory)
+        {
+            await Guarded(() => LoadAsync(entry.Path));
+            return;
+        }
+
+        // Re-clicking the open file is not a navigation and must not be blocked by its own edits.
+        if (entry.Path == _open?.Path) return;
+
+        await Guarded(() => OpenFileAsync(entry));
+    }
+
+    /// <summary>
+    /// Run an action that would replace what is on screen, unless doing so would silently discard
+    /// an edit.
+    /// <para>
+    /// Refusing outright rather than asking: the only ways out are Save and Revert, both already
+    /// on the editor's own bar and both one click away. A confirmation dialog here would offer a
+    /// third answer — "discard" — that the editor deliberately does not have.
+    /// </para>
+    /// </summary>
+    async Task Guarded(Func<Task> action)
+    {
+        if (_dirty)
+        {
+            _error = null;
+            _blocked = "Save or revert your changes before leaving this file.";
+            return;
+        }
+
+        _blocked = null;
+        await action();
+    }
+
+    async Task OpenFileAsync(FileEntry entry)
+    {
+        // A file too large to edit is also too large to fetch, so the size is checked before the
+        // read rather than after — the point of the limit is not transferring the bytes.
+        if (entry.Size > FileContent.MaxEditableBytes)
+        {
+            _open = FileContent.Refuse(entry.Path, entry.Size, FileOpenRefusal.TooLarge);
+            return;
+        }
+
+        try
+        {
+            var bytes = await ReadAsync(entry.Path, _cts.Token);
+            _open = FileContent.Decode(entry.Path, bytes);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    async Task<string?> SaveAsync(string path, byte[] content)
+    {
+        if (WriteAsync is null) return "This filesystem is read-only.";
+
+        try
+        {
+            return await WriteAsync(path, content, _cts.Token);
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Copy the open file out to the host.
+    /// <para>
+    /// The bytes are re-read rather than taken from the editor: the editor holds decoded text, and
+    /// a download that silently re-encoded a file would not be a copy of it.
+    /// </para>
+    /// </summary>
+    async Task DownloadAsync(string path)
+    {
+        var name = path[(path.LastIndexOf('/') + 1)..];
+
+        var target = await Shell.SaveFileAsync(new FilePickerOptions("Save file", name));
+        if (target is null) return;
+
+        try
+        {
+            var bytes = await ReadAsync(path, _cts.Token);
+            await System.IO.File.WriteAllBytesAsync(target, bytes, _cts.Token);
+
+            _blocked = null;
+            await Shell.NotifyAsync("Saved", $"{name} was written to the host.", NoticeKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>Copy a file from the host into the directory being browsed.</summary>
+    async Task UploadAsync()
+    {
+        if (WriteAsync is null) return;
+
+        var source = await Shell.PickFileAsync(new FilePickerOptions("Choose a file to upload"));
+        if (source is null) return;
+
+        var name = System.IO.Path.GetFileName(source);
+        var destination = FileEntry.Combine(_path, name);
+
+        try
+        {
+            var bytes = await System.IO.File.ReadAllBytesAsync(source, _cts.Token);
+
+            if (await WriteAsync(destination, bytes, _cts.Token) is { } failure)
+            {
+                _error = failure;
+                return;
+            }
+
+            // The listing came from the engine and will not know about this until it is asked
+            // again — there is no event for a file appearing inside a container.
+            await LoadAsync(_path, force: true);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    void CloseFile()
+    {
+        _open = null;
+        _dirty = false;
+        _blocked = null;
+    }
+
+    static string RefusalTitle(FileContent file) => file.Refusal switch
+    {
+        FileOpenRefusal.TooLarge => "Too large to open",
+        FileOpenRefusal.Binary => "Not a text file",
+        _ => "Cannot open this file",
+    };
+
+    static string RefusalBody(FileContent file) => file.Refusal switch
+    {
+        FileOpenRefusal.TooLarge =>
+            $"{Humanize.Bytes(file.SizeBytes)}, and the editor stops at {Humanize.Bytes(FileContent.MaxEditableBytes)}. "
+            + "Nothing anyone edits by hand is this big, and loading it would freeze the window.",
+
+        FileOpenRefusal.Binary =>
+            "This contains bytes that are not text. Showing it as text would fill the editor with "
+            + "replacement characters, and saving it would corrupt the file.",
+
+        _ => "",
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        await _cts.CancelAsync();
+        _cts.Dispose();
+    }
+}

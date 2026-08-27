@@ -1,0 +1,110 @@
+.slog {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.slog__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+}
+
+.slog__filter {
+    flex: 0 1 22ch;
+    font-size: var(--text-xs);
+}
+
+.slog__count {
+    margin-left: auto;
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.slog__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: var(--s2) var(--s3);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+}
+
+.slog__empty {
+    padding: var(--s4);
+}
+
+/* A grid so the service column aligns down the page: with six services interleaved, ragged labels
+   are what make the log unreadable. */
+.slog__line {
+    display: grid;
+    grid-template-columns: 12ch auto 1fr;
+    gap: var(--s2);
+    align-items: baseline;
+}
+
+.slog__body:not(.is-wrapped) .slog__line {
+    white-space: nowrap;
+}
+
+.slog__body.is-wrapped .slog__text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* --key is set per line from the service's colour. */
+.slog__service {
+    color: var(--key);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.slog__ts {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* stderr is a channel, not a severity — plenty of well-behaved programs log everything to it — so
+   it is marked without being coloured as an error. */
+.slog__text.is-stderr {
+    color: var(--warn-ink);
+}
+
+/* ---- the key ---- */
+
+.slog__key {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 1px var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.slog__key:hover {
+    background: var(--surface-2);
+}
+
+.slog__key.is-muted {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+.slog__swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--key);
+}
+
+.slog__key.is-muted .slog__swatch {
+    background: var(--line-strong);
+}

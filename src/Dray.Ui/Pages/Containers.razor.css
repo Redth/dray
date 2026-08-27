@@ -1,46 +1,3 @@
-.cell-name {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.25;
-}
-
-.cell-name .mono {
-    font-size: var(--text-xs);
-}
-
-.cell-name a {
-    color: inherit;
-    text-decoration: none;
-}
-
-.cell-name a:hover {
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-
-.cell-actions {
-    width: 1%;
-    text-align: right;
-    white-space: nowrap;
-}
-
-/* An engine refusal, shown where the user was working rather than as a modal — a failed Stop is
-   information, not a decision. */
-.banner {
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    padding: var(--s2) var(--s3);
-    background: var(--danger-tint);
-    color: var(--danger-ink);
-    border-bottom: 1px solid var(--line);
-    font-size: var(--text-sm);
-}
-
-.banner span {
-    flex: 1 1 auto;
-}
-
 /* Actions are revealed on hover, on keyboard focus, and for the selected row, so a dense table
    stays scannable without the controls being pointer-only. The selected row keeps them visible so
    a keyboard user always has a stable target.
@@ -53,4 +10,59 @@
 
 .table ::deep .btn {
     transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+/* Appears above the table when more than one row is selected. Not for a single selection: that
+   would duplicate the row's own actions and cover a row to do it. */
+.bulkbar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    margin-bottom: var(--s2);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+}
+
+.bulkbar__count {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.bulkbar__spacer {
+    flex: 1 1 auto;
+}
+
+/* Selected rows keep their actions visible — see the hover rule above, which exempts them. */
+.table tbody tr[aria-selected="true"] {
+    background: var(--surface-2);
+}
+
+/* Everything a row offers, on one line. The action bar brings its own flex container, so this is
+   the row that holds it alongside the row-level buttons. */
+.row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+}
+
+/* A number over its trend. Fixed width so a value changing once a second does not shuffle the
+   columns beside it. */
+.usage {
+    width: 6rem;
+}
+
+.usage__value {
+    display: block;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-xs);
+    line-height: 1.2;
+}
+
+/* Short: this is a trend indicator beside a number, not a chart to read values off. */
+.usage ::deep .spark {
+    height: 14px;
 }

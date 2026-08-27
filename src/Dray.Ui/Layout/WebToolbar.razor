@@ -3,6 +3,13 @@
 @implements IDisposable
 @inject IShellState Shell
 
+@* A toolbar with no controls is a second copy of the page heading — the detail pages looked like
+   they had two titles. Native heads always draw their toolbar because the window has one either
+   way; here there is nothing to draw. Back is deliberately not counted: it renders beside the
+   heading in the content, where a back control belongs when there is no window chrome to put it
+   in. *@
+@if (Chrome.HasControls)
+{
 <header class="toolbar chrome">
     <div class="toolbar__titles">
         @* Chrome, not the document heading. The real <h1> lives in the content area so it
@@ -44,6 +51,7 @@
         }
     </div>
 </header>
+}
 
 @code {
     PageChrome Chrome => Shell.Chrome;

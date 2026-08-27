@@ -1,4 +1,5 @@
 using AppKit;
+using Dray.Core.Engine;
 using Dray.Core.Navigation;
 using Dray.Core.Shell;
 using Foundation;
@@ -49,6 +50,20 @@ public sealed class DrayMacApp : Application
         };
 
         NSApplication.SharedApplication.BeginInvokeOnMainThread(AddAppMenuItems);
+
+        // Discover and connect in the background; the UI shows its connecting state until this
+        // lands rather than blocking the window from appearing.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _services.GetRequiredService<EngineManager>().InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[dray:engine] initialise failed: {ex}");
+            }
+        });
 
         return window;
     }

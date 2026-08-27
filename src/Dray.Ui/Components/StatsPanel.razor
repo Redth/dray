@@ -1,0 +1,190 @@
+@* What a container is using right now, and the shape of the last minute.
+
+   Streams for as long as it is on screen and stops when it is not — the stream belongs to the view,
+   like the log view's. *@
+@implements IAsyncDisposable
+@inject EngineManager Engine
+
+<div class="page page--flush">
+    @if (Container.State != DockerState.Running)
+    {
+        <EmptyState Icon="IconRef.Dashboard" Title="Nothing to measure"
+                    Body="A container that is not running uses no CPU, memory or network. Start it to see what it does." />
+    }
+    else if (_error is { } error)
+    {
+        <EmptyState Icon="IconRef.Warning" Title="No statistics from this engine" Body="@error" />
+    }
+    else if (_history.Latest is not { } latest)
+    {
+        <div class="stats">
+            @foreach (var _ in Enumerable.Range(0, 4))
+            {
+                <div class="stats__card"><Skeleton Width="60%" /><Skeleton Width="40%" /></div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="stats">
+            <div class="stats__card">
+                <div class="stats__label">CPU</div>
+                <div class="stats__value">
+                    @* Null on the first sample: the engine has nothing to measure against yet, and
+                       showing 0% would read as idle rather than as unknown. *@
+                    @(latest.CpuPercent is { } cpu ? $"{cpu:0.0}%" : "—")
+                </div>
+                <div class="stats__detail muted">of @(_onlineCpus > 0 ? $"{_onlineCpus * 100}% available" : "the host")</div>
+                <Sparkline Points="_history.Normalized(s => s.CpuPercent)" Label="CPU over the last minute" />
+            </div>
+
+            <div class="stats__card">
+                <div class="stats__label">Memory</div>
+                <div class="stats__value">@Humanize.Bytes(latest.MemoryBytes)</div>
+                <div class="stats__detail muted">
+                    @if (latest.MemoryPercent is { } percent)
+                    {
+                        @($"{percent:0.0}% of {Humanize.Bytes(latest.MemoryLimitBytes)}")
+                    }
+                    else
+                    {
+                        @* The engine reports an unlimited container with the host's total memory as
+                           its limit; repeating that would imply a bound nobody set. *@
+                        <span>no limit set</span>
+                    }
+                </div>
+                <Sparkline Points="_history.Normalized(s => (double?)s.MemoryBytes)" Label="Memory over the last minute" />
+            </div>
+
+            <div class="stats__card">
+                <div class="stats__label">Network</div>
+                <div class="stats__value">@Humanize.Bytes(latest.NetworkRxBytes + latest.NetworkTxBytes)</div>
+                <div class="stats__detail muted">
+                    ↓ @Humanize.Bytes(latest.NetworkRxBytes) · ↑ @Humanize.Bytes(latest.NetworkTxBytes)
+                </div>
+                <Sparkline Points="_history.Normalized(s => (double?)(s.NetworkRxBytes + s.NetworkTxBytes))"
+                           Label="Network total over the last minute" />
+            </div>
+
+            <div class="stats__card">
+                <div class="stats__label">Processes</div>
+                <div class="stats__value">@latest.ProcessCount</div>
+                <div class="stats__detail muted">
+                    @if (_reportsBlockIo)
+                    {
+                        @($"disk r {Humanize.Bytes(latest.BlockReadBytes)} · w {Humanize.Bytes(latest.BlockWriteBytes)}")
+                    }
+                    else
+                    {
+                        @* Rootless podman exposes no io accounting at all, so a zero here is the
+                           absence of a measurement rather than one. Saying so beats drawing "0 B"
+                           and letting the user conclude the container never touches disk. *@
+                        <span>disk I/O not reported by this engine</span>
+                    }
+                </div>
+                <Sparkline Points="_history.Normalized(s => (double?)s.ProcessCount)" Label="Process count over the last minute" />
+            </div>
+        </div>
+
+        <p class="note muted">
+            <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+            <span>
+                @* The rate is not the same on every engine, and the note is the only place it is
+                   stated — a reading that is two and a half seconds old should not be described as
+                   one a second. *@
+                @if (Engine.Selected?.Capabilities.SupportsEvents ?? true)
+                {
+                    @("Sampled from the engine's own stream, about once a second.")
+                }
+                else
+                {
+                    @("This engine has no stats stream, so Dray asks it about every couple of seconds — the reading is real but a moment behind.")
+                }
+                Each graph is scaled to its own highest reading, so the shape is visible even when
+                the numbers are small.
+            </span>
+        </p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ContainerSummary Container { get; set; } = default!;
+
+    readonly StatsHistory _history = new();
+
+    CancellationTokenSource? _stream;
+    string? _error;
+    string _streamingFor = "";
+    int _onlineCpus;
+    bool _reportsBlockIo;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var wanted = Container.State == DockerState.Running ? Container.Id : "";
+        if (wanted == _streamingFor) return;
+
+        await StopAsync();
+        _streamingFor = wanted;
+
+        if (wanted.Length > 0) Start(wanted);
+    }
+
+    void Start(string containerId)
+    {
+        _error = null;
+        _history.Clear();
+
+        var cts = new CancellationTokenSource();
+        _stream = cts;
+
+        // Detached: this is open-ended, and awaiting it would block the render that shows the
+        // panel it feeds.
+        _ = PumpAsync(containerId, cts.Token);
+    }
+
+    async Task PumpAsync(string containerId, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var sample in Engine.StreamStatsAsync(containerId, ct))
+            {
+                _history.Add(sample);
+
+                // Reported once and remembered: an engine that gives block I/O gives it every
+                // sample, and one that does not never will.
+                if (sample.BlockReadBytes > 0 || sample.BlockWriteBytes > 0) _reportsBlockIo = true;
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// How many CPUs the container can see, for the "of N% available" line.
+    /// <para>
+    /// Derived from the engine's capabilities rather than from a sample, because the sample does
+    /// not carry it once the percentage has been computed.
+    /// </para>
+    /// </summary>
+    protected override void OnInitialized()
+        => _onlineCpus = Engine.Selected?.Capabilities?.TotalCpus ?? 0;
+
+    async Task StopAsync()
+    {
+        if (_stream is not { } cts) return;
+
+        _stream = null;
+        await cts.CancelAsync();
+        cts.Dispose();
+    }
+
+    public async ValueTask DisposeAsync() => await StopAsync();
+}

@@ -22,37 +22,31 @@
             background: transparent;
         }
 
-        #blazor-error-ui {
-            position: fixed;
-            inset: auto 0 0 0;
-            padding: 12px 16px;
-            background: Canvas;
-            color: CanvasText;
-            border-top: 1px solid GrayText;
-            font: 13px/1.5 -apple-system, system-ui, sans-serif;
-            /* A modal <dialog> lives in the top layer and outranks any z-index, so
-               reaching for a magic number here buys nothing. */
-            z-index: var(--z-tooltip);
-        }
-
-        #dray-error-detail {
-            display: none;
-            max-height: 40vh;
-            margin: 8px 0 0;
-            overflow: auto;
-            white-space: pre-wrap;
-            font: 11px/1.45 ui-monospace, Menlo, monospace;
-            user-select: text;
-        }
     </style>
 </head>
 <body>
     <div id="app"></div>
 
-    <div id="blazor-error-ui" role="alert" aria-live="assertive" hidden>
-        <span>Dray hit an unhandled error and needs to reload.</span>
-        <a href="." class="reload">Reload</a>
-        <pre id="dray-error-detail"></pre>
+    <!-- Blazor's own unhandled-error element, restyled. Its id is fixed by the framework; the
+         content is ours, because "An unhandled error has occurred" is the wrong register for a
+         desktop app and says nothing a user can act on. -->
+    <div id="blazor-error-ui" role="alert" aria-live="assertive">
+        <div class="overlay-card">
+            <p class="overlay-title">Dray needs to restart</p>
+            <p class="overlay-body">
+                Something went wrong that Dray could not recover from. Your containers are
+                unaffected &mdash; nothing here changes what is running on the engine.
+            </p>
+            <!-- Behind a disclosure: a stack trace is what makes this diagnosable in a WebView
+                 with no devtools, and also the thing that turns a calm message into an alarming
+                 one. The script below reveals the <details> only when there is something in it. -->
+            <details id="dray-error-details">
+                <summary>Technical details</summary>
+                <pre id="dray-error-detail"></pre>
+            </details>
+
+            <a class="overlay-action reload" href=".">Restart Dray</a>
+        </div>
     </div>
 
     <script>
@@ -61,10 +55,11 @@
         // Debug-only detail, shown in place.
         (function () {
             var detail = document.getElementById('dray-error-detail');
+            var disclosure = document.getElementById('dray-error-details');
             function show(text) {
-                if (!detail) return;
+                if (!detail || !disclosure) return;
                 detail.textContent = String(text).slice(0, 4000);
-                detail.style.display = 'block';
+                disclosure.style.display = 'block';
             }
             window.addEventListener('error', function (e) {
                 show((e.error && (e.error.stack || e.error.message)) || e.message);

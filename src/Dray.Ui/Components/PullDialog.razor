@@ -1,0 +1,174 @@
+@* Pull an image, showing the engine's own per-layer progress.
+
+   Not a single bar. A pull is a dozen layers downloading and extracting at once, and averaging them
+   into one number produces a bar that jumps backwards whenever a new layer starts — which reads as
+   a bug rather than as progress. *@
+@implements IAsyncDisposable
+@inject EngineManager Engine
+
+<Dialog Title="Pull an image" Open="Open" OpenChanged="OnOpenChanged">
+    <ChildContent>
+        <div class="field">
+            <label class="field__label" for="pull-ref">Image</label>
+            <input id="pull-ref" class="input" placeholder="nginx:alpine"
+                   @bind="_reference" @bind:event="oninput"
+                   @onkeydown="OnKeyDown"
+                   autocomplete="off" spellcheck="false" disabled="@_pulling" />
+        </div>
+
+        @if (_error is { } error)
+        {
+            <p class="pull__error">@error</p>
+        }
+        else if (!_pulling && _layers.Count == 0)
+        {
+            <p class="pull__hint muted">
+                A bare name pulls <span class="mono">:latest</span> from Docker Hub. Prefix a host to
+                use another registry — <span class="mono">ghcr.io/owner/app:1.2</span>.
+            </p>
+        }
+
+        @if (_layers.Count > 0)
+        {
+            <div class="pull__layers">
+                @foreach (var layer in _layers.Values.OrderBy(l => l.Order))
+                {
+                    <div class="pull__layer" @key="layer.Id">
+                        <span class="pull__id mono">@layer.Id</span>
+
+                        <div class="pull__track" role="progressbar"
+                             aria-valuemin="0" aria-valuemax="100"
+                             aria-valuenow="@((int)((layer.Progress.Fraction ?? (layer.Progress.IsComplete ? 1 : 0)) * 100))">
+                            <div class="pull__fill @(layer.Progress.IsComplete ? "is-done" : null)"
+                                 style="width: @(((layer.Progress.Fraction ?? (layer.Progress.IsComplete ? 1 : 0)) * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                        </div>
+
+                        <span class="pull__status muted">@layer.Progress.Status</span>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (_done is { } done)
+        {
+            <p class="pull__done">@done</p>
+        }
+    </ChildContent>
+    <Footer>
+        <Button Label="@(_pulling ? "Cancel" : "Close")" Variant="ButtonVariant.Ghost" OnClick="CloseAsync" />
+        <Button Label="@(_pulling ? "Pulling…" : "Pull")" Variant="ButtonVariant.Primary"
+                Disabled="@(_pulling || string.IsNullOrWhiteSpace(_reference))"
+                Busy="_pulling" OnClick="StartAsync" />
+    </Footer>
+</Dialog>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Raised once a pull finishes, so the list behind can refresh.</summary>
+    [Parameter] public EventCallback OnPulled { get; set; }
+
+    string _reference = "";
+    string? _error;
+    string? _done;
+    bool _pulling;
+    CancellationTokenSource? _cts;
+
+    /// <summary>
+    /// Layers keyed by id, with the order first seen. The engine reports them out of order and
+    /// repeatedly; sorting by arrival keeps a row from jumping around as it updates.
+    /// </summary>
+    readonly Dictionary<string, LayerRow> _layers = new(StringComparer.Ordinal);
+
+    async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_pulling && !string.IsNullOrWhiteSpace(_reference)) await StartAsync();
+    }
+
+    async Task StartAsync()
+    {
+        var reference = _reference.Trim();
+        if (reference.Length == 0 || _pulling) return;
+
+        _pulling = true;
+        _error = null;
+        _done = null;
+        _layers.Clear();
+
+        _cts = new CancellationTokenSource();
+
+        try
+        {
+            await foreach (var step in Engine.PullImageAsync(reference, _cts.Token))
+            {
+                if (step.IsError)
+                {
+                    // The engine reports failures inside the stream rather than by failing the
+                    // request, so this is the only place a bad reference or a login problem shows.
+                    _error = step.Error;
+                    break;
+                }
+
+                if (step.LayerId is { } id)
+                {
+                    if (_layers.TryGetValue(id, out var existing)) existing.Progress = step;
+                    else _layers[id] = new LayerRow(id, _layers.Count, step);
+                }
+
+                StateHasChanged();
+            }
+
+            if (_error is null)
+            {
+                _done = $"Pulled {reference}.";
+                await OnPulled.InvokeAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _done = "Pull cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _pulling = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    async Task CloseAsync()
+    {
+        // Cancelling the stream stops Dray reading it; the engine finishes the pull it started.
+        // Saying otherwise would be a lie, and a half-pulled image is not a state Dray can create.
+        if (_cts is { } cts) await cts.CancelAsync();
+
+        await OpenChanged.InvokeAsync(false);
+    }
+
+    async Task OnOpenChanged(bool open)
+    {
+        if (!open) await CloseAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_cts is { } cts)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+        }
+    }
+
+    sealed class LayerRow(string id, int order, PullProgress progress)
+    {
+        public string Id { get; } = id;
+        public int Order { get; } = order;
+        public PullProgress Progress { get; set; } = progress;
+    }
+}

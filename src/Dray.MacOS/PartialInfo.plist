@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the Info.plist the SDK generates. A standalone Info.plist in this directory is
+  ignored entirely: the SDK builds the manifest from MSBuild properties, so extra keys have to
+  arrive through PartialAppManifest.
+-->
+<plist version="1.0">
+<dict>
+  <!-- Tints selection, focus rings and controls with Dray's brand instead of the stock blue,
+       reading the colour from the compiled asset catalog. macOS still lets the user override
+       this: picking a specific system accent in Appearance settings wins, and "Multicolor" —
+       the default — is what lets an app use its own. -->
+  <key>NSAccentColorName</key>
+  <string>AccentColor</string>
+
+  <!-- Dray follows the system appearance and pushes the resolved window colours into the
+       WebView's tokens, so it must never be forced into light mode. -->
+  <key>NSRequiresAquaSystemAppearance</key>
+  <false/>
+
+  <key>NSHighResolutionCapable</key>
+  <true/>
+</dict>
+</plist>

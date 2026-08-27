@@ -1,4 +1,5 @@
 @page "/"
+@implements IDisposable
 @inject EngineManager Engine
 
 <PageChromeScope Chrome="Chrome" />
@@ -31,6 +32,52 @@
                     </div>
                 </div>
             }
+
+            <div class="panel">
+                <div class="panel__head">
+                    <span class="panel__title">Disk</span>
+                    @if (_usage is { IsKnown: true } known && known.ReclaimableBytes > 0)
+                    {
+                        @* The number people came for. Not a button — reclaiming is per-kind and
+                           each one is typed to confirm, so this points at the pages that do it
+                           rather than offering a single sweep nobody could preview. *@
+                        <span class="disk__reclaim">@Humanize.Bytes(known.ReclaimableBytes) reclaimable</span>
+                    }
+                </div>
+                <div class="panel__body">
+                    @if (_usage is null)
+                    {
+                        <div class="stack-v"><Skeleton Width="70%" /><Skeleton Width="45%" /></div>
+                    }
+                    else if (!_usage.IsKnown)
+                    {
+                        @* Not "0 B". The engine did not answer, and a zero would invite the user
+                           to stop looking (docs/ARCHITECTURE.md DiskUsage.IsKnown). *@
+                        <p class="muted" style="margin: 0">
+                            This engine does not report what it is using on disk.
+                            <span class="mono">docker system df</span> is not part of its API.
+                        </p>
+                    }
+                    else
+                    {
+                        <div class="disk">
+                            @foreach (var part in Disk)
+                            {
+                                <div class="disk__row">
+                                    <span class="disk__label">@part.Label</span>
+                                    <span class="disk__bar" aria-hidden="true">
+                                        <span class="disk__fill @part.Tone" style="width: @Share(part.Bytes)"></span>
+                                    </span>
+                                    <span class="disk__size num mono">@Humanize.Bytes(part.Bytes)</span>
+                                    <span class="disk__free num mono muted">
+                                        @(part.Reclaimable > 0 ? $"{Humanize.Bytes(part.Reclaimable)} free-able" : "—")
+                                    </span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
 
             <div class="panel">
                 <div class="panel__head"><span class="panel__title">Needs attention</span></div>
@@ -80,7 +127,73 @@
         ("Needs attention", Attention.Count.ToString(), IconRef.Warning),
     ];
 
+    /// <summary>
+    /// Null until the first answer arrives, which is a third state the panel renders as a skeleton.
+    /// <see cref="DiskUsage.Unknown"/> is a different thing: an engine that answered "I cannot say".
+    /// </summary>
+    DiskUsage? _usage;
+
+    /// <summary>
+    /// Fetched once per host rather than kept current. <c>system df</c> walks every image layer and
+    /// every volume — the most expensive call the engine offers — so putting it on the event stream
+    /// would mean re-walking the disk every time a container started.
+    /// </summary>
+    string _usageFor = "";
+
+    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
+
+    protected override async Task OnParametersSetAsync() => await LoadUsageAsync();
+
+    void OnEngineChanged() => _ = InvokeAsync(LoadUsageAsync);
+
+    async Task LoadUsageAsync()
+    {
+        var host = Engine.Selected?.Id ?? "";
+        if (host == _usageFor) return;
+
+        _usageFor = host;
+        _usage = null;
+        StateHasChanged();
+
+        if (host.Length == 0) return;
+
+        _usage = await Engine.GetDiskUsageAsync();
+        StateHasChanged();
+    }
+
+    (string Label, long Bytes, long Reclaimable, string Tone)[] Disk => _usage is not { IsKnown: true } u
+        ? []
+        :
+        [
+            ("Images", u.ImagesBytes, u.ImagesReclaimableBytes, "disk__fill--images"),
+            ("Containers", u.ContainersBytes, 0, "disk__fill--containers"),
+            ("Volumes", u.VolumesBytes, u.VolumesReclaimableBytes, "disk__fill--volumes"),
+
+            // Every byte of build cache is reclaimable by definition — it exists only to make the
+            // next build faster, and nothing breaks without it.
+            ("Build cache", u.BuildCacheBytes, u.BuildCacheBytes, "disk__fill--cache"),
+        ];
+
+    /// <summary>
+    /// One part's width, as a share of the largest part rather than of the total.
+    /// <para>
+    /// Scaled to the largest for the same reason the sparklines are: images routinely dwarf
+    /// everything else, and against the total the other three would be invisible slivers — which
+    /// is exactly when someone is trying to see whether volumes have grown.
+    /// </para>
+    /// </summary>
+    string Share(long bytes)
+    {
+        var largest = Disk.Length == 0 ? 0 : Disk.Max(d => d.Bytes);
+        if (largest <= 0 || bytes <= 0) return "0%";
+
+        // A floor, so a part that exists but is tiny is still a visible mark rather than nothing.
+        return $"{Math.Max(1.5, bytes * 100.0 / largest):0.#}%";
+    }
+
     PageChrome Chrome => new("Dashboard", Subtitle: Engine.Selected?.Name);
 
     async Task Rediscover() => await Engine.InitializeAsync();
+
+    public void Dispose() => Engine.Changed -= OnEngineChanged;
 }

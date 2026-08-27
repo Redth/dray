@@ -136,9 +136,12 @@ internal static class DockerFileSystem
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var truncated = false;
 
-        // The tar is rooted at the requested directory's own name, so entries look like
-        // "etc/hosts" for a request of "/etc". Only the immediate children are wanted.
-        var rootName = path == "/" ? string.Empty : path[(path.LastIndexOf('/') + 1)..];
+        // How the tar names its entries is engine-specific and cannot be assumed from the request.
+        // Docker roots the archive at the requested directory's own name — "etc/hosts" for a
+        // request of "/etc" — while podman returns "/" and "/hosts". Guessing one shape silently
+        // discards every entry from the other, so the prefix is read off the tar's first entry,
+        // which always represents the requested directory itself.
+        string? rootPrefix = null;
 
         while (await tar.GetNextEntryAsync(copyData: false, ct).ConfigureAwait(false) is { } entry)
         {
@@ -148,7 +151,16 @@ internal static class DockerFileSystem
                 break;
             }
 
-            var relative = Relative(entry.Name, rootName);
+            var name = entry.Name.Replace('\\', '/').TrimEnd('/');
+
+            if (rootPrefix is null)
+            {
+                // "/" and "" both mean "entries are already relative to the directory".
+                rootPrefix = name.TrimStart('/').Length == 0 ? string.Empty : name;
+                continue;
+            }
+
+            var relative = Relative(name, rootPrefix);
             if (relative is null) continue;
 
             // Depth 1 only: the tar is recursive and everything below is a different directory.
@@ -171,20 +183,24 @@ internal static class DockerFileSystem
                 ? "Listed by reading a tar of the folder, because this image has no usable ls."
                 : "Listed by reading a tar of the folder, because the container is not running.";
 
-        return new DirectoryListing(path, entries, ListingMethod.Archive, truncated ? note : note);
+        return new DirectoryListing(path, entries, ListingMethod.Archive, note, truncated);
     }
 
-    /// <summary>Strip the tar's root component to get a path relative to the requested directory.</summary>
-    static string? Relative(string entryName, string rootName)
+    /// <summary>
+    /// Strip the tar's root component to get a path relative to the requested directory.
+    /// <para>
+    /// <paramref name="rootPrefix"/> comes from the archive's own first entry, so an empty one
+    /// means the engine already emits relative names and there is nothing to strip.
+    /// </para>
+    /// </summary>
+    internal static string? Relative(string name, string rootPrefix)
     {
-        var name = entryName.Replace('\\', '/').TrimEnd('/');
+        if (rootPrefix.Length == 0) return name.TrimStart('/');
 
-        if (rootName.Length == 0) return name.TrimStart('/');
+        if (!name.StartsWith(rootPrefix, StringComparison.Ordinal)) return null;
+        if (name.Length == rootPrefix.Length) return string.Empty;
 
-        if (!name.StartsWith(rootName, StringComparison.Ordinal)) return null;
-        if (name.Length == rootName.Length) return string.Empty;
-
-        return name[rootName.Length] == '/' ? name[(rootName.Length + 1)..] : null;
+        return name[rootPrefix.Length] == '/' ? name[(rootPrefix.Length + 1)..] : null;
     }
 
     static string FormatMode(TarEntry entry)

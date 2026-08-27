@@ -1,0 +1,209 @@
+@page "/stacks/{Name}"
+@inject EngineManager Engine
+@inject NavigationManager Nav
+@inject ShellCapabilities Caps
+
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
+<EngineScope>
+    <div class="detail">
+        <div class="detail__head">
+            <div class="detail__title">
+                @if (!Caps.HasNativeToolbar)
+                {
+                    <BackButton To="/stacks" Label="All stacks" />
+                }
+
+                <h2>@StackName</h2>
+
+                @if (Stack is { } header)
+                {
+                    <StatePill Status="header.Status" />
+                }
+            </div>
+
+            <div class="detail__meta mono muted">
+                @if (Stack is { } stack)
+                {
+                    <span>@stack.Services.Count service@(stack.Services.Count == 1 ? "" : "s")</span>
+                    <span>@stack.RunningCount/@stack.ContainerCount running</span>
+
+                    @if (stack.ConfigFiles.FirstOrDefault() is { } file)
+                    {
+                        <span title="@file">@file</span>
+                    }
+                }
+            </div>
+        </div>
+
+        <div class="detail__card card">
+            <div class="detail__tabs" role="tablist">
+                @foreach (var tab in Tabs)
+                {
+                    <button type="button" role="tab" class="tab @(_tab == tab ? "is-active" : null)"
+                            aria-selected="@((_tab == tab).ToString().ToLowerInvariant())"
+                            @onclick="() => _tab = tab">@tab</button>
+                }
+            </div>
+
+            <div class="detail__body">
+                @if (Stack is not { } current)
+                {
+                    <div class="page">
+                        <EmptyState Icon="IconRef.Stack" Title="That stack is not here"
+                                    Body="It may have been brought down, or it belongs to a different host than the one selected." />
+                    </div>
+                }
+                else if (_tab == "Services")
+                {
+                    <div class="page page--flush">
+                        <table class="table">
+                            <thead>
+                                <tr><th>Service</th><th>State</th><th>Container</th><th>Image</th><th class="num">Uptime</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var service in current.Services)
+                                {
+                                    @foreach (var replica in service.Replicas)
+                                    {
+                                        <tr @key="replica.Id">
+                                            <td>
+                                                @service.Name
+                                                @if (service.IsScaled)
+                                                {
+                                                    <span class="muted"> · @replica.Compose?.Replica</span>
+                                                }
+                                            </td>
+                                            <td><StatePill Status="replica.Status" /></td>
+                                            <td><a href="@($"/containers/{replica.ShortId}")">@replica.Name</a></td>
+                                            <td class="muted">@Humanize.ImageName(replica.Image):@Humanize.ImageTag(replica.Image)</td>
+                                            <td class="num muted">@Humanize.Since(replica.Since)</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else if (_file is { } file)
+                {
+                    @* The same editor the container and volume browsers use. A compose file is the
+                       one file in this app whose path came from the engine rather than from a
+                       directory Dray listed, so it is read from the host filesystem directly. *@
+                    <CodeEditor File="file" ReadOnly="@(!_writable)" OnSave="SaveAsync" OnClose="BackToServices" />
+                }
+                else
+                {
+                    <div class="page">
+                        <EmptyState Icon="IconRef.Files" Title="@(_fileError is null ? "No compose file" : "Cannot read the compose file")"
+                                    Body="@(_fileError ?? ComposeFileExplanation)" />
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</EngineScope>
+
+@code {
+    static readonly string[] Tabs = ["Services", "Compose file"];
+
+    const string ComposeFileExplanation =
+        "The engine did not record which file this stack came from, or the file is on the machine "
+        + "that ran compose rather than this one. Stacks started on a remote host name paths that "
+        + "do not exist here.";
+
+    [Parameter] public string Name { get; set; } = "";
+
+    string StackName => Uri.UnescapeDataString(Name);
+
+    StackSummary? Stack => Engine.Stacks.FirstOrDefault(s => s.Name == StackName);
+
+    string _tab = "Services";
+    FileContent? _file;
+    string? _fileError;
+    bool _writable;
+    string? _readFor;
+
+    void BackToServices() => _tab = "Services";
+
+    protected override void OnParametersSet()
+    {
+        if (_readFor == StackName) return;
+
+        _readFor = StackName;
+        _file = null;
+        _fileError = null;
+
+        LoadComposeFile();
+    }
+
+    /// <summary>
+    /// Read the compose file off this machine.
+    /// <para>
+    /// The path comes from a label the engine wrote when the stack was created, which means it is a
+    /// path on whichever machine ran <c>compose up</c>. For a local engine that is here; for a
+    /// remote one it is not, and the file simply will not exist — which is said plainly rather than
+    /// shown as an error.
+    /// </para>
+    /// </summary>
+    void LoadComposeFile()
+    {
+        if (Stack?.ConfigFiles.FirstOrDefault() is not { } path) return;
+
+        try
+        {
+            if (!System.IO.File.Exists(path)) return;
+
+            _file = FileContent.Decode(path, System.IO.File.ReadAllBytes(path));
+
+            // Editing is offered only where it would actually take effect. A read-only file, or one
+            // Dray cannot write, opens for reading rather than presenting a Save that fails.
+            var info = new System.IO.FileInfo(path);
+            _writable = !info.IsReadOnly;
+        }
+        catch (Exception ex)
+        {
+            _fileError = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Write the file back.
+    /// <para>
+    /// Saving does not apply anything — compose reads the file when it next runs. Saying so is the
+    /// difference between a user thinking their change is live and finding out later.
+    /// </para>
+    /// </summary>
+    Task<string?> SaveAsync(string path, byte[] content)
+    {
+        try
+        {
+            System.IO.File.WriteAllBytes(path, content);
+            return Task.FromResult<string?>(null);
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult<string?>(ex.Message);
+        }
+    }
+
+    PageChrome Chrome => new(
+        StackName,
+        Subtitle: Engine.Selected?.Name,
+        Actions: [ChromeAction.Secondary("logs", "Logs", IconRef.Logs)],
+        Back: new ChromeBack("back", "All stacks"));
+
+    void HandleAction(string id)
+    {
+        switch (id)
+        {
+            case "back":
+                Nav.NavigateTo("/stacks");
+                break;
+
+            case "logs":
+                Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(StackName)}/logs");
+                break;
+        }
+    }
+}

@@ -1,0 +1,50 @@
+.inspect__modes {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: var(--s3);
+    border-bottom: 1px solid var(--line);
+}
+
+.inspect__spacer {
+    flex: 1 1 auto;
+}
+
+/* Two columns where there is room. The panels are independent facts about one container, and
+   stacking them all vertically buries Mounts and Labels below a fold on a wide window. */
+.inspect {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+    gap: var(--s4);
+    align-items: start;
+}
+
+.inspect .panel {
+    overflow: hidden;
+}
+
+.inspect__raw {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: var(--s3);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+
+    /* JSON has long lines and reflowing them destroys the indentation that makes it readable. */
+    overflow-x: auto;
+    white-space: pre;
+}
+
+/* A fact that explains a failure, rather than one that merely describes state. */
+.inspect__alarm {
+    color: var(--danger-ink);
+    background: var(--danger-tint);
+    padding: 2px var(--s2);
+    border-radius: var(--r-sm);
+}
+
+.inspect__cmd,
+.inspect__source {
+    overflow-wrap: anywhere;
+}

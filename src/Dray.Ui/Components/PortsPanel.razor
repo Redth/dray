@@ -1,0 +1,107 @@
+@* Which ports exist, and which of them actually reach the host.
+
+   The unpublished ones are the point. "Why can't I connect?" is almost always answered by a port
+   the image declares and nobody mapped, and a table that listed only working mappings would show
+   an empty screen at exactly that moment. *@
+@inject IShellBridge Shell
+
+<div class="page page--flush">
+    @if (Inspect.Ports.Count == 0)
+    {
+        <EmptyState Icon="IconRef.Port" Title="No ports"
+                    Body="This image declares no ports and none were published when the container was started." />
+    }
+    else
+    {
+        <div class="panel">
+            <div class="panel__head">
+                <h3 class="panel__title">Ports</h3>
+                <span class="muted">@Published published of @Inspect.Ports.Count</span>
+            </div>
+
+            <table class="table ports">
+                <thead>
+                    <tr>
+                        <th>Container</th>
+                        <th>Host</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var port in Inspect.Ports)
+                    {
+                        <tr @key="@($"{port.ContainerPort}/{port.Protocol}")">
+                            <td class="mono">@port.ContainerPort<span class="muted">/@port.Protocol</span></td>
+
+                            <td class="mono">
+                                @if (port.IsPublished)
+                                {
+                                    @string.Join(", ", port.Bindings.Select(b => b.HostPort))
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+
+                            <td>
+                                @if (port.IsPublished)
+                                {
+                                    <StatePill Status="PublishedStatus" />
+                                }
+                                else
+                                {
+                                    <StatePill Status="UnpublishedStatus" />
+                                }
+                            </td>
+
+                            <td class="ports__actions">
+                                @if (Openable(port) is { } url)
+                                {
+                                    <Button Label="Open" Icon="IconRef.External" Variant="ButtonVariant.Ghost"
+                                            OnClick="() => Shell.OpenExternalAsync(url)" />
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (Published < Inspect.Ports.Count)
+        {
+            <p class="note muted">
+                <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                <span>
+                    An unpublished port is reachable from other containers on the same network, but
+                    not from this machine. Publishing one means recreating the container with
+                    <span class="mono">-p</span>.
+                </span>
+            </p>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ContainerInspect Inspect { get; set; } = default!;
+
+    // Glyph as well as tone, for the same reason every other pill carries one: hue alone does not
+    // survive a colour-vision difference.
+    static readonly ContainerStatus PublishedStatus = new(StateTone.Ok, "●", "Published");
+
+    static readonly ContainerStatus UnpublishedStatus = new(StateTone.Neutral, "○", "Not published");
+
+    int Published => Inspect.Ports.Count(p => p.IsPublished);
+
+    /// <summary>
+    /// Where clicking would go. Only TCP, and only while the container is running — offering to
+    /// open a link to a stopped container's port is offering a connection refused.
+    /// </summary>
+    string? Openable(ExposedPort port)
+    {
+        if (Inspect.State != DockerState.Running) return null;
+
+        return port.Bindings.FirstOrDefault()?.LocalUrl;
+    }
+}

@@ -1,0 +1,74 @@
+@* Create a volume. Just a name — the driver options the engine accepts are for storage plugins
+   nobody configures from a GUI, and offering them would be offering choices with no guidance. *@
+@inject EngineManager Engine
+
+<Dialog Title="Create a volume" Open="Open" OpenChanged="OpenChanged">
+    <ChildContent>
+        <div class="field">
+            <label class="field__label" for="vol-name">Name</label>
+            <input id="vol-name" class="input" @bind="_name" @bind:event="oninput"
+                   autocomplete="off" spellcheck="false" @onkeydown="OnKeyDown" />
+        </div>
+
+        @if (_problem is { } problem)
+        {
+            <p class="vol__problem">@problem</p>
+        }
+        else
+        {
+            <p class="vol__hint muted">
+                The volume is empty until a container mounts it. Nothing is stored on your machine
+                directly — the engine owns it, which is what makes it survive the container.
+            </p>
+        }
+    </ChildContent>
+    <Footer>
+        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => OpenChanged.InvokeAsync(false)" />
+        <Button Label="Create" Variant="ButtonVariant.Primary" Busy="_saving"
+                Disabled="@(_saving || !ContainerName.IsValid(_name))" OnClick="SubmitAsync" />
+    </Footer>
+</Dialog>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    [Parameter] public EventCallback OnCreated { get; set; }
+
+    string _name = "";
+    string? _problem;
+    bool _saving;
+
+    async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_saving && ContainerName.IsValid(_name)) await SubmitAsync();
+    }
+
+    async Task SubmitAsync()
+    {
+        if (ContainerName.Validate(_name) is { } invalid)
+        {
+            _problem = invalid;
+            return;
+        }
+
+        _saving = true;
+        _problem = null;
+
+        try
+        {
+            _problem = await Engine.CreateVolumeAsync(_name.Trim());
+
+            if (_problem is null)
+            {
+                await OnCreated.InvokeAsync();
+                await OpenChanged.InvokeAsync(false);
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

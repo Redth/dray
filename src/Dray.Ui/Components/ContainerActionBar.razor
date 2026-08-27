@@ -15,11 +15,11 @@
 else
 {
     <div class="actions">
-        @foreach (var action in ContainerActions.For(Container.State))
+        @foreach (var action in ContainerActions.For(Container.State, Engine.Selected?.Capabilities.SupportsPause ?? true))
         {
             var captured = action;
             <Button Label="@ContainerActions.Label(captured)"
-                    Icon="@IconFor(captured)"
+                    Icon="@ContainerCommands.IconFor(captured)"
                     IconOnly="true"
                     Variant="ButtonVariant.Ghost"
                     Danger="@ContainerActions.IsDestructive(captured)"
@@ -34,31 +34,9 @@ else
     /// <summary>Raised with a sentence when the engine refuses. Null is never raised.</summary>
     [Parameter] public EventCallback<string> OnError { get; set; }
 
-    static IconRef IconFor(ContainerAction action) => action switch
-    {
-        ContainerAction.Start => IconRef.Play,
-        ContainerAction.Stop => IconRef.Stop,
-        ContainerAction.Restart => IconRef.Restart,
-        ContainerAction.Pause => IconRef.Pause,
-        ContainerAction.Unpause => IconRef.Play,
-        ContainerAction.Kill => IconRef.Warning,
-        ContainerAction.Remove => IconRef.Trash,
-        _ => IconRef.More,
-    };
-
     async Task RunAsync(ContainerAction action)
     {
-        if (ContainerActions.IsDestructive(action))
-        {
-            var (title, body) = ContainerActions.Confirmation(action, Container.Name);
-
-            var answer = await Shell.ConfirmDestructiveAsync(
-                new DestructiveConfirm(title, body, ContainerActions.Label(action)));
-
-            if (answer != ConfirmResult.Confirm) return;
-        }
-
-        if (await Engine.PerformAsync(Container.Id, action) is { } error)
+        if (await ContainerCommands.RunAsync(Engine, Shell, Container, action) is { } error)
             await OnError.InvokeAsync(error);
     }
 }

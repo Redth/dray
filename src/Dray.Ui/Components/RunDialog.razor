@@ -1,0 +1,208 @@
+@* Run a container from an image.
+
+   Four fields, not forty. `docker run` has over a hundred flags; a form offering them all is one
+   nobody can complete and a set of choices nobody can evaluate. These are what someone types when
+   they want a database up — a name to find it by, a port to reach it on, the environment it needs
+   to boot, and somewhere for its data to live. Anything more specific belongs in a compose file,
+   which Dray can already bring up.
+
+   Every box takes the syntax people already have in their shell history, because a dialog that
+   invented its own would be one people retype things for. *@
+@inject EngineManager Engine
+
+<Dialog Title="Run a container" Class="run" Open="Open" OpenChanged="OpenChanged">
+    <ChildContent>
+        <div class="field">
+            <label class="field__label" for="run-image">Image</label>
+            <input id="run-image" class="input mono" placeholder="postgres:16"
+                   @bind="_image" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+
+            @if (_suggestions.Count > 0)
+            {
+                @* The images already on this host. Typing a tag that is not here is allowed — the
+                   engine pulls it — but most runs are of something already pulled, and a list
+                   beats remembering the exact tag. *@
+                <div class="run__suggestions">
+                    @foreach (var tag in _suggestions)
+                    {
+                        <button type="button" class="run__chip mono" @onclick="() => _image = tag">@tag</button>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="field">
+            <label class="field__label" for="run-name">
+                Name <span class="muted">(optional — the engine invents one otherwise)</span>
+            </label>
+            <input id="run-name" class="input" placeholder="my-database"
+                   @bind="_name" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <div class="run__grid">
+            <div class="field">
+                <label class="field__label" for="run-ports">
+                    Ports <span class="muted">(one per line, host:container)</span>
+                </label>
+                <textarea id="run-ports" class="input mono run__area" rows="3" placeholder="5432:5432"
+                          @bind="_ports" @bind:event="oninput" spellcheck="false"></textarea>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="run-env">
+                    Environment <span class="muted">(one NAME=value per line)</span>
+                </label>
+                <textarea id="run-env" class="input mono run__area" rows="3" placeholder="POSTGRES_PASSWORD=secret"
+                          @bind="_env" @bind:event="oninput" spellcheck="false"></textarea>
+            </div>
+        </div>
+
+        <div class="field">
+            <label class="field__label" for="run-mounts">
+                Mounts <span class="muted">(one per line, source:/path/in/container, add :ro for read-only)</span>
+            </label>
+            <textarea id="run-mounts" class="input mono run__area" rows="2" placeholder="pgdata:/var/lib/postgresql/data"
+                      @bind="_mounts" @bind:event="oninput" spellcheck="false"></textarea>
+        </div>
+
+        <label class="toggle">
+            <input type="checkbox" @bind="_start" />
+            <span>Start it now — leave this off to create it and look at it first</span>
+        </label>
+
+        @if (Problem is { } problem)
+        {
+            <p class="run__problem" role="alert">@problem</p>
+        }
+    </ChildContent>
+    <Footer>
+        <Button Label="Cancel" Variant="ButtonVariant.Ghost" Disabled="_running"
+                OnClick="() => OpenChanged.InvokeAsync(false)" />
+        <Button Label="@(_start ? "Run" : "Create")" Variant="ButtonVariant.Primary" Busy="_running"
+                Disabled="@(_running || _image.Trim().Length == 0)" OnClick="SubmitAsync" />
+    </Footer>
+</Dialog>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Pre-filled when the dialog is opened from a specific image's row.</summary>
+    [Parameter] public string? Image { get; set; }
+
+    /// <summary>Raised with the new container's id once the engine has accepted it.</summary>
+    [Parameter] public EventCallback<string> OnStarted { get; set; }
+
+    string _image = "";
+    string _name = "";
+    string _ports = "";
+    string _env = "";
+    string _mounts = "";
+    bool _start = true;
+    bool _running;
+
+    string? _failure;
+    IReadOnlyList<string> _suggestions = [];
+
+    /// <summary>
+    /// What is wrong right now — the first unreadable line, or the engine's refusal.
+    /// <para>
+    /// Recomputed on every render rather than on submit, so a mistyped port is flagged while the
+    /// user is still looking at the box rather than after they commit.
+    /// </para>
+    /// </summary>
+    string? Problem
+    {
+        get
+        {
+            if (_failure is { } failure) return failure;
+
+            if (_name.Trim().Length > 0 && ContainerName.Validate(_name.Trim()) is { } invalidName)
+                return invalidName;
+
+            RunParser.ParsePorts(_ports, out var portProblem);
+            if (portProblem is not null) return portProblem;
+
+            RunParser.ParseEnvironment(_env, out var envProblem);
+            if (envProblem is not null) return envProblem;
+
+            RunParser.ParseMounts(_mounts, out var mountProblem);
+            return mountProblem;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Image is { Length: > 0 } image && _image.Length == 0) _image = image;
+
+        if (Open && _suggestions.Count == 0)
+        {
+            var images = await Engine.ListImagesAsync();
+
+            _suggestions =
+            [
+                .. images
+                    .SelectMany(i => i.Tags.Select(t => t.Display))
+                    .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+                    .Take(8),
+            ];
+        }
+    }
+
+    async Task SubmitAsync()
+    {
+        _failure = null;
+
+        // Nothing is sent while anything is unreadable. Problem re-parses, which is cheap and
+        // keeps one definition of "is this form valid" rather than two that could drift.
+        if (Problem is not null) return;
+
+        // Re-parsed here rather than reusing what Problem computed: that property is for display
+        // and runs on every render, and threading its results out would make the render allocate
+        // the request too.
+        var ports = RunParser.ParsePorts(_ports, out _);
+        var env = RunParser.ParseEnvironment(_env, out _);
+        var mounts = RunParser.ParseMounts(_mounts, out _);
+
+        _running = true;
+
+        try
+        {
+            var request = new RunRequest
+            {
+                Image = _image.Trim(),
+                Name = _name.Trim() is { Length: > 0 } name ? name : null,
+                Ports = ports,
+                Environment = env,
+                Mounts = mounts,
+                Start = _start,
+            };
+
+            _failure = await Engine.RunAsync(request);
+
+            if (_failure is null)
+            {
+                await OnStarted.InvokeAsync(request.Name ?? request.Image);
+                await OpenChanged.InvokeAsync(false);
+                Reset();
+            }
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    /// <summary>Cleared on success so reopening the dialog does not offer to run the same thing twice.</summary>
+    void Reset()
+    {
+        _image = "";
+        _name = "";
+        _ports = "";
+        _env = "";
+        _mounts = "";
+        _start = true;
+        _suggestions = [];
+    }
+}

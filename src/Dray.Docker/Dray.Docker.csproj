@@ -16,6 +16,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The wire-shape mapping is internal because nothing outside this assembly should build a
+         ContainerInspect from a Docker response — but it is also where the engine-specific
+         quirks live, so it is exactly what needs testing. -->
+    <InternalsVisibleTo Include="Dray.Docker.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../Dray.Core/Dray.Core.csproj" />
   </ItemGroup>
 

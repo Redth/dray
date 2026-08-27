@@ -1,7 +1,294 @@
 @page "/stacks"
+@implements IDisposable
+@inject EngineManager Engine
+@inject IShellBridge Shell
+@inject NavigationManager Nav
 
-<PageChromeScope Chrome="@(new PageChrome("Stacks"))" />
+<EngineScope>
+    @* Declared inside EngineScope, not above it: this page's chrome reports a count that comes
+       from the store, and EngineScope re-renders only its own child content. Left outside, the
+       toolbar would keep the subtitle it had when the page opened. *@
+    <PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="s => _search = s" />
 
-<div class="page">
-    <EmptyState Icon="IconRef.Stack" Title="Compose stacks arrive in phase 5" Body="Dray will discover running stacks from their compose labels, and track compose files you add so a stack that is down stays visible." />
-</div>
+    <div class="page page--flush">
+        @if (_notice is { } notice)
+        {
+            <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+                <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                <span>@notice</span>
+                <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost"
+                        OnClick="() => _notice = null" />
+            </div>
+        }
+
+        @if (Engine.HasNoHosts)
+        {
+            <NoEngine />
+        }
+        else if (Visible.Count == 0 && _search.Length == 0 && Engine.Selected is { Capabilities.SupportsCompose: false })
+        {
+            @* Only when the list is also empty: a Docker host without the compose CLI still has
+               stacks worth reading, because Dray discovers them from container labels rather than
+               from compose. This branch is for an engine compose does not target at all. *@
+            <NotOnThisEngine Feature="stacks" Icon="IconRef.Stack"
+                             Instead="Compose does not target this engine, so nothing here carries the labels a stack is made of. Switch to a Docker-compatible host on the Hosts page." />
+        }
+        else if (Visible.Count == 0)
+        {
+            <EmptyState Icon="IconRef.Stack"
+                        Title="@(_search.Length > 0 ? "No stacks match" : "No stacks")"
+                        Body="@(_search.Length > 0
+                            ? "Nothing here matches the current search."
+                            : "A stack appears here as soon as one is running — including one brought up from a terminal. Dray reads the labels compose puts on containers, so nothing has to be registered first.")" />
+        }
+        else
+        {
+            <div class="stacks">
+                @foreach (var stack in Visible)
+                {
+                    <section class="stacks__card card" @key="stack.Name">
+                        <div class="panel__head">
+                            <h3 class="panel__title">
+                                <a href="@($"/stacks/{Uri.EscapeDataString(stack.Name)}")">@stack.Name</a>
+                            </h3>
+                            <StatePill Status="stack.Status" />
+
+                            <span class="muted stacks__count">
+                                @stack.Services.Count service@(stack.Services.Count == 1 ? "" : "s") ·
+                                @stack.RunningCount/@stack.ContainerCount running
+                            </span>
+
+                            <span class="stacks__spacer"></span>
+
+                            @if (_composeMissing)
+                            {
+                                @* Compose is a separate CLI, and a stack can be running that Dray
+                                   cannot drive. Saying so beats buttons that fail on click. *@
+                                <span class="muted stacks__note" title="Install Docker Compose to control stacks from Dray">
+                                    compose not installed
+                                </span>
+                            }
+                            else
+                            {
+                                @foreach (var (id, label, danger) in StackCommands)
+                                {
+                                    var captured = (id, label, stack);
+                                    <Button Label="@label"
+                                            Variant="ButtonVariant.Ghost"
+                                            Danger="danger"
+                                            Disabled="@(_running is not null)"
+                                            OnClick="() => RunAsync(captured.stack, captured.id, captured.label)" />
+                                }
+                            }
+                        </div>
+
+                        <table class="table">
+                            <thead>
+                                <tr><th>Service</th><th>State</th><th>Containers</th><th>Image</th><th></th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var service in stack.Services)
+                                {
+                                    <tr @key="@($"{stack.Name}/{service.Name}")">
+                                        <td>@service.Name</td>
+                                        <td><StatePill Status="service.Status" /></td>
+                                        <td>
+                                            @if (service.IsScaled)
+                                            {
+                                                <span>@service.RunningCount of @service.Replicas.Count</span>
+                                            }
+                                            else if (service.Replicas.FirstOrDefault() is { } only)
+                                            {
+                                                <a href="@($"/containers/{only.ShortId}")">@only.Name</a>
+                                            }
+                                        </td>
+                                        <td class="muted">
+                                            @(service.Replicas.FirstOrDefault() is { } r
+                                                ? $"{Humanize.ImageName(r.Image)}:{Humanize.ImageTag(r.Image)}"
+                                                : "—")
+                                        </td>
+                                        <td class="cell-actions">
+                                            <Button Label="@($"Logs for {service.Name}")" Icon="IconRef.Logs"
+                                                    IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                    OnClick="() => OpenLogs(stack, service)" />
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </section>
+                }
+            </div>
+        }
+
+        @if (_output.Count > 0)
+        {
+            <section class="stacks__output card">
+                <div class="panel__head">
+                    <h3 class="panel__title">@(_running ?? "Finished")</h3>
+                    <span class="stacks__spacer"></span>
+                    <Button Label="Clear" Icon="IconRef.Close" Variant="ButtonVariant.Ghost"
+                            Disabled="@(_running is not null)" OnClick="() => _output.Clear()" />
+                </div>
+
+                <pre class="stacks__log mono"><code>@string.Join('\n', _output)</code></pre>
+            </section>
+        }
+    </div>
+</EngineScope>
+
+@code {
+    /// <summary>
+    /// The compose commands worth a button. Deliberately not every subcommand: <c>up</c> and
+    /// <c>down</c> are what people do, and a wall of eight buttons makes the two that matter harder
+    /// to find.
+    /// </summary>
+    static readonly (string Id, string Label, bool Danger)[] StackCommands =
+    [
+        ("up", "Up", false),
+        ("restart", "Restart", false),
+        ("pull", "Pull", false),
+        ("down", "Down", true),
+    ];
+
+    string _search = "";
+    string? _notice;
+    bool _noticeOk;
+    bool _composeMissing;
+
+    /// <summary>The command in flight, as a label. Null when nothing is running.</summary>
+    string? _running;
+
+    readonly List<string> _output = [];
+    CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Engine.Changed += OnEngineChanged;
+
+        // Probed once. A machine either has compose or it does not, and asking again per render
+        // would shell out on every keystroke in the filter.
+        _composeMissing = await Engine.DetectComposeAsync() is null;
+    }
+
+    void OnEngineChanged() => InvokeAsync(StateHasChanged);
+
+    IReadOnlyList<StackSummary> Visible
+    {
+        get
+        {
+            var stacks = Engine.Stacks;
+            if (string.IsNullOrWhiteSpace(_search)) return stacks;
+
+            var needle = _search.Trim();
+
+            return
+            [
+                .. stacks.Where(s =>
+                    s.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                    || s.Services.Any(v => v.Name.Contains(needle, StringComparison.OrdinalIgnoreCase))),
+            ];
+        }
+    }
+
+    async Task RunAsync(StackSummary stack, string command, string label)
+    {
+        if (_running is not null) return;
+
+        if (command == "down")
+        {
+            var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+                $"Bring {stack.Name} down?",
+                "Every container in the stack is stopped and removed. Named volumes are kept — "
+                + "anything written outside one is lost.",
+                "Bring down"));
+
+            if (answer != ConfirmResult.Confirm) return;
+        }
+
+        _running = $"{label} {stack.Name}";
+        _output.Clear();
+        _cts = new CancellationTokenSource();
+
+        // `up` without -d would attach and never return; Dray is not a terminal and the containers
+        // must outlive the button that started them.
+        var arguments = command == "up" ? new[] { "up", "-d" } : [command];
+
+        try
+        {
+            await foreach (var line in Engine.RunComposeAsync(stack, arguments, _cts.Token))
+            {
+                _output.Add(line.Text);
+
+                // Bounded: a pull of a large stack produces thousands of lines and the panel only
+                // shows the tail anyway.
+                if (_output.Count > 500) _output.RemoveRange(0, _output.Count - 500);
+
+                StateHasChanged();
+            }
+
+            Notify($"{label} finished for {stack.Name}.", ok: true);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Notify(ex.Message, ok: false);
+        }
+        finally
+        {
+            _running = null;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    void OpenLogs(StackSummary stack, StackService service)
+    {
+        // One replica goes straight to its container's own log view rather than to an aggregated
+        // one that would show a single colour key and one source.
+        if (service.Replicas.FirstOrDefault() is { } only && !service.IsScaled)
+        {
+            Nav.NavigateTo($"/containers/{only.ShortId}");
+            return;
+        }
+
+        Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(stack.Name)}/logs");
+    }
+
+    void Notify(string message, bool ok)
+    {
+        _notice = message;
+        _noticeOk = ok;
+    }
+
+    PageChrome Chrome
+    {
+        get
+        {
+            var stacks = Engine.Stacks;
+
+            return new PageChrome(
+                "Stacks",
+                Subtitle: Engine.Selected is null
+                    ? null
+                    : $"{stacks.Count} on {Engine.Selected.Name}",
+                Search: new ChromeSearch("Filter stacks", _search),
+                Actions: [ChromeAction.Secondary("logs", "Aggregated logs", IconRef.Logs)]);
+        }
+    }
+
+    void HandleAction(string id)
+    {
+        if (id == "logs" && Engine.Stacks.FirstOrDefault() is { } first)
+            Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(first.Name)}/logs");
+    }
+
+    public void Dispose()
+    {
+        Engine.Changed -= OnEngineChanged;
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

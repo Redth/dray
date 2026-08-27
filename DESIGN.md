@@ -69,6 +69,14 @@ silently clip.
 | `--danger-ink` | `oklch(0.435 0.174 18)` | `#9a002a` | 8.72:1 vs bg |
 | `--neutral-tint` | `oklch(0.945 0.005 41)` | `#f0ecea` | 1.18:1 vs bg |
 | `--neutral-ink` | `oklch(0.520 0.011 41)` | `#6f6764` | 5.53:1 vs bg |
+| `--key-1` | `oklch(0.520 0.130 250)` | `#1f6cb0` | 5.50:1 vs bg |
+| `--key-2` | `oklch(0.520 0.120 150)` | `#287c42` | 5.21:1 vs bg |
+| `--key-3` | `oklch(0.520 0.100 60)` | `#925a25` | 5.67:1 vs bg |
+| `--key-4` | `oklch(0.520 0.130 320)` | `#894d97` | 5.89:1 vs bg |
+| `--key-5` | `oklch(0.520 0.085 200)` | `#10777c` | 5.29:1 vs bg |
+| `--key-6` | `oklch(0.520 0.130 25)` | `#a74541` | 5.88:1 vs bg |
+| `--key-7` | `oklch(0.520 0.130 285)` | `#635bb0` | 5.75:1 vs bg |
+| `--key-8` | `oklch(0.520 0.095 110)` | `#6c6d24` | 5.42:1 vs bg |
 <!-- generated:palette-light:end -->
 
 ### 2.2 Dark
@@ -104,6 +112,14 @@ fallbacks, not the truth.
 | `--danger-ink` | `oklch(0.700 0.170 14)` | `#f56a7e` | 6.44:1 vs bg |
 | `--neutral-tint` | `oklch(0.275 0.005 41)` | `#2a2726` | 1.26:1 vs bg |
 | `--neutral-ink` | `oklch(0.700 0.010 41)` | `#a49c9a` | 6.95:1 vs bg |
+| `--key-1` | `oklch(0.760 0.120 250)` | `#73b6fa` | 8.73:1 vs bg |
+| `--key-2` | `oklch(0.760 0.110 150)` | `#7cc58c` | 9.06:1 vs bg |
+| `--key-3` | `oklch(0.760 0.115 60)` | `#e79f62` | 8.45:1 vs bg |
+| `--key-4` | `oklch(0.760 0.115 320)` | `#d299df` | 8.28:1 vs bg |
+| `--key-5` | `oklch(0.760 0.090 200)` | `#64c3c8` | 9.00:1 vs bg |
+| `--key-6` | `oklch(0.760 0.115 25)` | `#f1938c` | 8.28:1 vs bg |
+| `--key-7` | `oklch(0.760 0.115 285)` | `#a9a6f7` | 8.46:1 vs bg |
+| `--key-8` | `oklch(0.760 0.110 110)` | `#b5b761` | 8.82:1 vs bg |
 <!-- generated:palette-dark:end -->
 
 ### 2.3 Status pills
@@ -211,12 +227,32 @@ different things. It swaps one variable; nothing else in the system changes.
 | `--row-pad-y` | `--s2` | `--s1` |
 | Table font | `--text-sm` | `--text-xs` |
 
-Radius: `--r-sm` 4px (pills, inputs, buttons), `--r-md` 6px (panels, popovers), `--r-lg` 10px
-(dialogs). Nothing is fully round except avatars and the state dot.
+Radius: `--r-sm` 6px (pills, inputs, buttons), `--r-md` 10px (popovers, inline banners), `--r-lg`
+14px (cards, dialogs). Nothing is fully round except avatars and the state dot.
+
+These were 4/6/10 and read as tighter than the platform around them — macOS 26 rounds its own
+sidebar and toolbar groups far more generously, and a 6px card inside that window looks like a
+different app's control. **Every card is rounded, always**, including a card that fills the window:
+a square corner where the design system says there is a radius reads as a bug, not as a variant.
 
 Elevation is borders and background steps, not shadow. Exactly two shadows exist, both for genuinely
 floating layers: `--shadow-popover` and `--shadow-dialog`. Cards do not have shadows. Rows do not have
 shadows.
+
+### 4.1 Content sits in cards
+
+Page content is laid out in cards on the window ground rather than running edge to edge. Full-bleed
+is defensible in a browser and wrong beside a native sidebar, where the sidebar is itself an inset
+rounded surface — a square-cornered slab of content butted against it reads as a layout failure.
+
+Two rules make this hold up:
+
+- **A card clips its children** (`overflow: hidden`). A table's first header cell, a tab bar's
+  bottom rule and the code editor's own background each paint over a rounded corner and square it
+  off. Clipping at the card is the one place that fixes all of them.
+- **A card is never inside a card.** Panels and table wrappers carry their own surface and border
+  for when they sit directly on the page ground; inside a card they flatten to sections separated
+  by the rule under their heading. Two nested borders fight for the eye and read as a mistake.
 
 **Z-index is a named scale**, never an arbitrary number:
 `--z-sticky` 10 → `--z-dropdown` 20 → `--z-overlay` 30 → `--z-dialog` 40 → `--z-toast` 50 →
@@ -326,7 +362,46 @@ feels wrong — sidebar rows, toolbar, table headers, buttons, tabs.
 on hover. This is the single most common thing a user wants from a Docker GUI.
 
 **Never poll a list.** State comes from the Docker event stream. A manual refresh exists as a
-fallback, in the toolbar overflow, not as the primary affordance.
+fallback, in the toolbar overflow, not as the primary affordance. One engine has no event stream at
+all (Apple's `container`); there Dray polls, and the Hosts page says so rather than letting the user
+discover it as sluggishness.
+
+---
+
+### 8.1 Never offer what the engine cannot do
+
+Engines differ. Apple's runtime cannot pause a container, cannot rename one, has no volumes, no
+manageable networks, and no shell Dray can attach to. Every one of those is a control that would
+render, be clicked, and fail.
+
+`ContainerAction.cs` already states the rule for state: *an action offered in the wrong state is
+either a no-op the user does not understand or an error the engine has to reject, and it teaches the
+user the UI is guessing.* A capability the engine lacks is the same mistake with a different cause,
+so it gets the same treatment.
+
+- **A control the engine will refuse is not rendered.** Not disabled, not shown-with-a-tooltip —
+  absent. A disabled Pause button on an engine that will never have pause is permanent clutter.
+- **A whole page's worth of absence is explained, not emptied.** "No volumes" invites the user to
+  create one. `NotOnThisEngine` names the engine, says the concept is not part of it, and says what
+  this engine does instead.
+- **The Hosts page is where the whole picture lives.** One panel, every capability, with a sentence
+  on what its absence costs. A user should be able to answer "why can't I do X here?" in one place
+  rather than by pressing things.
+- **A page that explains itself still needs its title.** The web chrome hides a toolbar with no
+  controls, so these pages keep one action — "Switch engine…" — which is both the title's carrier
+  and the only thing that would change the answer.
+
+### 8.2 Unknown is not zero
+
+An engine that does not report a number must not be rendered as having reported zero.
+
+`0 B` of image size reads as a measurement and makes a list of images look free. "nothing" in a
+Used by column reads as a fact and makes Remove look safe. `0 B reclaimable` invites the user to
+stop looking. Each of these is a claim the engine never made.
+
+The rendering is an em dash, and where a total would be built from unmeasured parts the total is
+dropped rather than understated. `DiskUsage.IsKnown` and `ImageSummary.SizeReported` exist to carry
+this distinction; so does a null `ExitCode` on an engine that reports none.
 
 ---
 
@@ -350,10 +425,21 @@ The Blazor content sits inside a native window. At the boundary, these must matc
 - **Resolve platform colours inside the current appearance.** AppKit's semantic colours are
   dynamic and resolve against the *default* appearance outside a drawing context, so a naive read
   returns light values in dark mode.
-- **Accent.** Where the OS exposes a user accent colour (macOS `NSColor.controlAccentColor`, Windows
-  `UISettings.GetColorValue(Accent)`), selection highlight uses it. `--brand` remains the app's
-  identity — icon, splash, primary buttons — but the *selected row* follows the user's OS preference,
-  because that is what every native list on their machine does.
+- **Accent: Dray supplies its own, and the user can still override it.** Native selection defaults
+  to the system blue, which reads as a foreign colour sitting inside a terracotta app — the seam
+  becomes visible at exactly the moment the user interacts. So Dray ships its accent to the
+  platform: on macOS an `AccentColor` colorset generated into `Assets.xcassets` from
+  `design/tokens.json`, named by `NSAccentColorName`. AppKit then tints selection, focus rings and
+  controls with `--brand` for free, in both appearances.
+
+  This does not take the choice away from the user, because of how macOS resolves it: an app accent
+  applies only while the system Appearance accent is **Multicolor** (the default). A user who has
+  picked a specific accent still gets theirs everywhere, Dray included — which is the right
+  precedence. Windows behaves the same way through its own accent, and GTK has no equivalent
+  mechanism at all, so on Linux this reduces to styling selection with `--brand` directly.
+
+  The colorset is generated, never hand-edited: AppKit reads it at launch with no runtime API, so a
+  hand-written copy would be the one place the brand could silently drift from the token file.
 - **Theme changes propagate synchronously.** Switching the OS appearance must repaint native chrome
   and WebView content in the same frame. A visible two-step flash is a bug, not a limitation.
 - **System settings are honoured:** reduce-transparency, increase-contrast, and the system text-size
@@ -382,6 +468,22 @@ The native sidebar and the web nav must never be two hand-maintained lists that 
 render from one `NavigationManifest` in `Dray.Core`. Similarly, a page **declares** its toolbar
 through a `PageChrome` record — the way it declares `<PageTitle>` — and the host projects that onto
 `NSToolbar` / `CommandBar` / `AdwHeaderBar`. Pages never imperatively mutate native chrome.
+
+**Back is its own slot, not another action.** There is at most one, it is navigation rather than a
+command, and every platform agrees it goes leading. Modelled as an action, each host had to
+special-case an id it should not know about, and the web chrome rendered it as a forward-pointing
+button on the far right.
+
+**Where a page's commands are drawn depends on the host, and only that.** A detail page declares
+back and its container's actions once. A host with a real toolbar projects them there — back
+leading, actions trailing. A host without one has nowhere to put them, so the page renders them in
+its own header instead; a web toolbar containing nothing but the page's own heading is a second
+copy of it, which is what made detail pages look like they had two titles.
+
+The window's title stays out of it. Making `NSWindow.Title` visible reserves the toolbar's leading
+edge for AppKit, which pushes back across to the actions; the only style that avoids that,
+`Expanded`, puts the title on a full-width row above the sidebar and loses the inset-sidebar look
+entirely. Both were tried. The heading stays in the content.
 
 ---
 

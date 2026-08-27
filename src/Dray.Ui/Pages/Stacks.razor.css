@@ -1,0 +1,32 @@
+.stacks {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+}
+
+.stacks__spacer {
+    flex: 1 1 auto;
+}
+
+.stacks__count,
+.stacks__note {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+/* Compose's own output while a command runs. Fixed height so a long pull does not push the stack
+   list off the page, and scrolled to keep the tail visible. */
+.stacks__output {
+    margin-top: var(--s3);
+}
+
+.stacks__log {
+    max-height: 30vh;
+    overflow: auto;
+    padding: var(--s3);
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}

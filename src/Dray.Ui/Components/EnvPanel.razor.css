@@ -1,0 +1,30 @@
+.env__hidden {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    font-size: var(--text-xs);
+    color: var(--muted);
+}
+
+.env__key {
+    white-space: nowrap;
+    width: 1%;
+}
+
+.env__value {
+    overflow-wrap: anywhere;
+}
+
+/* Fixed width, deliberately: one dot per character would leak the length of the password. */
+.env__mask {
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    user-select: none;
+}
+
+.env__actions {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+}
+

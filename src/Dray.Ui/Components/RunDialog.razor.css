@@ -1,0 +1,53 @@
+/* Wider than the default dialog: three of these fields are multi-line, and a narrow box turns a
+   two-column port mapping into something that wraps. */
+::deep .dialog.run {
+    max-width: 44rem;
+}
+
+/* Ports and environment side by side — they are filled together and read together, and stacking
+   them pushes the mounts field below the fold on a short window. Collapses on a narrow one. */
+.run__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: var(--s3);
+}
+
+.run__area {
+    /* Vertical only: a textarea that can be dragged wider breaks the grid it sits in. */
+    resize: vertical;
+    min-height: calc(var(--row-h) * 2);
+    line-height: 1.5;
+}
+
+.run__suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1);
+    margin-top: var(--s2);
+}
+
+.run__chip {
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--muted);
+    padding: 2px var(--s2);
+    font-size: var(--text-sm);
+    cursor: pointer;
+}
+
+.run__chip:hover {
+    border-color: var(--brand);
+    color: var(--ink);
+}
+
+.run__chip:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.run__problem {
+    margin: var(--s3) 0 0;
+    color: var(--danger);
+    font-size: var(--text-sm);
+}

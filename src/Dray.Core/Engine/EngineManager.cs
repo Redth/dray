@@ -8,7 +8,34 @@ namespace Dray.Core.Engine;
 /// </summary>
 public interface IContainerRuntimeFactory
 {
+    /// <summary>
+    /// Whether this factory can serve the endpoint.
+    /// <para>
+    /// Exists because there is now more than one engine. A factory that answered every endpoint
+    /// would have to guess, and the wrong guess is a runtime that connects to nothing and reports
+    /// the engine as down.
+    /// </para>
+    /// </summary>
+    bool Handles(DockerEndpoint endpoint);
+
     IContainerRuntime Create(DockerEndpoint endpoint);
+}
+
+/// <summary>
+/// Dispatches an endpoint to whichever engine can serve it.
+/// <para>
+/// The composition root's answer to two runtimes existing. Order matters only in that the first
+/// factory claiming an endpoint wins, so a more specific factory belongs before a general one.
+/// </para>
+/// </summary>
+public sealed class CompositeRuntimeFactory(params IContainerRuntimeFactory[] factories) : IContainerRuntimeFactory
+{
+    public bool Handles(DockerEndpoint endpoint) => factories.Any(f => f.Handles(endpoint));
+
+    public IContainerRuntime Create(DockerEndpoint endpoint)
+        => factories.FirstOrDefault(f => f.Handles(endpoint))?.Create(endpoint)
+           ?? throw new RuntimeConnectionException(
+               $"Dray has no engine that can talk to {endpoint.Display}.");
 }
 
 /// <summary>
@@ -189,6 +216,302 @@ public sealed class EngineManager : IAsyncDisposable
 
         await foreach (var line in runtime.StreamLogsAsync(containerId, options, ct).ConfigureAwait(false))
             yield return line;
+    }
+
+    /// <summary>
+    /// Everything the engine knows about one container.
+    /// <para>
+    /// Not cached and not folded into the store. The store holds what the event stream can keep
+    /// current; an inspect response is a snapshot of far more than events report, so caching one
+    /// would mean showing stale detail with no way to know it had gone stale.
+    /// </para>
+    /// </summary>
+    public async Task<ContainerInspect> InspectAsync(string containerId, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) throw new RuntimeConnectionException("Not connected to an engine.");
+
+        return await runtime.InspectContainerAsync(containerId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// What the engine says is on disk, or <see cref="DiskUsage.Unknown"/> when it cannot say.
+    /// <para>
+    /// Not folded into the store and not kept current: <c>system df</c> walks every image layer and
+    /// every volume, which is the most expensive call the engine offers. It is fetched when a
+    /// screen asks and not on a timer.
+    /// </para>
+    /// </summary>
+    public async Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return DiskUsage.Unknown;
+
+        try
+        {
+            return await runtime.GetDiskUsageAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // An engine that cannot answer is the same to the caller as one that does not
+            // implement it: unknown, which is a state the UI already renders honestly.
+            return DiskUsage.Unknown;
+        }
+    }
+
+    public async Task<IReadOnlyList<VolumeSummary>> ListVolumesAsync(CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return [];
+
+        return await runtime.ListVolumesAsync(ct).ConfigureAwait(false);
+    }
+
+    // ---------------------------------------------------------------- compose
+
+    readonly ComposeCli _compose = new();
+
+    /// <summary>
+    /// How compose is invoked here, or null when it is not installed.
+    /// <para>
+    /// Compose is a CLI plugin, not an engine feature, so it is probed on this machine rather than
+    /// asked of the daemon — a remote engine can be running a stack Dray cannot drive.
+    /// </para>
+    /// </summary>
+    public Task<ComposeCommand?> DetectComposeAsync(CancellationToken ct = default)
+        => _compose.DetectAsync(ct);
+
+    /// <summary>
+    /// The stacks currently on this host, assembled from the labels compose puts on containers.
+    /// <para>
+    /// Read from the store rather than the engine, so it follows the event stream like everything
+    /// else: a container starting or dying updates its stack without a refresh.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<StackSummary> Stacks => StackDiscovery.From(Store.Containers);
+
+    /// <summary>Run a compose subcommand, streaming its output.</summary>
+    public async IAsyncEnumerable<ComposeOutput> RunComposeAsync(
+        StackSummary stack,
+        IReadOnlyList<string> arguments,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (await _compose.DetectAsync(ct).ConfigureAwait(false) is not { } command)
+        {
+            yield return new ComposeOutput("Compose is not installed on this machine.", IsError: true);
+            yield break;
+        }
+
+        await foreach (var line in _compose
+            .RunAsync(command, stack.Name, stack.ConfigFiles, arguments, stack.WorkingDirectory, ct)
+            .ConfigureAwait(false))
+        {
+            yield return line;
+        }
+    }
+
+    // ---------------------------------------------------------------- images
+
+    public async Task<IReadOnlyList<ImageSummary>> ListImagesAsync(bool includeDangling = true, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return [];
+
+        return await runtime.ListImagesAsync(includeDangling, ct).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return [];
+
+        return await runtime.GetImageHistoryAsync(imageId, ct).ConfigureAwait(false);
+    }
+
+    /// <returns>Null on success, or a sentence explaining what went wrong.</returns>
+    public Task<string?> RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.RemoveImageAsync(imageId, force, ct));
+
+    public Task<string?> TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.TagImageAsync(imageId, repository, tag, ct));
+
+    /// <summary>
+    /// Create a container from an image and start it.
+    /// <para>
+    /// Nothing is written to the store: the new container arrives the way every other one does,
+    /// through the event stream or the poll. Writing it here would put a row on screen that the
+    /// engine has not yet confirmed, and the whole design says the engine is the source of truth.
+    /// </para>
+    /// </summary>
+    /// <returns>A sentence explaining what went wrong, or null on success.</returns>
+    public Task<string?> RunAsync(RunRequest request, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.RunAsync(request, ct));
+
+    public async IAsyncEnumerable<PullProgress> PullImageAsync(
+        string reference,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) yield break;
+
+        await foreach (var step in runtime.PullImageAsync(reference, ct).ConfigureAwait(false))
+            yield return step;
+    }
+
+    /// <summary>Build an image, streaming the engine's output.</summary>
+    public async IAsyncEnumerable<BuildProgress> BuildImageAsync(
+        BuildRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) yield break;
+
+        await foreach (var step in runtime.BuildImageAsync(request, ct).ConfigureAwait(false))
+            yield return step;
+    }
+
+    // ---------------------------------------------------------------- networks
+
+    public async Task<IReadOnlyList<NetworkSummary>> ListNetworksAsync(CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return [];
+
+        return await runtime.ListNetworksAsync(ct).ConfigureAwait(false);
+    }
+
+    public Task<string?> CreateNetworkAsync(NetworkRequest request, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.CreateNetworkAsync(request, ct));
+
+    public Task<string?> RemoveNetworkAsync(string networkId, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.RemoveNetworkAsync(networkId, ct));
+
+    public Task<string?> ConnectNetworkAsync(string networkId, string containerId, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.ConnectNetworkAsync(networkId, containerId, ct));
+
+    public Task<string?> DisconnectNetworkAsync(string networkId, string containerId, bool force = false, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.DisconnectNetworkAsync(networkId, containerId, force, ct));
+
+    // ---------------------------------------------------------------- volumes
+
+    public Task<string?> CreateVolumeAsync(string name, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.CreateVolumeAsync(name, ct));
+
+    public Task<string?> RemoveVolumeAsync(string name, bool force = false, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.RemoveVolumeAsync(name, force, ct));
+
+    // ---------------------------------------------------------------- prune
+
+    public async Task<PrunePreview> PreviewPruneAsync(PruneKind kind, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return PrunePreview.Empty(kind);
+
+        return await runtime.PreviewPruneAsync(kind, ct).ConfigureAwait(false);
+    }
+
+    public async Task<PruneResult> PruneAsync(PruneKind kind, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return new PruneResult(kind, 0, 0);
+
+        return await runtime.PruneAsync(kind, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Run something that either works or explains itself.
+    /// <para>
+    /// Every mutating call in this class has the same shape — do it, and turn a failure into a
+    /// sentence the UI can show — and repeating that try/catch a dozen times is how one of them
+    /// ends up rethrowing a stack trace at the user.
+    /// </para>
+    /// </summary>
+    async Task<string?> TryAsync(Func<IContainerRuntime, Task> action)
+    {
+        if (_runtime is not { } runtime) return "Not connected to an engine.";
+
+        try
+        {
+            await action(runtime).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return RuntimeEventPump.Describe(ex);
+        }
+    }
+
+    /// <summary>
+    /// Open a volume for browsing. The caller owns the session and must dispose it — it holds
+    /// engine-side resources for as long as it lives.
+    /// </summary>
+    public async Task<IVolumeSession> OpenVolumeAsync(string volumeName, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) throw new RuntimeConnectionException("Not connected to an engine.");
+
+        return await runtime.OpenVolumeAsync(volumeName, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Rename a container.</summary>
+    /// <returns>Null on success, or a sentence explaining what went wrong.</returns>
+    public async Task<string?> RenameAsync(string containerId, string name, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return "Not connected to an engine.";
+
+        try
+        {
+            await runtime.RenameAsync(containerId, name, ct).ConfigureAwait(false);
+
+            // Written straight to the store rather than waiting for the stream. Docker emits a
+            // rename event; podman emits nothing at all, so waiting would leave the old name on
+            // screen indefinitely. The engine has already accepted this exact name, so it is a
+            // fact rather than a prediction — see EntityStore.Rename.
+            Store.Rename(containerId, name);
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return RuntimeEventPump.Describe(ex);
+        }
+    }
+
+    /// <summary>
+    /// Sample a container's resource use. The stream belongs to the caller and ends with their
+    /// cancellation token, so a view that goes away stops sampling.
+    /// </summary>
+    public async IAsyncEnumerable<ContainerStats> StreamStatsAsync(
+        string containerId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) yield break;
+
+        await foreach (var sample in runtime.StreamStatsAsync(containerId, ct).ConfigureAwait(false))
+            yield return sample;
+    }
+
+    /// <summary>
+    /// Open a shell inside a container. The caller owns the session and must dispose it — an exec
+    /// left running holds a process inside the user's container.
+    /// </summary>
+    public async Task<IExecSession> StartExecAsync(
+        string containerId, ExecOptions options, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) throw new RuntimeConnectionException("Not connected to an engine.");
+
+        return await runtime.StartExecAsync(containerId, options, ct).ConfigureAwait(false);
+    }
+
+    public async Task<DirectoryListing> ListDirectoryAsync(
+        string containerId, string path, bool containerIsRunning, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) throw new RuntimeConnectionException("Not connected to an engine.");
+
+        return await runtime.ListDirectoryAsync(containerId, path, containerIsRunning, ct).ConfigureAwait(false);
+    }
+
+    public async Task<byte[]> ReadFileAsync(string containerId, string path, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) throw new RuntimeConnectionException("Not connected to an engine.");
+
+        return await runtime.ReadFileAsync(containerId, path, ct).ConfigureAwait(false);
+    }
+
+    public async Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) throw new RuntimeConnectionException("Not connected to an engine.");
+
+        await runtime.WriteFileAsync(containerId, path, content, ct).ConfigureAwait(false);
     }
 
     /// <summary>

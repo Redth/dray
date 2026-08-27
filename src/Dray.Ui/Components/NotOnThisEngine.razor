@@ -1,0 +1,33 @@
+@* A feature the selected engine genuinely does not have.
+
+   Distinct from an empty list, and the distinction is the whole point. "No volumes yet" invites
+   the user to make one; this says the concept does not exist here, names the engine, and says what
+   this engine does instead.
+
+   No button of its own: the page's chrome already carries "Switch engine…", which is where a
+   page's actions live and the only thing that would change the answer. Two identical buttons a
+   centimetre apart read as a mistake.
+
+   DESIGN.md section 6: never "Nothing here." Say why. *@
+@inject EngineManager Engine
+
+<EmptyState Icon="Icon" Title="@Title" Body="@Body" />
+
+@code {
+    /// <summary>The plural noun, lowercase: "volumes", "networks", "stacks".</summary>
+    [Parameter, EditorRequired] public string Feature { get; set; } = "";
+
+    [Parameter] public IconRef Icon { get; set; } = IconRef.Info;
+
+    /// <summary>What the user can do on this engine instead, when there is something. One sentence.</summary>
+    [Parameter] public string? Instead { get; set; }
+
+    string EngineName => Engine.Selected?.Name ?? "This engine";
+
+    string Title => $"{EngineName} has no {Feature}";
+
+    string Body => Instead is { Length: > 0 } instead
+        ? $"This is not a Docker-compatible engine, and {Feature} are not part of it. {instead}"
+        : $"This is not a Docker-compatible engine, and {Feature} are not part of it. "
+          + "Switching to a Docker-compatible host brings this page back.";
+}

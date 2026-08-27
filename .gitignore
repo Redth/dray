@@ -24,6 +24,7 @@ src/Dray.Ui/wwwroot/css/tokens.css
 src/Dray.Ui/wwwroot/icons/sprite.svg
 src/Dray.Core/Theme/Tokens.g.cs
 src/Dray.Core/Shell/Icons.g.cs
+src/Dray.MacOS/Assets.xcassets/AccentColor.colorset/Contents.json
 
 # macOS app bundles
 *.app/

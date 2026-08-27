@@ -1,0 +1,23 @@
+/* Sized to the title it sits beside rather than to the button scale: this is a piece of the
+   heading, not a control competing with it. */
+.back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-left: -4px;
+    border-radius: var(--r-sm);
+    color: var(--muted);
+    flex: 0 0 auto;
+}
+
+.back:hover {
+    color: var(--ink);
+    background: var(--surface-2);
+}
+
+.back:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}

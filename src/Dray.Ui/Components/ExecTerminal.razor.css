@@ -1,0 +1,72 @@
+.term {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    background: var(--surface);
+}
+
+.term__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+}
+
+.term__shell {
+    font-size: var(--text-xs);
+    color: var(--muted);
+}
+
+.term__exit {
+    font-size: var(--text-xs);
+    color: var(--muted);
+    background: var(--neutral-tint);
+    padding: 2px var(--s2);
+    border-radius: var(--r-sm);
+}
+
+.term__exit.is-error {
+    color: var(--danger-ink);
+    background: var(--danger-tint);
+}
+
+.term__spacer {
+    flex: 1 1 auto;
+}
+
+/* xterm measures this element to work out its column count, so it needs a definite size from
+   flex rather than from its content. The padding is inside the scroll area deliberately: a
+   terminal whose first column touches the border reads as clipped. */
+.term__host {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: var(--s2) var(--s3);
+    overflow: hidden;
+}
+
+/* Hidden rather than unmounted while an error shows, so reconnecting keeps the previous session's
+   scrollback instead of rebuilding the terminal from nothing. */
+.term__host.is-hidden {
+    display: none;
+}
+
+.term__message {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s5);
+}
+
+/* Narrow on purpose: find is a secondary control in a bar whose subject is the shell prompt. */
+.term__find {
+    width: 12ch;
+    font-size: var(--text-xs);
+}
+
+.term__find:focus {
+    width: 20ch;
+}

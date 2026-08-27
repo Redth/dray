@@ -1,0 +1,83 @@
+/* Wider and higher than a normal dialog: it is a list to scan, and one anchored to the middle of a
+   tall window puts the results where the eye is not. */
+::deep .palette {
+    width: min(640px, 92vw);
+    max-height: 70vh;
+    margin-top: 12vh;
+}
+
+.palette__input {
+    width: 100%;
+    font-size: var(--text-md);
+    padding: var(--s3);
+}
+
+.palette__empty {
+    padding: var(--s4) var(--s2);
+    font-size: var(--text-sm);
+}
+
+.palette__list {
+    list-style: none;
+    margin: var(--s2) 0 0;
+    padding: 0;
+    max-height: 46vh;
+    overflow-y: auto;
+}
+
+/* Four columns: icon, what it is, its state, and where it came from. The category on the right
+   keeps a list mixing containers and navigation readable without grouping headers. */
+.palette__row {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    font-size: var(--text-sm);
+}
+
+.palette__row.is-selected {
+    background: var(--surface-2);
+}
+
+/* Destructive entries are marked in the palette too. It is the one place an action can be run
+   without the row it belongs to on screen, so the cue has to travel with it. */
+.palette__row.is-destructive .palette__title {
+    color: var(--danger);
+}
+
+.palette__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.palette__detail,
+.palette__category {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+.palette__detail {
+    max-width: 24ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.palette__hint {
+    margin-top: var(--s3);
+    font-size: var(--text-xs);
+    text-align: center;
+}
+
+.palette__hint kbd {
+    display: inline-block;
+    padding: 0 4px;
+    margin: 0 1px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    font-size: var(--text-xs);
+}

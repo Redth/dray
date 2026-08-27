@@ -20,7 +20,7 @@ public static class DemoData
         {
             Id = "3f2a91c4e8b7d05a", Name = "web", Image = "ghcr.io/redth/dray-web:1.4.2",
             State = DockerState.Running, Health = DockerHealth.Healthy,
-            Since = Now.AddDays(-3), Stack = "dray",
+            Since = Now.AddDays(-3), Compose = new ComposeMembership("dray"),
             Ports = [new(8080, 80), new(8443, 443)],
             CpuPercent = 1.4, MemoryBytes = 128_500_000,
         },
@@ -28,7 +28,7 @@ public static class DemoData
         {
             Id = "9c1d77aa2b3e4f60", Name = "api", Image = "ghcr.io/redth/dray-api:1.4.2",
             State = DockerState.Running, Health = DockerHealth.Unhealthy,
-            Since = Now.AddHours(-6), Stack = "dray",
+            Since = Now.AddHours(-6), Compose = new ComposeMembership("dray"),
             Ports = [new(5000, 5000)],
             CpuPercent = 42.8, MemoryBytes = 512_300_000,
         },
@@ -36,7 +36,7 @@ public static class DemoData
         {
             Id = "b47e0f5c19d82a3b", Name = "postgres", Image = "postgres:16-alpine",
             State = DockerState.Running, Health = DockerHealth.Healthy,
-            Since = Now.AddDays(-31), Stack = "dray",
+            Since = Now.AddDays(-31), Compose = new ComposeMembership("dray"),
             Ports = [new(5432, 5432)],
             CpuPercent = 0.3, MemoryBytes = 96_000_000,
         },
@@ -44,19 +44,19 @@ public static class DemoData
         {
             Id = "0a5b8e2f77c13d94", Name = "migrate", Image = "ghcr.io/redth/dray-api:1.4.2",
             State = DockerState.Exited, ExitCode = 0,
-            Since = Now.AddHours(-6), Stack = "dray",
+            Since = Now.AddHours(-6), Compose = new ComposeMembership("dray"),
         },
         new()
         {
             Id = "e81c46b0d9f27a55", Name = "worker", Image = "ghcr.io/redth/dray-worker:1.4.2",
             State = DockerState.Exited, ExitCode = 137,
-            Since = Now.AddMinutes(-18), Stack = "dray",
+            Since = Now.AddMinutes(-18), Compose = new ComposeMembership("dray"),
         },
         new()
         {
             Id = "7d3f10ab55e6c982", Name = "redis", Image = "redis:7",
             State = DockerState.Running, Health = DockerHealth.Starting,
-            Since = Now.AddSeconds(-22), Stack = "dray",
+            Since = Now.AddSeconds(-22), Compose = new ComposeMembership("dray"),
             Ports = [new(6379, 6379)],
             CpuPercent = 0.1, MemoryBytes = 12_400_000,
         },

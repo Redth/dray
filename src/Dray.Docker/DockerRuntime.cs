@@ -17,6 +17,7 @@ namespace Dray.Docker;
 public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
 {
     DockerClient? _client;
+    DockerRawApi? _raw;
 
     public RuntimeCapabilities Capabilities { get; private set; } = RuntimeCapabilities.None;
 
@@ -26,6 +27,8 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public async Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default)
     {
         _client?.Dispose();
+        _raw?.Dispose();
+
         _client = DockerClientFactory.Create(endpoint);
 
         try
@@ -34,6 +37,15 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             var info = await _client.System.GetSystemInfoAsync(ct).ConfigureAwait(false);
 
             Capabilities = Probe(version, info);
+
+            // Built here rather than above because it needs the negotiated API version: an
+            // unversioned path reaches a different API on podman. See DockerRawApi.
+            _raw = new DockerRawApi(endpoint, version.APIVersion);
+
+            // A Dray that was killed rather than closed leaves its volume-browser helpers behind.
+            // Cleared here, where it is certain none of them belongs to a live session.
+            await DockerVolumeSession.SweepOrphansAsync(_client, ct).ConfigureAwait(false);
+
             return Capabilities;
         }
         catch (DockerApiException ex)
@@ -79,8 +91,14 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             SupportsCompose = false,
             SupportsBuildKit = flavor == EngineFlavor.Docker,
 
-            // Podman's compat stats endpoint exists but is partial.
-            SupportsStats = flavor == EngineFlavor.Docker,
+            // Both engines serve the compat stats endpoint with the fields Dray needs — CPU and
+            // memory counters, per-interface network totals. Verified against podman 6.0.2 rather
+            // than assumed: an earlier version of this claimed podman could not do it, on no
+            // evidence, and turned the feature off for every podman user.
+            //
+            // Block I/O is the one gap: a rootless podman reports no io accounting at all, so the
+            // UI treats a zero there as "not reported" rather than as a measurement.
+            SupportsStats = true,
         };
     }
 
@@ -95,8 +113,19 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             .ListContainersAsync(new ContainersListParameters { All = includeStopped }, ct)
             .ConfigureAwait(false);
 
-        return [.. responses.Select(Map)];
+        return [.. responses.Where(IsUsersOwn).Select(Map)];
     }
+
+    /// <summary>
+    /// Whether a container is the user's rather than Dray's own scaffolding.
+    /// <para>
+    /// The volume browser mounts a volume into a container that never runs. That container is an
+    /// implementation detail: listing it would put something in the user's containers table that
+    /// they did not create, cannot explain, and would reasonably try to delete.
+    /// </para>
+    /// </summary>
+    internal static bool IsUsersOwn(ContainerListResponse c)
+        => c.Labels?.ContainsKey(DockerVolumeSession.HelperLabel) != true;
 
     internal static ContainerSummary Map(ContainerListResponse c) => new()
     {
@@ -110,9 +139,11 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         State = ParseState(c.State),
         Health = ParseHealthFromStatus(c.Status),
         ExitCode = ParseExitCode(c.Status),
-        Since = c.Created == default ? null : new DateTimeOffset(c.Created, TimeSpan.Zero),
+        Since = DockerTime.From(c.Created),
         Ports = MapPorts(c.Ports),
-        Stack = c.Labels is not null && c.Labels.TryGetValue("com.docker.compose.project", out var project) ? project : null,
+        Compose = ComposeMembership.From(c.Labels is { Count: > 0 } labels
+            ? new Dictionary<string, string>(labels, StringComparer.Ordinal)
+            : null),
     };
 
     static DockerState ParseState(string? state) => state?.ToLowerInvariant() switch
@@ -242,6 +273,186 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default)
         => DockerFileSystem.WriteFileAsync(Client, containerId, path, content, ct);
 
+    public Task<string> RunAsync(RunRequest request, CancellationToken ct = default)
+        => DockerRun.RunAsync(Client, request, ct);
+
+    public async Task RenameAsync(string containerId, string name, CancellationToken ct = default)
+    {
+        try
+        {
+            await Client.Containers
+                .RenameContainerAsync(containerId, new ContainerRenameParameters { NewName = name }, ct)
+                .ConfigureAwait(false);
+        }
+        catch (DockerApiException ex) when ((int)ex.StatusCode == 409)
+        {
+            throw new RuntimeConnectionException($"Another container is already called \"{name}\".", ex);
+        }
+        catch (DockerApiException ex) when ((int)ex.StatusCode == 404)
+        {
+            throw new RuntimeConnectionException("That container no longer exists.", ex);
+        }
+        catch (DockerApiException ex)
+        {
+            throw new RuntimeConnectionException(DescribeApiFailure(ex), ex);
+        }
+    }
+
+    public async Task<ContainerInspect> InspectContainerAsync(string containerId, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await Client.Containers.InspectContainerAsync(containerId, ct).ConfigureAwait(false);
+
+            // The typed response drives the curated tabs; the raw body drives the JSON view. Both
+            // come from the same container but not the same request, so a container removed
+            // between the two shows the curated view without the raw one rather than failing.
+            var raw = await ReadRawInspectAsync(containerId, ct).ConfigureAwait(false);
+
+            return DockerInspect.Map(response, raw);
+        }
+        catch (DockerApiException ex) when ((int)ex.StatusCode == 404)
+        {
+            throw new RuntimeConnectionException("That container no longer exists.", ex);
+        }
+        catch (DockerApiException ex)
+        {
+            throw new RuntimeConnectionException(DescribeApiFailure(ex), ex);
+        }
+    }
+
+    async Task<string> ReadRawInspectAsync(string containerId, CancellationToken ct)
+    {
+        if (_raw is null) return "";
+
+        try
+        {
+            return await _raw.GetJsonAsync($"/containers/{containerId}/json", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            // The curated tabs are the point of the screen; losing the raw view is a degraded
+            // Inspect tab, not a failed page.
+            return "";
+        }
+    }
+
+    public async Task<IReadOnlyList<ImageSummary>> ListImagesAsync(bool includeDangling = true, CancellationToken ct = default)
+    {
+        try
+        {
+            return await DockerImages.ListAsync(Client, includeDangling, ct).ConfigureAwait(false);
+        }
+        catch (DockerApiException ex)
+        {
+            throw new RuntimeConnectionException(DescribeApiFailure(ex), ex);
+        }
+    }
+
+    public Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default)
+        => DockerImages.HistoryAsync(Client, imageId, ct);
+
+    public Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default)
+        => DockerImages.RemoveAsync(Client, imageId, force, ct);
+
+    public Task TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default)
+        => DockerImages.TagAsync(Client, imageId, repository, tag, ct);
+
+    public IAsyncEnumerable<PullProgress> PullImageAsync(string reference, CancellationToken ct = default)
+        => DockerImages.PullAsync(Client, reference, ct);
+
+    public IAsyncEnumerable<BuildProgress> BuildImageAsync(BuildRequest request, CancellationToken ct = default)
+        => DockerBuild.RunAsync(Client, request, ct);
+
+    public async Task<IReadOnlyList<NetworkSummary>> ListNetworksAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await DockerNetworks.ListAsync(Client, ct).ConfigureAwait(false);
+        }
+        catch (DockerApiException ex)
+        {
+            throw new RuntimeConnectionException(DescribeApiFailure(ex), ex);
+        }
+    }
+
+    public Task CreateNetworkAsync(NetworkRequest request, CancellationToken ct = default)
+        => DockerNetworks.CreateAsync(Client, request, ct);
+
+    public Task RemoveNetworkAsync(string networkId, CancellationToken ct = default)
+        => DockerNetworks.RemoveAsync(Client, networkId, ct);
+
+    public Task ConnectNetworkAsync(string networkId, string containerId, CancellationToken ct = default)
+        => DockerNetworks.ConnectAsync(Client, networkId, containerId, ct);
+
+    public Task DisconnectNetworkAsync(string networkId, string containerId, bool force = false, CancellationToken ct = default)
+        => DockerNetworks.DisconnectAsync(Client, networkId, containerId, force, ct);
+
+    public async Task CreateVolumeAsync(string name, CancellationToken ct = default)
+    {
+        try
+        {
+            await Client.Volumes.CreateAsync(new VolumesCreateParameters { Name = name }, ct).ConfigureAwait(false);
+        }
+        catch (DockerApiException ex)
+        {
+            throw new RuntimeConnectionException($"Could not create the volume: {ex.Message}", ex);
+        }
+    }
+
+    public async Task RemoveVolumeAsync(string name, bool force = false, CancellationToken ct = default)
+    {
+        try
+        {
+            await Client.Volumes.RemoveAsync(name, force, ct).ConfigureAwait(false);
+        }
+        catch (DockerApiException ex) when ((int)ex.StatusCode == 409)
+        {
+            throw new RuntimeConnectionException(
+                "A container is still using this volume. Remove the container first.", ex);
+        }
+        catch (DockerApiException ex) when ((int)ex.StatusCode == 404)
+        {
+            throw new RuntimeConnectionException("That volume no longer exists.", ex);
+        }
+    }
+
+    public Task<PrunePreview> PreviewPruneAsync(PruneKind kind, CancellationToken ct = default)
+        => DockerPrune.PreviewAsync(Client, kind, ct);
+
+    public async Task<PruneResult> PruneAsync(PruneKind kind, CancellationToken ct = default)
+    {
+        try
+        {
+            return await DockerPrune.RunAsync(Client, kind, ct).ConfigureAwait(false);
+        }
+        catch (DockerApiException ex)
+        {
+            throw new RuntimeConnectionException(DescribeApiFailure(ex), ex);
+        }
+    }
+
+    public async Task<IReadOnlyList<VolumeSummary>> ListVolumesAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await DockerVolumes.ListAsync(Client, ct).ConfigureAwait(false);
+        }
+        catch (DockerApiException ex)
+        {
+            throw new RuntimeConnectionException(DescribeApiFailure(ex), ex);
+        }
+    }
+
+    public async Task<IVolumeSession> OpenVolumeAsync(string volumeName, CancellationToken ct = default)
+        => await DockerVolumeSession.OpenAsync(Client, volumeName, ct).ConfigureAwait(false);
+
+    public IAsyncEnumerable<ContainerStats> StreamStatsAsync(string containerId, CancellationToken ct = default)
+        => DockerStats.StreamAsync(Client, containerId, ct);
+
+    public Task<IExecSession> StartExecAsync(string containerId, ExecOptions options, CancellationToken ct = default)
+        => DockerExec.StartAsync(Client, containerId, options, ct);
+
     public async Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
     {
         var info = await Client.System.GetSystemInfoAsync(ct).ConfigureAwait(false);
@@ -255,11 +466,66 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             info.ServerVersion);
     }
 
-    public Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default)
-        // Docker.DotNet.Enhanced does not expose `system df`. Phase 4 needs the real breakdown for
-        // the prune preview, and will call the endpoint directly; reporting zeroes now is honest
-        // in that the dashboard shows nothing rather than a fabricated number.
-        => Task.FromResult(new DiskUsage(0, 0, 0, 0, 0, 0));
+    /// <summary>
+    /// <c>system df</c>, which Docker.DotNet.Enhanced has no binding for, so it goes through the
+    /// raw API.
+    /// <para>
+    /// The engine computes this by walking its storage, so it is slow enough that callers should
+    /// treat it as an explicit request rather than something to refresh on a timer.
+    /// </para>
+    /// </summary>
+    public async Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default)
+    {
+        if (_raw is null) return DiskUsage.Unknown;
+
+        try
+        {
+            var df = await _raw.GetAsync<SystemDfResponse>("/system/df", ct).ConfigureAwait(false);
+            if (df is null) return DiskUsage.Unknown;
+
+            // An image layer shared by several images is reported against each of them, so summing
+            // SharedSize would count it more than once. UniqueSize (Size minus shared) is what the
+            // CLI reports and what actually frees on removal.
+            var imagesTotal = df.Images?.Sum(i => i.Size) ?? 0;
+            var imagesReclaimable = df.Images?.Where(i => i.Containers <= 0).Sum(i => i.Size) ?? 0;
+
+            var volumes = df.Volumes ?? [];
+
+            return new DiskUsage(
+                ImagesBytes: imagesTotal,
+                ImagesReclaimableBytes: imagesReclaimable,
+                ContainersBytes: df.Containers?.Sum(c => c.SizeRw) ?? 0,
+                VolumesBytes: volumes.Sum(v => v.UsageData?.Size ?? 0),
+                VolumesReclaimableBytes: volumes.Where(v => (v.UsageData?.RefCount ?? 0) <= 0).Sum(v => v.UsageData?.Size ?? 0),
+                BuildCacheBytes: df.BuildCache?.Sum(b => b.Size) ?? 0);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or System.Text.Json.JsonException)
+        {
+            // Not every engine implements `system df`. An unknown total is shown as unknown; the
+            // one thing the dashboard must not do is present a zero as a measurement.
+            return DiskUsage.Unknown;
+        }
+    }
+
+    /// <summary>
+    /// Only the fields Dray sums. Deliberately not the whole `system df` shape — the rest is large
+    /// and would have to be kept in step with two engines for no gain.
+    /// </summary>
+    sealed record SystemDfResponse(
+        List<DfImage>? Images,
+        List<DfContainer>? Containers,
+        List<DfVolume>? Volumes,
+        List<DfBuildCache>? BuildCache);
+
+    sealed record DfImage(long Size, long Containers);
+
+    sealed record DfContainer(long SizeRw);
+
+    sealed record DfVolume(DfVolumeUsage? UsageData);
+
+    sealed record DfVolumeUsage(long Size, long RefCount);
+
+    sealed record DfBuildCache(long Size);
 
     /// <summary>
     /// The engine's event stream.
@@ -357,7 +623,11 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public ValueTask DisposeAsync()
     {
         _client?.Dispose();
+        _raw?.Dispose();
+
         _client = null;
+        _raw = null;
+
         return ValueTask.CompletedTask;
     }
 }

@@ -1,0 +1,250 @@
+@* ⌘K.
+
+   Mounted once by the layout and opened from anywhere. Its list is built fresh each time it opens
+   rather than registered at startup: most of it is the user's own containers and images, and a
+   catalogue populated once would be stale the moment anything changed. *@
+@implements IDisposable
+@inject EngineManager Engine
+@inject IShellBridge Shell
+@inject NavigationManager Nav
+@inject ShellCapabilities Caps
+@inject IJSRuntime JS
+
+<Dialog Title="" Open="_open" OpenChanged="OnOpenChanged" Class="palette" HideFooter="true">
+    <ChildContent>
+        <input class="input palette__input" type="search" placeholder="Search containers, images, actions…"
+               autocomplete="off" spellcheck="false"
+               @ref="_input"
+               value="@_query"
+               @oninput="OnInput"
+               @onkeydown="OnKeyDown"
+               @onkeydown:preventDefault="_swallowKey" />
+
+        @if (_matches.Count == 0)
+        {
+            <p class="palette__empty muted">
+                @(_query.Length == 0 ? "Type to search." : $"Nothing matches \"{_query}\".")
+            </p>
+        }
+        else
+        {
+            <ul class="palette__list" role="listbox">
+                @for (var i = 0; i < _matches.Count; i++)
+                {
+                    var index = i;
+                    var match = _matches[i];
+
+                    <li @key="match.Command.Id"
+                        class="palette__row @(index == _selected ? "is-selected" : null) @(match.Command.IsDestructive ? "is-destructive" : null)"
+                        role="option"
+                        aria-selected="@((index == _selected).ToString().ToLowerInvariant())"
+                        @onclick="() => RunAsync(match.Command)"
+                        @onmousemove="() => _selected = index">
+
+                        <Icon Name="match.Command.Icon" Size="IconSize.Sm" />
+
+                        <span class="palette__title">@match.Command.Title</span>
+
+                        @if (match.Command.Detail is { } detail)
+                        {
+                            <span class="palette__detail muted">@detail</span>
+                        }
+
+                        <span class="palette__category muted">@match.Command.Category</span>
+                    </li>
+                }
+            </ul>
+        }
+
+        <p class="palette__hint muted">
+            <kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>↵</kbd> to run · <kbd>esc</kbd> to close
+        </p>
+    </ChildContent>
+</Dialog>
+
+@code {
+    /// <summary>
+    /// How many rows are shown.
+    /// <para>
+    /// A palette listing four hundred containers is a list, not a palette. The ranking puts the
+    /// intended one near the top, and anything past this is reached by typing more.
+    /// </para>
+    /// </summary>
+    const int MaxRows = 40;
+
+    ElementReference _input;
+    bool _open;
+    bool _focusPending;
+    string _query = "";
+    int _selected;
+
+    IReadOnlyList<Command> _catalogue = [];
+    IReadOnlyList<CommandMatch> _matches = [];
+
+    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
+
+    /// <summary>
+    /// The palette stays in step while it is open — a container that dies mid-search should not
+    /// still offer Stop.
+    /// </summary>
+    void OnEngineChanged()
+    {
+        if (!_open) return;
+
+        _ = InvokeAsync(() =>
+        {
+            Rebuild();
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>Open the palette. Called by the layout's ⌘K handler.</summary>
+    public void Open()
+    {
+        _query = "";
+        _selected = 0;
+        _open = true;
+        _focusPending = true;
+
+        Rebuild();
+        StateHasChanged();
+    }
+
+    void Rebuild()
+    {
+        _catalogue =
+        [
+            .. CommandCatalogue.Navigation(Caps.IsDebugBuild),
+            .. CommandCatalogue.ForContainers(Engine.Store.Containers, Engine.Selected?.Capabilities.SupportsPause ?? true),
+            .. CommandCatalogue.ForStacks(Engine.Stacks),
+        ];
+
+        Rank();
+    }
+
+    void Rank()
+    {
+        _matches = [.. CommandSearch.Rank(_catalogue, _query).Take(MaxRows)];
+
+        // The selection follows the list rather than the other way round: after typing, the best
+        // match is the one Enter should run.
+        _selected = Math.Clamp(_selected, 0, Math.Max(0, _matches.Count - 1));
+    }
+
+    /// <summary>
+    /// Re-rank as the user types.
+    /// <para>
+    /// Bound by hand rather than with <c>@bind</c>: two-way binding updates the field but nothing
+    /// re-runs the search, so the list would keep showing the previous query's results while the
+    /// box said something else.
+    /// </para>
+    /// </summary>
+    void OnInput(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString() ?? string.Empty;
+
+        // Back to the top: after typing, the best match is the one Enter should run.
+        _selected = 0;
+        Rank();
+    }
+
+    /// <summary>
+    /// Whether the last keystroke was one the palette consumes.
+    /// <para>
+    /// Only the navigation keys. Preventing default on <i>every</i> key stops the browser inserting
+    /// the character, so the field never receives what is typed — which is exactly the bug this
+    /// replaced.
+    /// </para>
+    /// </summary>
+    bool _swallowKey;
+
+    async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        _swallowKey = e.Key is "ArrowDown" or "ArrowUp" or "Enter" or "Escape";
+
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                Move(1);
+                break;
+
+            case "ArrowUp":
+                Move(-1);
+                break;
+
+            case "Enter" when _matches.Count > 0:
+                await RunAsync(_matches[_selected].Command);
+                break;
+
+            case "Escape":
+                Close();
+                break;
+        }
+    }
+
+    void Move(int delta)
+    {
+        if (_matches.Count == 0) return;
+
+        // Wraps, because a palette that stops at the end makes the user reverse all the way back
+        // up to reach the top.
+        _selected = (_selected + delta + _matches.Count) % _matches.Count;
+    }
+
+    async Task RunAsync(Command command)
+    {
+        Close();
+
+        var parts = command.Id.Split(':');
+
+        switch (parts[0])
+        {
+            case "go":
+                Nav.NavigateTo(command.Id["go:".Length..]);
+                break;
+
+            case "open" when parts[1] == "container":
+                Nav.NavigateTo($"/containers/{parts[2][..Math.Min(12, parts[2].Length)]}");
+                break;
+
+            case "open" when parts[1] == "stack":
+                Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(parts[2])}");
+                break;
+
+            case "do" when Enum.TryParse<ContainerAction>(parts[1], out var action):
+                if (Engine.Store.Find(parts[2]) is { } target)
+                    await ContainerCommands.RunAsync(Engine, Shell, target, action);
+                break;
+        }
+    }
+
+    void Close()
+    {
+        _open = false;
+        _query = "";
+    }
+
+    void OnOpenChanged(bool open)
+    {
+        if (!open) Close();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusPending) return;
+
+        _focusPending = false;
+
+        try
+        {
+            await _input.FocusAsync();
+        }
+        catch (JSException)
+        {
+            // The dialog had not been placed in the top layer yet. Not worth retrying — the user
+            // can click the field.
+        }
+    }
+
+    public void Dispose() => Engine.Changed -= OnEngineChanged;
+}

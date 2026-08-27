@@ -30,6 +30,16 @@ public sealed class RuntimeEventPump : IAsyncDisposable
 
     public TimeSpan MaxRetryDelay { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// How often to re-list when the engine has no event stream.
+    /// <para>
+    /// Two seconds is the compromise: a lifecycle change feels immediate at this rate, and the
+    /// cost is one list call — which on Apple's runtime is a process launch, not a socket read.
+    /// Only used when <see cref="RuntimeCapabilities.SupportsEvents"/> is false.
+    /// </para>
+    /// </summary>
+    public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
     public HostConnectionState State { get; private set; } = HostConnectionState.Disconnected;
 
     /// <summary>Plain-language reason for the current state, or null when connected.</summary>
@@ -66,12 +76,24 @@ public sealed class RuntimeEventPump : IAsyncDisposable
                 SetState(HostConnectionState.Connected, null);
                 delay = InitialRetryDelay;
 
-                await ConsumeAsync(ct).ConfigureAwait(false);
+                // Not every engine has an event stream. Apple's `container` runtime has no
+                // `events` subcommand at all, so there is nothing to subscribe to and the only
+                // way to notice a change is to look again.
+                if (_runtime.Capabilities.SupportsEvents)
+                {
+                    await ConsumeAsync(ct).ConfigureAwait(false);
 
-                // The stream ended without an error and without cancellation. The engine went
-                // away cleanly; treat it as a drop and reconnect.
-                if (!ct.IsCancellationRequested)
-                    SetState(HostConnectionState.Degraded, "The event stream ended. Reconnecting…");
+                    // The stream ended without an error and without cancellation. The engine went
+                    // away cleanly; treat it as a drop and reconnect.
+                    if (!ct.IsCancellationRequested)
+                        SetState(HostConnectionState.Degraded, "The event stream ended. Reconnecting…");
+                }
+                else
+                {
+                    // Runs until cancelled or until a list call throws, which the outer catch
+                    // turns into the same reconnect the stream path takes.
+                    await PollAsync(ct).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -110,6 +132,54 @@ public sealed class RuntimeEventPump : IAsyncDisposable
         if (!ct.IsCancellationRequested) return;
 
         SetState(HostConnectionState.Disconnected, null);
+    }
+
+    /// <summary>
+    /// The fallback for an engine with no event stream: list, diff, repeat.
+    /// <para>
+    /// Deliberately a diff rather than a <see cref="EntityStore.Reset"/>. Resetting twice a second
+    /// would clear every pending action and re-announce every row as new, so the list would flash
+    /// and the change highlights — which exist to show what just happened — would fire constantly
+    /// and mean nothing. Only rows that actually differ are written, so an idle engine produces no
+    /// store changes at all and the UI does not repaint.
+    /// </para>
+    /// <para>
+    /// This is worse than an event stream and is meant to look it: a change is noticed up to one
+    /// interval late, and a container that is created and destroyed between two polls is never
+    /// seen. <see cref="RuntimeCapabilities.SupportsEvents"/> is what the UI reads to say so.
+    /// </para>
+    /// </summary>
+    async Task PollAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await Task.Delay(PollInterval, _time, ct).ConfigureAwait(false);
+
+            var containers = await _runtime.ListContainersAsync(ct: ct).ConfigureAwait(false);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var container in containers)
+            {
+                seen.Add(container.Id);
+
+                var existing = _store.Find(container.Id);
+
+                // Field comparison, not record equality: Ports is a list, so two identical
+                // responses are never == and every row would be rewritten on every tick.
+                if (existing is not null && existing.SameAs(container)) continue;
+
+                // Whatever the user was waiting for has now been observed, whether or not it is
+                // the outcome they asked for. The event path clears this the same way.
+                if (existing is not null && existing.State != container.State) _store.ClearPending(container.Id);
+
+                _store.Upsert(container);
+            }
+
+            foreach (var container in _store.Containers)
+            {
+                if (!seen.Contains(container.Id)) _store.Remove(container.Id);
+            }
+        }
     }
 
     async Task ConsumeAsync(CancellationToken ct)

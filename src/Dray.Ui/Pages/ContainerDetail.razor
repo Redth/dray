@@ -1,10 +1,16 @@
 @page "/containers/{Id}"
+@implements IDisposable
 @inject EngineManager Engine
 @inject NavigationManager Nav
-
-<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+@inject IShellBridge ShellBridge
+@inject ShellCapabilities Caps
 
 <EngineScope>
+    @* Declared inside EngineScope, not above it: the title and the action set both come from the
+       store, and EngineScope re-renders only its own child content. Left outside, stopping this
+       container would leave a Stop button in the toolbar. *@
+    <PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
     @if (Container is not { } container)
     {
         <div class="page">
@@ -19,71 +25,265 @@
         <div class="detail">
             <div class="detail__head">
                 <div class="detail__title">
+                    @* Back and the container's commands belong in the window's toolbar where there
+                       is one — leading for back, trailing for the rest. A host without a toolbar
+                       has nowhere to put them, so they render here instead. Declared once either
+                       way; only where they are drawn changes. *@
+                    @if (!Caps.HasNativeToolbar)
+                    {
+                        <BackButton To="/containers" Label="All containers" />
+                    }
+
                     <h2>@container.Name</h2>
                     <StatePill Status="container.Status" />
                 </div>
                 <div class="detail__meta mono muted">
-                    <span>@container.ShortId</span>
+                    @* Omitted where the id is the name: repeating the title with its last few
+                       characters cut off reads as a rendering bug. *@
+                    @if (container.HasDistinctId)
+                    {
+                        <span>@container.ShortId</span>
+                    }
                     <span>@container.Image</span>
                     @if (container.Stack is { } stack)
                     {
                         <span>stack: @stack</span>
                     }
                 </div>
-                <div class="detail__actions">
-                    <ContainerActionBar Container="container" />
+
+                @if (!Caps.HasNativeToolbar)
+                {
+                    <div class="detail__actions">
+                        <ContainerActionBar Container="container" OnError="e => _actionError = e" />
+                    </div>
+                }
+            </div>
+
+            @if (_actionError is { } actionError)
+            {
+                <div class="banner detail__banner" role="alert">
+                    <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                    <span>@actionError</span>
+                    <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true"
+                            Variant="ButtonVariant.Ghost" OnClick="() => _actionError = null" />
                 </div>
-            </div>
+            }
 
-            <div class="detail__tabs" role="tablist">
-                @foreach (var tab in Tabs)
-                {
-                    <button type="button" role="tab" class="tab @(_tab == tab ? "is-active" : null)"
-                            aria-selected="@((_tab == tab).ToString().ToLowerInvariant())"
-                            @onclick="() => _tab = tab">
-                        @tab
-                    </button>
-                }
-            </div>
+            @* Tabs and their content are one card, not two: the tab bar labels the panel below it,
+               and separating them would leave the active tab pointing at nothing. *@
+            <div class="detail__card card">
+                <div class="detail__tabs" role="tablist">
+                    @foreach (var tab in Tabs)
+                    {
+                        <button type="button" role="tab" class="tab @(ActiveTab == tab ? "is-active" : null)"
+                                aria-selected="@((ActiveTab == tab).ToString().ToLowerInvariant())"
+                                @onclick="() => SelectTab(tab)">
+                            @tab
+                        </button>
+                    }
+                </div>
 
-            <div class="detail__body">
-                @switch (_tab)
-                {
-                    case "Logs":
-                        <LogView Container="container" />
-                        break;
+                <div class="detail__body">
+                    @switch (ActiveTab)
+                    {
+                        case "Logs":
+                            <LogView Container="container" />
+                            break;
 
-                    default:
-                        <div class="page">
-                            <EmptyState Icon="IconRef.Inspect"
-                                        Title="@($"{_tab} is not built yet")"
-                                        Body="Logs work today. Inspect, Files, Ports and Env are next." />
-                        </div>
-                        break;
-                }
+                        case "Terminal":
+                            @* Keyed on the container so switching containers starts a new shell
+                               rather than leaving the previous one's session attached. *@
+                            <ExecTerminal @key="container.Id" Container="container" />
+                            break;
+
+                        case "Stats":
+                            <StatsPanel @key="container.Id" Container="container" />
+                            break;
+
+                        case "Files":
+                            @* Keyed on the container so switching between two containers rebuilds the
+                               browser rather than leaving the previous one's directory on screen. *@
+                            <FileBrowser @key="container.Id"
+                                         SourceKey="@container.Id"
+                                         ListAsync="(path, ct) => Engine.ListDirectoryAsync(container.Id, path, container.State == DockerState.Running, ct)"
+                                         ReadAsync="(path, ct) => Engine.ReadFileAsync(container.Id, path, ct)"
+                                         WriteAsync="(path, bytes, ct) => WriteAsync(container.Id, path, bytes, ct)" />
+                            break;
+
+                        default:
+                            @if (_error is { } error)
+                            {
+                                <div class="page">
+                                    <EmptyState Icon="IconRef.Warning" Title="Could not read this container" Body="@error">
+                                        <Actions>
+                                            <Button Label="Try again" Icon="IconRef.Refresh" OnClick="LoadInspectAsync" />
+                                        </Actions>
+                                    </EmptyState>
+                                </div>
+                            }
+                            else if (_inspect is not { } inspect)
+                            {
+                                <div class="page page--flush">
+                                    <Skeleton Width="40%" />
+                                    <Skeleton Width="70%" />
+                                    <Skeleton Width="55%" />
+                                </div>
+                            }
+                            else
+                            {
+                                @switch (ActiveTab)
+                                {
+                                    case "Inspect":
+                                        <InspectPanel Inspect="inspect" OnBrowseVolume="BrowseVolume" />
+                                        break;
+
+                                    case "Ports":
+                                        <PortsPanel Inspect="inspect" />
+                                        break;
+
+                                    case "Env":
+                                        <EnvPanel Inspect="inspect" />
+                                        break;
+                                }
+                            }
+                            break;
+                    }
+                </div>
             </div>
         </div>
     }
 </EngineScope>
 
 @code {
-    static readonly string[] Tabs = ["Logs", "Inspect", "Files", "Ports", "Env"];
+    static readonly string[] AllTabs = ["Logs", "Terminal", "Stats", "Inspect", "Files", "Ports", "Env"];
+
+    /// <summary>
+    /// The tabs this engine can actually fill.
+    /// <para>
+    /// Apple's <c>exec</c> is a terminal command rather than a stream Dray can attach to, so the
+    /// Terminal tab there would open only to explain itself. A tab that never works is the same
+    /// mistake as a button that always fails; the Hosts page says what to use instead.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<string> Tabs => (Engine.Selected?.Capabilities.SupportsShell ?? true)
+        ? AllTabs
+        : [.. AllTabs.Where(t => t != "Terminal")];
+
+    /// <summary>
+    /// The tab actually shown. Falls back to Logs when the selected one is not available on this
+    /// engine — switching hosts while the Terminal tab is open must not leave a blank card.
+    /// </summary>
+    string ActiveTab => Tabs.Contains(_tab) ? _tab : "Logs";
+
+    /// <summary>The tabs that need an inspect response before they can render anything.</summary>
+    static readonly string[] NeedsInspect = ["Inspect", "Ports", "Env"];
 
     [Parameter] public string Id { get; set; } = "";
 
     string _tab = "Logs";
+    string? _actionError;
+    ContainerInspect? _inspect;
+    string? _error;
+    string? _inspectedId;
 
     ContainerSummary? Container => Engine.Store.Find(Id)
         // The URL carries a short id when it came from a row, so fall back to a prefix match.
         ?? Engine.Store.Containers.FirstOrDefault(c => c.Id.StartsWith(Id, StringComparison.Ordinal));
 
-    PageChrome Chrome => new(
-        Container?.Name ?? "Container",
-        Subtitle: Container is null ? null : Engine.Selected?.Name,
-        Actions: [ChromeAction.Secondary("back", "All containers", IconRef.ChevronRight)]);
+    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
 
-    void HandleAction(string id)
+    /// <summary>
+    /// Re-read the container when the engine reports it changed.
+    /// <para>
+    /// An inspect response is a snapshot, and this screen is the one place someone watches a
+    /// container closely — a restart that left the Inspect tab showing the previous PID and start
+    /// time would be quietly wrong for as long as they looked at it.
+    /// </para>
+    /// </summary>
+    void OnEngineChanged()
     {
-        if (id == "back") Nav.NavigateTo("/containers");
+        if (_inspect is null || Container is not { } container) return;
+        if (!Engine.Store.WasRecentlyChanged(container.Id)) return;
+
+        _ = InvokeAsync(LoadInspectAsync);
     }
+
+    void SelectTab(string tab)
+    {
+        _tab = tab;
+
+        // Fetched on demand rather than with the page: most visits are for the logs, and inspect
+        // is a second round trip nobody asked for.
+        if (NeedsInspect.Contains(tab)) _ = LoadInspectAsync();
+    }
+
+    async Task LoadInspectAsync()
+    {
+        if (Container is not { } container) return;
+
+        // Already have this container's response, and nothing has said it is stale.
+        if (_inspectedId == container.Id && _inspect is not null && _error is null) return;
+
+        _error = null;
+
+        try
+        {
+            _inspect = await Engine.InspectAsync(container.Id);
+            _inspectedId = container.Id;
+        }
+        catch (Exception ex)
+        {
+            _inspect = null;
+            _error = ex.Message;
+        }
+
+        StateHasChanged();
+    }
+
+    async Task<string?> WriteAsync(string containerId, string path, byte[] content, CancellationToken ct)
+    {
+        try
+        {
+            await Engine.WriteFileAsync(containerId, path, content, ct);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    void BrowseVolume(string volumeName) => Nav.NavigateTo($"/volumes/{Uri.EscapeDataString(volumeName)}");
+
+    /// <summary>
+    /// What the window's chrome should show.
+    /// <para>
+    /// Populated only where the host has a toolbar to put it in. On a web-only head the same
+    /// controls render in the page header, and declaring them here as well would either duplicate
+    /// them or bring back the title-only toolbar this page exists without.
+    /// </para>
+    /// </summary>
+    PageChrome Chrome => Caps.HasNativeToolbar
+        ? new PageChrome(
+            Container?.Name ?? "Container",
+            Subtitle: Container is null ? null : Engine.Selected?.Name,
+            Actions: Container is { } c ? ContainerCommands.ChromeActionsFor(c, Engine.Selected?.Capabilities.SupportsPause ?? true) : null,
+            Back: new ChromeBack("back", "All containers"))
+        : new PageChrome(
+            Container?.Name ?? "Container",
+            Subtitle: Container is null ? null : Engine.Selected?.Name);
+
+    async Task HandleAction(string id)
+    {
+        if (id == "back")
+        {
+            Nav.NavigateTo("/containers");
+            return;
+        }
+
+        if (ContainerCommands.Parse(id) is { } action && Container is { } container)
+            _actionError = await ContainerCommands.RunAsync(Engine, ShellBridge, container, action);
+    }
+
+    public void Dispose() => Engine.Changed -= OnEngineChanged;
 }

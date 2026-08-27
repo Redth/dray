@@ -1,0 +1,258 @@
+@* What the engine knows about one container.
+
+   Two views, because they answer different questions. The summary is the ten facts that explain
+   what this container is and why it is behaving as it is; the raw JSON is everything, verbatim,
+   for the times the summary does not contain the answer. Without the second, the user leaves for a
+   terminal — and Dray exists to make that unnecessary, not to insist its own curation is complete. *@
+@inject IShellBridge Shell
+
+<div class="page page--flush">
+    <div class="inspect__modes" role="tablist" aria-label="Detail level">
+        <button type="button" role="tab" class="tab @(_raw ? null : "is-active")"
+                aria-selected="@((!_raw).ToString().ToLowerInvariant())"
+                @onclick="() => _raw = false">Summary</button>
+
+        <button type="button" role="tab" class="tab @(_raw ? "is-active" : null)"
+                aria-selected="@(_raw.ToString().ToLowerInvariant())"
+                @onclick="() => _raw = true">Raw JSON</button>
+
+        <span class="inspect__spacer"></span>
+
+        <Button Label="Copy" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost" OnClick="CopyAsync" />
+    </div>
+
+    @if (_raw)
+    {
+        @if (string.IsNullOrEmpty(Inspect.RawJson))
+        {
+            <EmptyState Icon="IconRef.Inspect" Title="No raw response"
+                        Body="The engine answered the typed request but not the raw one. The summary above is still accurate." />
+        }
+        else
+        {
+            <pre class="inspect__raw mono"><code>@Inspect.RawJson</code></pre>
+        }
+    }
+    else
+    {
+        <div class="inspect">
+            <section class="panel">
+                <div class="panel__head"><h3 class="panel__title">Identity</h3></div>
+                <dl class="kv">
+                    <dt>Name</dt><dd>@Inspect.Name</dd>
+
+                    @* Shortened, because a 64-character hex string wraps over three lines and
+                       buries every other fact in the panel. The full value is on the element and
+                       in what Copy produces — nobody reads it, they paste it. *@
+                    @if (Inspect.HasDistinctId)
+                    {
+                        <dt>ID</dt><dd class="mono" title="@Inspect.Id">@Inspect.ShortId</dd>
+                    }
+
+                    <dt>Image</dt><dd class="mono">@Inspect.Image</dd>
+
+                    @if (Inspect.ImageId is { } imageId)
+                    {
+                        <dt>Image ID</dt><dd class="mono" title="@imageId">@Digest(imageId)</dd>
+                    }
+
+                    @if (Inspect.Stack is { } stack)
+                    {
+                        <dt>Stack</dt><dd>@stack</dd>
+                    }
+                </dl>
+            </section>
+
+            <section class="panel">
+                <div class="panel__head"><h3 class="panel__title">State</h3></div>
+                <dl class="kv">
+                    <dt>Status</dt><dd><StatePill Status="Inspect.Status" /></dd>
+
+                    @if (Inspect.Created is { } created)
+                    {
+                        <dt>Created</dt><dd title="@created.ToLocalTime().ToString("F")">@Humanize.Since(created) ago</dd>
+                    }
+
+                    @if (Inspect.StartedAt is { } started)
+                    {
+                        <dt>Started</dt><dd title="@started.ToLocalTime().ToString("F")">@Humanize.Since(started) ago</dd>
+                    }
+
+                    @if (Inspect.FinishedAt is { } finished)
+                    {
+                        <dt>Finished</dt><dd title="@finished.ToLocalTime().ToString("F")">@Humanize.Since(finished) ago</dd>
+                    }
+
+                    @if (Inspect.OomKilled)
+                    {
+                        @* The single most valuable fact on this screen when it is true: exit 137
+                           on its own is indistinguishable from an ordinary SIGKILL. *@
+                        <dt>Killed by</dt>
+                        <dd class="inspect__alarm">The kernel's out-of-memory killer. Raise the memory limit, or reduce what it allocates.</dd>
+                    }
+
+                    @if (Inspect.Error is { } error)
+                    {
+                        <dt>Error</dt><dd class="inspect__alarm mono">@error</dd>
+                    }
+
+                    @if (Inspect.RestartPolicy is { } policy)
+                    {
+                        <dt>Restart policy</dt><dd class="mono">@policy</dd>
+                    }
+
+                    @if (Inspect.RestartCount > 0)
+                    {
+                        <dt>Restarts</dt><dd>@Inspect.RestartCount</dd>
+                    }
+
+                    @if (Inspect.Pid is { } pid)
+                    {
+                        <dt>PID</dt><dd class="mono">@pid</dd>
+                    }
+                </dl>
+            </section>
+
+            <section class="panel">
+                <div class="panel__head"><h3 class="panel__title">Execution</h3></div>
+                <dl class="kv">
+                    <dt>Command</dt>
+                    <dd class="mono inspect__cmd">@(Inspect.CommandLine.Length > 0 ? Inspect.CommandLine : "—")</dd>
+
+                    <dt>Working directory</dt><dd class="mono">@(Inspect.WorkingDirectory ?? "/")</dd>
+                    <dt>User</dt><dd class="mono">@(Inspect.User ?? "root")</dd>
+                </dl>
+            </section>
+
+            @if (Inspect.Networks.Count > 0)
+            {
+                <section class="panel">
+                    <div class="panel__head"><h3 class="panel__title">Networks</h3></div>
+                    <dl class="kv">
+                        @foreach (var network in Inspect.Networks)
+                        {
+                            <dt>@network.Name</dt>
+                            <dd class="mono">
+                                @(network.IpAddress ?? "no address")
+                                @if (network.Aliases.Count > 0)
+                                {
+                                    <span class="muted"> · @string.Join(", ", network.Aliases)</span>
+                                }
+                            </dd>
+                        }
+                    </dl>
+                </section>
+            }
+
+            @if (Inspect.Mounts.Count > 0)
+            {
+                <section class="panel">
+                    <div class="panel__head">
+                        <h3 class="panel__title">Mounts</h3>
+                        <span class="muted">@Inspect.Mounts.Count</span>
+                    </div>
+
+                    <table class="table">
+                        <thead>
+                            <tr><th>Destination</th><th>Source</th><th>Kind</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var mount in Inspect.Mounts)
+                            {
+                                <tr @key="mount.Destination">
+                                    <td class="mono">@mount.Destination</td>
+                                    <td class="mono inspect__source">@(mount.Source.Length > 0 ? mount.Source : "—")</td>
+                                    <td>
+                                        @mount.Kind.ToString().ToLowerInvariant()
+                                        @if (mount.ReadOnly)
+                                        {
+                                            <span class="muted"> · read only</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (mount.IsBrowsable && OnBrowseVolume.HasDelegate)
+                                        {
+                                            @* Only named volumes: the engine cannot serve a host
+                                               path, so offering to open a bind would be a promise
+                                               Dray cannot keep. *@
+                                            <Button Label="Browse" Icon="IconRef.Volume" Variant="ButtonVariant.Ghost"
+                                                    OnClick="() => OnBrowseVolume.InvokeAsync(mount.Source)" />
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </section>
+            }
+
+            @if (Inspect.Labels.Count > 0)
+            {
+                <section class="panel">
+                    <div class="panel__head">
+                        <h3 class="panel__title">Labels</h3>
+                        <span class="muted">@Inspect.Labels.Count</span>
+                    </div>
+                    <dl class="kv kv--dense">
+                        @foreach (var (key, value) in Inspect.Labels.OrderBy(l => l.Key, StringComparer.Ordinal))
+                        {
+                            <dt class="mono">@key</dt>
+                            <dd class="mono">@(value.Length > 0 ? value : "—")</dd>
+                        }
+                    </dl>
+                </section>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ContainerInspect Inspect { get; set; } = default!;
+
+    /// <summary>Open a named volume this container mounts. Not offered when unhandled.</summary>
+    [Parameter] public EventCallback<string> OnBrowseVolume { get; set; }
+
+    bool _raw;
+
+    /// <summary>
+    /// A digest as people refer to it: the algorithm prefix kept, the hash cut to the first twelve
+    /// characters — the same shortening the CLI does.
+    /// </summary>
+    static string Digest(string value)
+    {
+        var colon = value.IndexOf(':');
+        if (colon < 0) return value.Length <= 12 ? value : value[..12];
+
+        var hash = value[(colon + 1)..];
+        return value[..(colon + 1)] + (hash.Length <= 12 ? hash : hash[..12]);
+    }
+
+    // Copies whichever view is on screen: the JSON when reading raw, and otherwise the summary as
+    // text that can be pasted into an issue.
+    Task CopyAsync() => Shell.WriteClipboardAsync(_raw ? Inspect.RawJson : Summarise());
+
+    string Summarise()
+    {
+        var lines = new List<string>
+        {
+            $"name:     {Inspect.Name}",
+
+            // The full id here: this text exists to be pasted into an issue or a command.
+            $"id:       {Inspect.Id}",
+            $"image:    {Inspect.Image}",
+            $"status:   {Inspect.Status.Label}",
+            $"command:  {Inspect.CommandLine}",
+        };
+
+        if (Inspect.OomKilled) lines.Add("killed:   out of memory");
+        if (Inspect.Error is { } error) lines.Add($"error:    {error}");
+
+        foreach (var network in Inspect.Networks)
+            lines.Add($"network:  {network.Name} {network.IpAddress}");
+
+        foreach (var mount in Inspect.Mounts)
+            lines.Add($"mount:    {mount.Source} -> {mount.Destination}");
+
+        return string.Join('\n', lines);
+    }
+}

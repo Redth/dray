@@ -1,7 +1,213 @@
 @page "/registries"
+@inject RegistryReader Reader
+@inject IShellBridge Shell
 
-<PageChromeScope Chrome="@(new PageChrome("Registries"))" />
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
 
-<div class="page">
-    <EmptyState Icon="IconRef.Registry" Title="Registries arrive in phase 6" Body="Sign in through the platform credential helper, so Dray and the Docker CLI share one credential store and nothing lands in config.json as plaintext." />
+<div class="page page--flush">
+    @if (_notice is { } notice)
+    {
+        <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+            <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+            <span>@notice</span>
+            <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost"
+                    OnClick="() => _notice = null" />
+        </div>
+    }
+
+    @if (_entries is null)
+    {
+        <div class="stack-v">
+            @for (var i = 0; i < 4; i++)
+            {
+                <Skeleton Width="@($"{45 + (i * 13 % 35)}%")" />
+            }
+        </div>
+    }
+    else if (_entries.Count == 0)
+    {
+        <EmptyState Icon="IconRef.Registry" Title="No registries configured"
+                    Body="Public images pull without any of this. A registry appears here once you sign in to one — from Dray or from a terminal, since both use the same store." />
+    }
+    else
+    {
+        @if (_entries.FirstOrDefault(e => e.HelperMissing) is { } broken)
+        {
+            @* The failure that motivated docs/CREDENTIALS.md: an uninstalled engine takes its
+               bundled helper with it and leaves the config pointing at nothing. Every pull then
+               fails, including of a public image. *@
+            <div class="banner" role="alert">
+                <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                <span>
+                    <strong>@("docker-credential-" + broken.Helper)</strong> is named in your Docker
+                    config but is not installed. Signing in will not work, and some engines refuse
+                    every pull until it is back — including public images.
+                    Installing it restores access; your saved credentials are still in the system
+                    store and nothing has been lost.
+                </span>
+            </div>
+        }
+
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr><th>Registry</th><th>Username</th><th>Credential</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in _entries)
+                    {
+                        <tr @key="entry.Server">
+                            <td>
+                                <div class="cell-name">
+                                    <span>@entry.DisplayName</span>
+                                    @if (entry.DisplayName != entry.Server)
+                                    {
+                                        <span class="mono muted">@entry.Server</span>
+                                    }
+                                </div>
+                            </td>
+                            <td class="mono">@(entry.Username ?? "—")</td>
+                            <td>
+                                @if (entry.HelperMissing)
+                                {
+                                    <StatePill Status="MissingStatus" />
+                                }
+                                else
+                                {
+                                    switch (entry.Storage)
+                                    {
+                                        case CredentialStorage.Helper:
+                                            <span class="muted">@entry.Helper</span>
+                                            break;
+
+                                        case CredentialStorage.Plaintext:
+                                            @* base64 is an encoding, not encryption. Saying so, with
+                                               the fix, is the whole point of showing this column. *@
+                                            <span class="reg__plain"
+                                                  title="Stored base64-encoded in ~/.docker/config.json. Set credsStore to a helper and sign in again to move it into the system store.">
+                                                unencrypted in config.json
+                                            </span>
+                                            break;
+
+                                        default:
+                                            <span class="muted">none</span>
+                                            break;
+                                    }
+                                }
+                            </td>
+                            <td class="cell-actions">
+                                <div class="row-actions">
+                                    @if (entry.IsAmbient)
+                                    {
+                                        @* These mint short-lived tokens from an ambient identity, so
+                                           a username and password field would be the wrong question. *@
+                                        <span class="muted reg__note">signed in by @entry.Helper</span>
+                                    }
+                                    else if (entry.AcceptsSignIn)
+                                    {
+                                        @* Short label, full sentence in the tooltip: a registry
+                                           name can be forty characters and the button would push
+                                           the column off the card. *@
+                                        <Button Label="Sign in" Icon="IconRef.Registry"
+                                                Tooltip="@($"Sign in to {entry.DisplayName}")"
+                                                Variant="ButtonVariant.Ghost" OnClick="() => BeginSignIn(entry)" />
+                                    }
+
+                                    @if (entry.Storage == CredentialStorage.Helper && !entry.IsAmbient)
+                                    {
+                                        <Button Label="@($"Sign out of {entry.DisplayName}")" Icon="IconRef.Trash"
+                                                IconOnly="true" Variant="ButtonVariant.Ghost" Danger="true"
+                                                OnClick="() => SignOutAsync(entry)" />
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <p class="note muted">
+            <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+            <span>
+                Dray stores no credentials of its own. Signing in hands your token straight to the
+                system credential helper — the same store the <span class="mono">docker</span>
+                command uses — so signing in once works in both.
+            </span>
+        </p>
+    }
 </div>
+
+@if (_signingIn is { } target)
+{
+    <SignInDialog Registry="target" Open="true"
+                  OpenChanged="open => _signingIn = open ? target : null"
+                  OnSignedIn="OnSignedInAsync" />
+}
+
+@code {
+    static readonly ContainerStatus MissingStatus = new(StateTone.Danger, "▲", "Helper missing");
+
+    IReadOnlyList<RegistryEntry>? _entries;
+    RegistryEntry? _signingIn;
+    string? _notice;
+    bool _noticeOk;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    async Task LoadAsync()
+    {
+        try
+        {
+            _entries = await Reader.ListAsync();
+        }
+        catch (Exception ex)
+        {
+            _entries = [];
+            Notify(ex.Message, ok: false);
+        }
+    }
+
+    void BeginSignIn(RegistryEntry entry) => _signingIn = entry;
+
+    async Task OnSignedInAsync(string server)
+    {
+        Notify($"Signed in to {server}. The credential is in your system store, not in Dray.", ok: true);
+        await LoadAsync();
+    }
+
+    async Task SignOutAsync(RegistryEntry entry)
+    {
+        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+            $"Sign out of {entry.DisplayName}?",
+            "The credential is removed from your system store. Pulls of private images from this "
+            + "registry will fail until you sign in again — including from the docker command, "
+            + "which uses the same store.",
+            "Sign out"));
+
+        if (answer != ConfirmResult.Confirm) return;
+
+        if (entry.Helper is not { } helper) return;
+
+        if (await Reader.EraseAsync(helper, entry.Server) is { } failure) Notify(failure, ok: false);
+        else Notify($"Signed out of {entry.DisplayName}.", ok: true);
+
+        await LoadAsync();
+    }
+
+    void Notify(string message, bool ok)
+    {
+        _notice = message;
+        _noticeOk = ok;
+    }
+
+    PageChrome Chrome => new(
+        "Registries",
+        Subtitle: _entries is null ? null : $"{_entries.Count} configured",
+        Actions: [ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh)]);
+
+    async Task HandleAction(string id)
+    {
+        if (id == "refresh") await LoadAsync();
+    }
+}

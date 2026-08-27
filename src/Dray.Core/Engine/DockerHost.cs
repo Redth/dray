@@ -14,6 +14,9 @@ public enum HostOrigin
 
     /// <summary>A WSL2 distribution running its own engine.</summary>
     WslDistro,
+
+    /// <summary>Apple's <c>container</c> runtime, found on PATH rather than declared anywhere.</summary>
+    AppleContainer,
 }
 
 /// <summary>
@@ -78,6 +81,56 @@ public sealed record RuntimeCapabilities
     /// <summary>The <c>/events</c> stream. Without it Dray must fall back to polling and say so.</summary>
     public bool SupportsEvents { get; init; } = true;
 
+    /// <summary>
+    /// Pause and resume. Absent on Apple's runtime, where a container is a VM with no freezer.
+    /// <para>
+    /// A capability rather than a caught exception, because the alternative is a Pause button that
+    /// always fails. ContainerAction.cs is explicit about why that is worse than no button:
+    /// "an action offered in the wrong state teaches the user the UI is guessing".
+    /// </para>
+    /// </summary>
+    public bool SupportsPause { get; init; } = true;
+
+    /// <summary>
+    /// A shell Dray can attach to. Apple's <c>exec</c> is a terminal command rather than a stream,
+    /// so the Shell tab explains itself instead of opening a terminal that cannot take input.
+    /// </summary>
+    public bool SupportsShell { get; init; } = true;
+
+    /// <summary>
+    /// Renaming a container. Apple identifies one <i>by</i> its name, so a rename there means
+    /// recreating it — a different operation with different consequences.
+    /// </summary>
+    public bool SupportsRename { get; init; } = true;
+
+    /// <summary>
+    /// Engine-managed volumes. Without them the Volumes page says the engine has no such concept,
+    /// rather than showing an empty list that reads as "none yet".
+    /// </summary>
+    public bool SupportsVolumes { get; init; } = true;
+
+    /// <summary>
+    /// Networks Dray can list and manage. Apple attaches a network at creation and exposes nothing
+    /// to manage afterwards.
+    /// </summary>
+    public bool SupportsNetworks { get; init; } = true;
+
+    /// <summary>
+    /// Reading a stopped container's filesystem. Docker's archive endpoint can; Apple's runtime
+    /// needs the container running, so the Files tab says so rather than showing an empty root.
+    /// </summary>
+    public bool SupportsStoppedFileAccess { get; init; } = true;
+
+    /// <summary>
+    /// Whether log lines arrive with a timestamp and a stream attached.
+    /// <para>
+    /// Apple's <c>container logs</c> has no timestamps flag and merges stdout and stderr into one
+    /// stream, so both facts are simply absent. One flag rather than two because they come from
+    /// the same limitation: the CLI hands over plain text and nothing about it.
+    /// </para>
+    /// </summary>
+    public bool SupportsLogMetadata { get; init; } = true;
+
     /// <summary>The daemon is running rootless, which changes what ports and mounts are possible.</summary>
     public bool IsRootless { get; init; }
 
@@ -94,6 +147,9 @@ public enum EngineFlavor
     Unknown,
     Docker,
     Podman,
+
+    /// <summary>Apple's containerization framework. Not Docker-compatible in any way.</summary>
+    Apple,
 }
 
 /// <summary>

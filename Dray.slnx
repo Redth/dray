@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Dray.Apple/Dray.Apple.csproj" />
     <Project Path="src/Dray.Core/Dray.Core.csproj" />
     <Project Path="src/Dray.DevHost/Dray.DevHost.csproj" />
     <Project Path="src/Dray.Docker/Dray.Docker.csproj" />
@@ -8,5 +9,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Dray.Core.Tests/Dray.Core.Tests.csproj" />
+    <Project Path="tests/Dray.Apple.Tests/Dray.Apple.Tests.csproj" />
+    <Project Path="tests/Dray.Docker.Tests/Dray.Docker.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,76 @@
+.editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.editor__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+}
+
+/* The path is split so the directory can truncate while the filename never does — the filename
+   is what identifies the file, and the directory is context.
+
+   An earlier version used `direction: rtl` to ellipsize from the left in one element. That does
+   truncate the correct end, and it also relocates the leading slash of "/conf/app.conf" to the
+   far right, because a slash is bidi-neutral and takes the paragraph direction. Two elements are
+   duller and correct. */
+.editor__dir {
+    font-size: var(--text-xs);
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 0 1 auto;
+}
+
+.editor__file {
+    font-size: var(--text-xs);
+    color: var(--ink);
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.editor__spacer {
+    flex: 1 1 auto;
+}
+
+.editor__dirty {
+    font-size: var(--text-xs);
+    color: var(--warn-ink);
+    background: var(--warn-tint);
+    padding: 2px var(--s2);
+    border-radius: var(--r-sm);
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.editor__message {
+    font-size: var(--text-xs);
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.editor__message.is-error {
+    color: var(--danger);
+}
+
+.editor__ro {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+/* Monaco measures this element and positions everything inside it absolutely, so it needs a
+   definite size from flex rather than from its content. */
+.editor__host {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}

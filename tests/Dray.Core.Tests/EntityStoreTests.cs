@@ -305,3 +305,76 @@ public class EntityStoreTests
         Assert.False(store.WasRecentlyChanged("a"));
     }
 }
+
+/// <summary>
+/// Renaming is the one thing written to the store directly rather than through the event stream —
+/// because podman does not emit an event for it at all.
+/// </summary>
+public class EntityStoreRenameTests
+{
+    static ContainerSummary Container(string id, string name) =>
+        new() { Id = id, Name = name, Image = "alpine", State = DockerState.Running };
+
+    [Fact]
+    public void ARenameIsRecorded()
+    {
+        var store = new EntityStore();
+        store.Reset([Container("abc", "old")]);
+
+        store.Rename("abc", "new");
+
+        Assert.Equal("new", store.Find("abc")!.Name);
+    }
+
+    [Fact]
+    public void ARenameNotifiesSoTheListRedraws()
+    {
+        var store = new EntityStore();
+        store.Reset([Container("abc", "old")]);
+
+        StoreChange? seen = null;
+        store.Changed += c => seen = c;
+
+        store.Rename("abc", "new");
+
+        Assert.Equal(StoreChangeKind.Updated, seen?.Kind);
+        Assert.Equal("abc", seen?.ContainerId);
+    }
+
+    [Fact]
+    public void RenamingToTheSameNameChangesNothing()
+    {
+        // Docker does emit a rename event, so this runs twice there. The second must be a no-op
+        // rather than a second redraw and a second highlight pulse.
+        var store = new EntityStore();
+        store.Reset([Container("abc", "same")]);
+
+        var notifications = 0;
+        store.Changed += _ => notifications++;
+
+        store.Rename("abc", "same");
+
+        Assert.Equal(0, notifications);
+    }
+
+    [Fact]
+    public void RenamingSomethingUnknownIsIgnored()
+    {
+        var store = new EntityStore();
+
+        store.Rename("nope", "new");
+
+        Assert.Null(store.Find("nope"));
+    }
+
+    [Fact]
+    public void ARenamedContainerPulsesLikeAnyOtherChange()
+    {
+        var store = new EntityStore();
+        store.Reset([Container("abc", "old")]);
+
+        store.Rename("abc", "new");
+
+        Assert.True(store.WasRecentlyChanged("abc"));
+    }
+}

@@ -1,0 +1,171 @@
+/* The file browser fills its tab and manages its own scrolling: the listing and the editor each
+   scroll independently, so neither can push the other off screen. */
+.fb {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.fb__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+}
+
+.fb__spacer {
+    flex: 1 1 auto;
+}
+
+.fb__count {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ breadcrumbs */
+
+.fb__crumbs {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    min-width: 0;
+    overflow-x: auto;
+
+    /* A deep path scrolls rather than wrapping: a breadcrumb that reflows onto a second line
+       shifts everything below it every time the user opens a folder. */
+    scrollbar-width: none;
+}
+
+.fb__crumbs::-webkit-scrollbar {
+    display: none;
+}
+
+.fb__crumb {
+    padding: 2px var(--s2);
+    border-radius: var(--r-sm);
+    color: var(--muted);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+}
+
+.fb__crumb:hover {
+    color: var(--ink);
+    background: var(--surface-2);
+}
+
+.fb__crumb.is-current {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.fb__sep {
+    color: var(--line-strong);
+    font-size: var(--text-sm);
+}
+
+.fb__dirty {
+    font-size: var(--text-xs);
+    color: var(--warn-ink);
+    background: var(--warn-tint);
+    padding: 2px var(--s2);
+    border-radius: var(--r-sm);
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ split */
+
+.fb__split {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.fb__list {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: auto;
+    padding: var(--s3);
+}
+
+/* With a file open the listing narrows to a sidebar and the editor takes the room. The listing
+   keeps a fixed width rather than a fraction so opening a file does not resize it again on every
+   window change. */
+.fb__split.is-split .fb__list {
+    flex: 0 0 clamp(220px, 28%, 340px);
+    border-right: 1px solid var(--line);
+}
+
+.fb__editor {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.fb__loading {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    padding: var(--s2);
+}
+
+/* ------------------------------------------------------------------ listing */
+
+.fb__table tbody tr {
+    cursor: default;
+}
+
+.fb__table tbody tr.is-selected {
+    background: var(--surface-2);
+}
+
+.fb__name {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+}
+
+.fb__name span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fb__link {
+    font-size: var(--text-xs);
+    flex: 0 1 auto;
+}
+
+
+.fb__refusal {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s5);
+}
+
+/* The mode column is reference material rather than something scanned, so it recedes. */
+.fb__mode {
+    font-size: var(--text-xs);
+}
+
+/* With a file open the listing becomes a narrow sidebar, and mode and modified no longer fit —
+   they were being clipped mid-column, which reads as a rendering bug rather than as a choice.
+   Driven by the split rather than by a viewport media query, because the listing's width depends
+   on whether a file is open and not on how big the window is. */
+.fb__split.is-split .fb__table :is(th, td):nth-child(3),
+.fb__split.is-split .fb__table :is(th, td):nth-child(4) {
+    display: none;
+}
+
+/* Below this the window itself is too narrow for the pair even without a file open. */
+@media (max-width: 900px) {
+    .fb__table :is(th, td):nth-child(3) {
+        display: none;
+    }
+}

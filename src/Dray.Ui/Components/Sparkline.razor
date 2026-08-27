@@ -1,0 +1,65 @@
+@* A small line chart of recent values.
+
+   SVG rather than canvas: the series is at most a few dozen points, it has to repaint whenever the
+   theme changes, and a path that inherits currentColor does that for free. *@
+
+<svg class="spark" viewBox="0 0 @Width @Height" preserveAspectRatio="none" role="img"
+     aria-label="@Label" focusable="false">
+    @if (Points.Count >= 2)
+    {
+        @* The fill sits under the line and gives the shape weight at a glance, which a one-pixel
+           stroke on its own does not at this size. *@
+        <path class="spark__area" d="@AreaPath" />
+        <path class="spark__line" d="@LinePath" />
+
+        @* The newest reading is the one being watched, so it is marked. *@
+        <circle class="spark__now" cx="@X(Points.Count - 1).ToString(Invariant)" cy="@Y(Points[^1]).ToString(Invariant)" r="2" />
+    }
+    else
+    {
+        <line class="spark__flat" x1="0" y1="@((Height - Inset).ToString(Invariant))"
+              x2="@Width" y2="@((Height - Inset).ToString(Invariant))" />
+    }
+</svg>
+
+@code {
+    static readonly System.Globalization.CultureInfo Invariant = System.Globalization.CultureInfo.InvariantCulture;
+
+    /// <summary>Values between 0 and 1, oldest first.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<double> Points { get; set; } = [];
+
+    /// <summary>Described for screen readers, which cannot see the shape.</summary>
+    [Parameter] public string Label { get; set; } = "Recent activity";
+
+    const double Width = 100;
+    const double Height = 28;
+
+    /// <summary>
+    /// Keeps the stroke off the edges. Without it a value of 1 is clipped in half by the viewBox
+    /// and the peak of the graph looks flat.
+    /// </summary>
+    const double Inset = 3;
+
+    /// <summary>
+    /// How much of the height the peak reaches.
+    /// <para>
+    /// The series is scaled to its own maximum, so a steady value normalises to a flat 1.0 — and
+    /// drawn to the full height that fills the box and reads as a solid bar rather than a chart. A
+    /// container pinned at 97% CPU is exactly that case, and it is a common one. Leaving room
+    /// above the peak keeps it legible as a line.
+    /// </para>
+    /// </summary>
+    const double PeakHeight = 0.82;
+
+    double X(int index) => Points.Count <= 1 ? 0 : index * Width / (Points.Count - 1);
+
+    double Y(double value)
+        => Height - Inset - (Math.Clamp(value, 0, 1) * (Height - (Inset * 2)) * PeakHeight);
+
+    string LinePath => string.Join(
+        ' ',
+        Points.Select((v, i) => $"{(i == 0 ? "M" : "L")}{X(i).ToString("0.##", Invariant)},{Y(v).ToString("0.##", Invariant)}"));
+
+    string AreaPath =>
+        $"{LinePath} L{Width.ToString("0.##", Invariant)},{Height.ToString("0.##", Invariant)} L0,{Height.ToString("0.##", Invariant)} Z";
+}

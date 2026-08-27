@@ -181,6 +181,71 @@ public class DockerContextReaderTests
 }
 
 /// <summary>An in-memory <c>~/.docker</c>.</summary>
+/// <summary>
+/// Apple's runtime is a second engine, not a second socket, so discovery has to find it a
+/// different way and must not let it displace the engine the user's terminal is pointed at.
+/// </summary>
+public class AppleContainerDiscoveryTests
+{
+    [Fact]
+    public void TheAppleRuntimeIsFoundOnPath()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Apple's runtime only exists on macOS.");
+
+        var source = new FakeConfigSource()
+            .WithEnvironment("PATH", "/usr/bin:/opt/homebrew/bin")
+            .WithExecutable("/opt/homebrew/bin/container");
+
+        var apple = Assert.Single(new DockerContextReader(source).Discover(), h => h.Origin == HostOrigin.AppleContainer);
+
+        Assert.Equal(EndpointScheme.AppleContainer, apple.Endpoint.Scheme);
+
+        // The CLI's own path, so a Homebrew install and a hand-built one are distinguishable the
+        // same way two docker.socks are.
+        Assert.Equal("/opt/homebrew/bin/container", apple.Endpoint.Path);
+    }
+
+    [Fact]
+    public void NothingIsOfferedWhenTheRuntimeIsNotInstalled()
+    {
+        var source = new FakeConfigSource().WithEnvironment("PATH", "/usr/bin:/opt/homebrew/bin");
+
+        Assert.DoesNotContain(new DockerContextReader(source).Discover(), h => h.Origin == HostOrigin.AppleContainer);
+    }
+
+    [Fact]
+    public void ItNeverClaimsTheCurrentSlotFromADockerContext()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Apple's runtime only exists on macOS.");
+
+        var source = new FakeConfigSource()
+            .WithConfig("orbstack")
+            .WithContext("orbstack", "unix:///b.sock")
+            .WithEnvironment("PATH", "/opt/homebrew/bin")
+            .WithExecutable("/opt/homebrew/bin/container");
+
+        var hosts = new DockerContextReader(source).Discover();
+
+        // A machine with both should open on the Docker-compatible engine: that is where the
+        // user's existing containers are. Apple's belongs in the picker, not in front of it.
+        Assert.Equal("orbstack", Assert.Single(hosts, h => h.IsCurrent).Id);
+        Assert.Equal(HostOrigin.AppleContainer, hosts[^1].Origin);
+    }
+
+    [Fact]
+    public void ItIsStillTheCurrentHostWhenItIsTheOnlyOne()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Apple's runtime only exists on macOS.");
+
+        var source = new FakeConfigSource()
+            .WithEnvironment("PATH", "/opt/homebrew/bin")
+            .WithExecutable("/opt/homebrew/bin/container");
+
+        // Nothing else exists, so the app opens somewhere rather than nowhere.
+        Assert.True(Assert.Single(new DockerContextReader(source).Discover()).IsCurrent);
+    }
+}
+
 sealed class FakeConfigSource : IDockerConfigSource
 {
     const string Root = "/fake/.docker";
@@ -228,6 +293,13 @@ sealed class FakeConfigSource : IDockerConfigSource
     {
         _symlinks[Normalize(from)] = Normalize(to);
         _sockets.Add(Normalize(from));
+        return this;
+    }
+
+    /// <summary>An executable on PATH, which is how Apple's runtime is discovered.</summary>
+    public FakeConfigSource WithExecutable(string path)
+    {
+        _files[Normalize(path)] = "";
         return this;
     }
 

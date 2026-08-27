@@ -1,9 +1,28 @@
 @page "/containers"
+@implements IDisposable
 @inject EngineManager Engine
-
-<PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="HandleSearch" OnFilter="HandleFilter" />
+@inject IShellBridge Shell
+@inject StatsHub Stats
 
 <EngineScope>
+    @* Declared inside EngineScope, not above it: this page's chrome reports a count that comes
+       from the store, and EngineScope re-renders only its own child content. Left outside, the
+       toolbar would keep the subtitle it had when the page opened. *@
+    <PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="HandleSearch" OnFilter="HandleFilter" />
+
+    @{
+        // Computed once per render. The property walks and filters the whole store, and the markup
+        // below asks for it four times — for the empty check, the bulk bar, the table and the
+        // selection.
+        //
+        // It must be computed *inside* EngineScope, not above it. EngineScope re-renders on every
+        // store change by re-invoking this child content; a value hoisted above it is captured by
+        // the closure when the *page* renders and never recomputed, so the list would show whatever
+        // was true when the page was opened. That is exactly what happened: a container stopped
+        // from a terminal left the row reading "Running" indefinitely.
+        var visible = Visible;
+    }
+
     <div class="page page--flush">
         @if (_error is { } error)
         {
@@ -33,7 +52,7 @@
                 </Actions>
             </EmptyState>
         }
-        else if (Visible.Count == 0)
+        else if (visible.Count == 0)
         {
             <EmptyState Icon="IconRef.Container"
                         Title="@(HasFilter ? "No containers match" : "No containers yet")"
@@ -54,7 +73,34 @@
         }
         else
         {
-            <div class="table-wrap">
+            @* Shown only with more than one selected. A bar that appears for a single selection
+               would duplicate the row's own actions and cover a row to do it. *@
+            var chosen = Chosen(visible);
+
+            @if (chosen.Count > 1)
+            {
+                <div class="bulkbar" role="toolbar" aria-label="Actions for the selected containers">
+                    <span class="bulkbar__count">@chosen.Count selected</span>
+
+                    @foreach (var bulk in BulkActions.For(chosen))
+                    {
+                        var captured = bulk;
+                        <Button Label="@captured.Label"
+                                Icon="@ContainerCommands.IconFor(captured.Action)"
+                                Variant="ButtonVariant.Ghost"
+                                Danger="@ContainerActions.IsDestructive(captured.Action)"
+                                Disabled="_working"
+                                OnClick="() => RunBulkAsync(captured, chosen)" />
+                    }
+
+                    <span class="bulkbar__spacer"></span>
+
+                    <Button Label="Clear selection" Icon="IconRef.Close" IconOnly="true"
+                            Variant="ButtonVariant.Ghost" OnClick="ClearSelection" />
+                </div>
+            }
+
+            <div class="table-wrap" @onkeydown="OnTableKeyDown" tabindex="-1">
                 <table class="table">
                     <thead>
                         <tr>
@@ -63,22 +109,46 @@
                             <th>Image</th>
                             <th>Ports</th>
                             <th>Stack</th>
+                            @if (_showUsage)
+                            {
+                                <th class="num">CPU</th>
+                                <th class="num">Memory</th>
+                            }
                             <th class="num">Uptime</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var c in Visible)
-                        {
+                        @* Virtualized: the exit criterion is 400 containers scrolling at 60fps, and
+                           a row carries a pill, an action bar and a live "recently changed" pulse —
+                           rendering four hundred of those is what makes the list stutter, not the
+                           data.
+
+                           ItemSize is 45 rather than --row-h's 36 because the name cell is usually
+                           two lines — the name over its short id — and that is what sets the row's
+                           real height. It is one line on an engine whose id is its name, so this
+                           is an estimate either way: Virtualize measures and corrects after the
+                           first paint, and this only has to be close enough that the scrollbar
+                           does not jump.
+
+                           SpacerElement is not optional here: Virtualize keeps the scroll height
+                           honest with two spacer elements, and they default to <div>. A div inside
+                           a tbody is invalid, so the browser reparents it and every row inherits a
+                           broken box — rows rendered at nearly twice their height. *@
+                        <Virtualize Items="visible" Context="c" ItemSize="45" OverscanCount="6"
+                                    SpacerElement="tr">
                             <tr @key="c.Id"
                                 class="@RowClass(c)"
-                                aria-selected="@((_selected == c.Id).ToString().ToLowerInvariant())"
-                                @onclick="() => _selected = c.Id"
+                                aria-selected="@(_selected.Contains(c.Id) ? "true" : "false")"
+                                @onclick="e => OnRowClick(c, e)"
                                 @ondblclick="() => Open(c)">
                                 <td>
                                     <div class="cell-name">
                                         <a href="@($"/containers/{c.ShortId}")" @onclick:stopPropagation>@c.Name</a>
-                                        <span class="mono muted">@c.ShortId</span>
+                                        @if (c.HasDistinctId)
+                                        {
+                                            <span class="mono muted">@c.ShortId</span>
+                                        }
                                     </div>
                                 </td>
                                 <td><StatePill Status="c.Status" /></td>
@@ -97,17 +167,76 @@
                                     }
                                 </td>
                                 <td>@(c.Stack ?? "—")</td>
+
+                                @if (_showUsage)
+                                {
+                                    <td class="num usage">
+                                        @if (Stats.For(c.Id) is { Latest: { } latest } history)
+                                        {
+                                            <span class="usage__value">@(latest.CpuPercent is { } cpu ? $"{cpu:0.0}%" : "—")</span>
+                                            <Sparkline Points="history.Normalized(s => s.CpuPercent)" Label="@($"CPU for {c.Name}")" />
+                                        }
+                                        else
+                                        {
+                                            @* Running containers are being sampled and have simply
+                                               not reported yet; a stopped one never will. *@
+                                            <span class="muted">@(c.State == DockerState.Running ? "…" : "—")</span>
+                                        }
+                                    </td>
+                                    <td class="num usage">
+                                        @if (Stats.For(c.Id) is { Latest: { } mem } memHistory)
+                                        {
+                                            <span class="usage__value">@Humanize.Bytes(mem.MemoryBytes)</span>
+                                            <Sparkline Points="memHistory.Normalized(s => (double?)s.MemoryBytes)" Label="@($"Memory for {c.Name}")" />
+                                        }
+                                        else
+                                        {
+                                            <span class="muted">@(c.State == DockerState.Running ? "…" : "—")</span>
+                                        }
+                                    </td>
+                                }
+
                                 <td class="num muted">@Humanize.Since(c.Since)</td>
                                 <td class="cell-actions">
-                                    <ContainerActionBar Container="c" OnError="ShowError" />
+                                    @* One flex row. ContainerActionBar renders its own block-level
+                                       container, so buttons placed beside it as siblings wrap onto
+                                       a second line and double the row height. *@
+                                    <div class="row-actions">
+                                        <ContainerActionBar Container="c" OnError="ShowError" />
+
+                                        @* Apple's runtime identifies a container by its name, so
+                                           there is nothing to rename. Hidden rather than offered
+                                           and refused. *@
+                                        @if (Engine.Selected?.Capabilities.SupportsRename ?? true)
+                                        {
+                                            <Button Label="@($"Rename {c.Name}")" Icon="IconRef.Inspect" IconOnly="true"
+                                                    Variant="ButtonVariant.Ghost" OnClick="() => BeginRename(c)" />
+                                        }
+
+                                        <Button Label="@($"Copy full ID of {c.Name}")" Icon="IconRef.Copy" IconOnly="true"
+                                                Variant="ButtonVariant.Ghost" OnClick="() => CopyIdAsync(c)" />
+                                    </div>
                                 </td>
                             </tr>
-                        }
+                        </Virtualize>
                     </tbody>
                 </table>
             </div>
         }
     </div>
+
+    @if (_renaming is { } renaming)
+    {
+        <RenameDialog Container="renaming" Open="true"
+                      OpenChanged="open => _renaming = open ? renaming : null"
+                      OnRename="name => Engine.RenameAsync(renaming.Id, name)" />
+    }
+
+    @* No success banner: the new container appearing in the list *is* the confirmation, and it
+       arrives the same way every other change does — through the event stream, or the poll. A
+       banner saying "created" while the row was not yet there would be Dray claiming something
+       the engine had not confirmed. *@
+    <RunDialog Open="_running" OpenChanged="open => _running = open" />
 </EngineScope>
 
 @code {
@@ -116,13 +245,92 @@
     string _search = "";
     string? _error;
     int _stateFilter;
-    string? _selected;
+    ContainerSummary? _renaming;
+
+    /// <summary>Whether the run-from-image dialog is open. Its own flag, not a container.</summary>
+    bool _running;
+    bool _working;
+    bool _showUsage;
+
+    /// <summary>
+    /// Selected ids rather than containers: the store replaces a summary on every event, so
+    /// holding the objects would lose the selection each time a container changed state.
+    /// </summary>
+    readonly HashSet<string> _selected = new(StringComparer.Ordinal);
+
+    /// <summary>Anchor for shift-click, which extends from the last plain click.</summary>
+    string? _anchor;
 
     [Inject] NavigationManager Navigation { get; set; } = default!;
 
+    protected override void OnInitialized()
+    {
+        Engine.Changed += OnEngineChanged;
+        Stats.Updated += OnStatsUpdated;
+    }
+
+    /// <summary>
+    /// Redraw when a reading lands.
+    /// <para>
+    /// Rate-limited rather than rendered per sample: with twenty containers streaming a sample a
+    /// second each, rendering every one would rebuild the table twenty times a second for numbers
+    /// nobody can read that fast.
+    /// </para>
+    /// </summary>
+    void OnStatsUpdated()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastStatsRender < TimeSpan.FromMilliseconds(500)) return;
+
+        _lastStatsRender = now;
+        InvokeAsync(StateHasChanged);
+    }
+
+    DateTimeOffset _lastStatsRender = DateTimeOffset.MinValue;
+
+    /// <summary>
+    /// Sample the running containers currently listed, or stop sampling entirely.
+    /// <para>
+    /// Off by default and driven from the filter, because this is the one feature whose cost scales
+    /// with the number of rows: the engine has no bulk stats endpoint, so each row is a held
+    /// connection.
+    /// </para>
+    /// </summary>
+    async Task SyncUsageAsync()
+    {
+        if (!_showUsage)
+        {
+            await Stats.ClearAsync();
+            return;
+        }
+
+        await Stats.WatchAsync(Visible.Where(c => c.State == DockerState.Running).Select(c => c.Id));
+    }
+
+    /// <summary>
+    /// Drop selected ids for containers that no longer exist.
+    /// <para>
+    /// Otherwise removing three of five selected leaves a bulk bar claiming five, and the next
+    /// action silently reaches two.
+    /// </para>
+    /// </summary>
+    void OnEngineChanged()
+    {
+        if (_selected.Count == 0) return;
+
+        var live = Engine.Store.Containers.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        if (_selected.RemoveWhere(id => !live.Contains(id)) > 0) InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnParametersSetAsync() => await SyncUsageAsync();
+
     bool HasFilter => _stateFilter != 0 || !string.IsNullOrWhiteSpace(_search);
 
-    IReadOnlyList<ContainerSummary> Visible
+    /// <summary>
+    /// A List rather than an IReadOnlyList because <c>Virtualize</c> takes an
+    /// <c>ICollection&lt;T&gt;</c>, which IReadOnlyList does not implement.
+    /// </summary>
+    List<ContainerSummary> Visible
     {
         get
         {
@@ -150,6 +358,122 @@
         }
     }
 
+    /// <summary>
+    /// The selection, in the order shown. Filtered to what is visible: an action must never reach a
+    /// container the user cannot see.
+    /// </summary>
+    IReadOnlyList<ContainerSummary> Chosen(IReadOnlyList<ContainerSummary> visible)
+        => [.. visible.Where(c => _selected.Contains(c.Id))];
+
+    // ---------------------------------------------------------------- selection
+
+    void OnRowClick(ContainerSummary container, MouseEventArgs e)
+    {
+        // Cmd on macOS, Ctrl elsewhere. Both are accepted everywhere rather than branching on
+        // platform, because the wrong one doing nothing is worse than both working.
+        if (e.MetaKey || e.CtrlKey)
+        {
+            if (!_selected.Add(container.Id)) _selected.Remove(container.Id);
+            _anchor = container.Id;
+            return;
+        }
+
+        if (e.ShiftKey && _anchor is { } anchor)
+        {
+            SelectRange(anchor, container.Id);
+            return;
+        }
+
+        _selected.Clear();
+        _selected.Add(container.Id);
+        _anchor = container.Id;
+    }
+
+    /// <summary>
+    /// Select everything between two rows inclusive, in the order shown rather than the order
+    /// clicked — shift-clicking upwards selects the same set as shift-clicking down.
+    /// </summary>
+    void SelectRange(string fromId, string toId)
+    {
+        var visible = Visible;
+        var from = visible.ToList().FindIndex(c => c.Id == fromId);
+        var to = visible.ToList().FindIndex(c => c.Id == toId);
+
+        if (from < 0 || to < 0) return;
+
+        var (start, end) = from <= to ? (from, to) : (to, from);
+
+        _selected.Clear();
+        for (var i = start; i <= end; i++) _selected.Add(visible[i].Id);
+    }
+
+    void ClearSelection()
+    {
+        _selected.Clear();
+        _anchor = null;
+    }
+
+    void OnTableKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") ClearSelection();
+
+        // Select-all reaches what is visible, not the whole engine: the filter is part of what the
+        // user is looking at, and "all" that includes rows off-screen behind a search is a trap.
+        if (e.Key is "a" or "A" && (e.MetaKey || e.CtrlKey))
+        {
+            foreach (var c in Visible) _selected.Add(c.Id);
+        }
+    }
+
+    // ---------------------------------------------------------------- actions
+
+    async Task RunBulkAsync(BulkAction bulk, IReadOnlyList<ContainerSummary> selection)
+    {
+        var action = bulk.Action;
+        var targets = BulkActions.Targets(action, selection);
+        if (targets.Count == 0) return;
+
+        if (ContainerActions.IsDestructive(action))
+        {
+            var (title, body) = BulkActions.Confirmation(action, targets);
+
+            var answer = await Shell.ConfirmDestructiveAsync(
+                new DestructiveConfirm(title, body, ContainerActions.Label(action)));
+
+            if (answer != ConfirmResult.Confirm) return;
+        }
+
+        _working = true;
+
+        try
+        {
+            // Sequential, deliberately. Firing twenty stops at once is a burst the engine handles
+            // by queueing anyway, and an ordered walk means a failure names the container it
+            // happened to rather than one of twenty.
+            foreach (var target in targets)
+            {
+                if (await Engine.PerformAsync(target.Id, action) is { } failure)
+                {
+                    _error = $"{target.Name}: {failure}";
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    void BeginRename(ContainerSummary container) => _renaming = container;
+
+    async Task CopyIdAsync(ContainerSummary container)
+    {
+        // The full id, not the short one: it is copied to be pasted into a command, and the short
+        // form is already on screen to be read.
+        await Shell.WriteClipboardAsync(container.Id);
+    }
+
     PageChrome Chrome
     {
         get
@@ -173,7 +497,11 @@
                     },
                     ChromeAction.Destructive("prune", "Prune stopped", IconRef.Trash),
                 ],
-                Filters: [new ChromeFilter("state", "State", [.. StateFilters.Select(s => new ChromeFilterOption(s))], _stateFilter)]);
+                Filters:
+                [
+                    new ChromeFilter("state", "State", [.. StateFilters.Select(s => new ChromeFilterOption(s))], _stateFilter),
+                    new ChromeFilter("usage", "Usage", [new ChromeFilterOption("Usage off"), new ChromeFilterOption("Usage on")], _showUsage ? 1 : 0),
+                ]);
         }
     }
 
@@ -202,11 +530,36 @@
     void HandleFilter((string FilterId, int Index) change)
     {
         if (change.FilterId == "state") _stateFilter = change.Index;
+
+        if (change.FilterId == "usage")
+        {
+            _showUsage = change.Index == 1;
+            _ = SyncUsageAsync();
+        }
     }
 
     async Task HandleAction(string id)
     {
-        if (id == "refresh" && Engine.Selected is { } host)
-            await Engine.SelectAsync(host.Id);
+        switch (id)
+        {
+            case "run":
+                _running = true;
+                break;
+
+            case "refresh" when Engine.Selected is { } host:
+                await Engine.SelectAsync(host.Id);
+                break;
+        }
+    }
+
+
+    public void Dispose()
+    {
+        Engine.Changed -= OnEngineChanged;
+        Stats.Updated -= OnStatsUpdated;
+
+        // Fire-and-forget: the component's teardown is synchronous, and leaving the streams open
+        // would hold one connection per row against the engine for a page nobody is on.
+        _ = Stats.ClearAsync();
     }
 }

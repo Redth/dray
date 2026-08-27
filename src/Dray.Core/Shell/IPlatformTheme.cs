@@ -16,10 +16,13 @@ public interface IPlatformTheme
     DrayTheme Current { get; }
 
     /// <summary>
-    /// Token overrides as <c>name -&gt; CSS colour</c>, without the <c>--</c> prefix. Only the
-    /// roles where "what the OS chose" beats "what we chose": the window ground, the panel
-    /// surfaces, separators, and the user's accent for selection. Everything else stays on the
-    /// generated palette.
+    /// Token overrides as <c>name -&gt; CSS value</c>, without the <c>--</c> prefix.
+    /// <para>
+    /// Mostly colour: the roles where "what the OS chose" beats "what we chose" — the window
+    /// ground, separators, the accent. It also carries <c>chrome-top</c>, the height of the
+    /// native titlebar and toolbar the content sits under, because that is a fact only the host
+    /// knows and CSS has to reserve space for it.
+    /// </para>
     /// </summary>
     IReadOnlyDictionary<string, string> TokenOverrides();
 

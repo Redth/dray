@@ -60,6 +60,21 @@ public static class Humanize
     /// Strips a registry host and tag so a list of images stays scannable.
     /// <c>ghcr.io/redth/dray:1.2</c> becomes <c>redth/dray</c>.
     /// </summary>
+    /// <summary>
+    /// A list of names as a sentence: "a", "a and b", "a, b and c".
+    /// <para>
+    /// Used wherever a confirmation names what it is about to affect. Naming two volumes beats
+    /// saying "2 volumes", because the second is a number and the first is a decision.
+    /// </para>
+    /// </summary>
+    public static string Names(IReadOnlyList<string> names) => names.Count switch
+    {
+        0 => string.Empty,
+        1 => names[0],
+        2 => $"{names[0]} and {names[1]}",
+        _ => $"{string.Join(", ", names.Take(names.Count - 1))} and {names[^1]}",
+    };
+
     public static string ImageName(string image)
     {
         if (string.IsNullOrWhiteSpace(image)) return image;

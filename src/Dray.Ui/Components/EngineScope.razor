@@ -2,7 +2,14 @@
 
    Pages wrap their body in this rather than each subscribing to two events and remembering to
    unsubscribe. The store raises a change per affected row, so this is the one place that decides
-   how a store change becomes a render. *@
+   how a store change becomes a render.
+
+   One rule comes with it: **anything that reads the store must be inside this component.** A
+   re-render here re-invokes the child content, and nothing else. A value computed above the tag is
+   captured by the child-content closure when the *page* renders, so it is never recomputed — the
+   containers list once showed "Running" indefinitely for a container stopped from a terminal for
+   exactly this reason. `PageChromeScope` counts: a toolbar subtitle built from the store goes
+   inside too. *@
 @implements IDisposable
 @inject EngineManager Engine
 

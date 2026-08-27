@@ -1,0 +1,98 @@
+@* Sign in to a registry.
+
+   docs/CREDENTIALS.md §1.4: Dray takes a username and a token, hands both to the helper's `store`,
+   and forgets them. The secret lives in a local for the length of one call — never rendered, never
+   logged, never held in a field that survives this dialog. *@
+@inject RegistryReader Reader
+
+<Dialog Title="@($"Sign in to {Registry.DisplayName}")" Open="Open" OpenChanged="OpenChanged">
+    <ChildContent>
+        <div class="field">
+            <label class="field__label" for="signin-user">Username</label>
+            <input id="signin-user" class="input" @bind="_username" @bind:event="oninput"
+                   autocomplete="off" spellcheck="false" disabled="@_saving" />
+        </div>
+
+        <div class="field">
+            <label class="field__label" for="signin-secret">
+                Token <span class="muted">— prefer an access token over your password</span>
+            </label>
+            <input id="signin-secret" class="input" type="password"
+                   @bind="_secret" @bind:event="oninput"
+                   autocomplete="off" spellcheck="false" disabled="@_saving" />
+        </div>
+
+        @if (_problem is { } problem)
+        {
+            <p class="signin__problem">@problem</p>
+        }
+        else
+        {
+            <p class="signin__hint muted">
+                This goes straight to <span class="mono">@("docker-credential-" + Registry.Helper)</span>,
+                the same store the <span class="mono">docker</span> command uses. Dray keeps no copy.
+            </p>
+        }
+    </ChildContent>
+    <Footer>
+        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => OpenChanged.InvokeAsync(false)" />
+        <Button Label="Sign in" Variant="ButtonVariant.Primary" Busy="_saving"
+                Disabled="@(_saving || _username.Length == 0 || _secret.Length == 0)"
+                OnClick="SubmitAsync" />
+    </Footer>
+</Dialog>
+
+@code {
+    [Parameter, EditorRequired] public RegistryEntry Registry { get; set; } = default!;
+
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Raised with the server on success. Deliberately carries no credential.</summary>
+    [Parameter] public EventCallback<string> OnSignedIn { get; set; }
+
+    string _username = "";
+    string _secret = "";
+    string? _problem;
+    bool _saving;
+
+    protected override void OnParametersSet()
+    {
+        if (!Open) return;
+
+        // Prefilled with the username already stored, because signing in again to refresh a token
+        // is the common case and retyping it is friction for nothing.
+        if (_username.Length == 0) _username = Registry.Username ?? "";
+    }
+
+    async Task SubmitAsync()
+    {
+        if (Registry.Helper is not { } helper)
+        {
+            _problem = "There is no credential helper configured, and Dray will not write a credential in plaintext.";
+            return;
+        }
+
+        _saving = true;
+        _problem = null;
+
+        try
+        {
+            _problem = await Reader.StoreAsync(helper, Registry.Server, _username.Trim(), _secret);
+
+            if (_problem is null)
+            {
+                await OnSignedIn.InvokeAsync(Registry.DisplayName);
+                await OpenChanged.InvokeAsync(false);
+            }
+        }
+        finally
+        {
+            // Cleared whatever happened. A failed sign-in must not leave the token sitting in a
+            // component field for the rest of the session.
+            _secret = "";
+            _saving = false;
+        }
+    }
+}

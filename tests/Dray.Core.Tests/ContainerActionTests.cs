@@ -135,4 +135,31 @@ public class ContainerActionTests
         foreach (var action in ContainerActions.All)
             Assert.EndsWith("ing", ContainerActions.PendingLabel(action), StringComparison.Ordinal);
     }
+
+    // ---------------------------------------------------------------- engines without pause
+
+    [Fact]
+    public void PauseIsNotOfferedOnAnEngineThatCannotPause()
+    {
+        var offered = ContainerActions.For(DockerState.Running, canPause: false);
+
+        // Apple's runtime has no freezer. A Pause button there is a button that always fails,
+        // which this class's own doc calls out as teaching the user the UI is guessing.
+        Assert.DoesNotContain(ContainerAction.Pause, offered);
+        Assert.Contains(ContainerAction.Stop, offered);
+        Assert.Contains(ContainerAction.Restart, offered);
+    }
+
+    [Fact]
+    public void ResumeIsNotOfferedEitherEvenOnAPausedContainer()
+    {
+        // A container cannot be paused on such an engine, so this state should not arise — but if
+        // it somehow does, offering the one action that would fix it and having it fail is worse
+        // than offering Stop.
+        Assert.DoesNotContain(ContainerAction.Unpause, ContainerActions.For(DockerState.Paused, canPause: false));
+    }
+
+    [Fact]
+    public void PauseIsStillOfferedByDefault()
+        => Assert.Contains(ContainerAction.Pause, ContainerActions.For(DockerState.Running));
 }

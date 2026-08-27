@@ -1,0 +1,21 @@
+# A small stack Dray is developed against. Deliberately idle — see the memory note about not
+# leaving load-generating containers running.
+name: draydemo
+
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8099:80"
+    depends_on:
+      - cache
+
+  cache:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", ""]
+
+  worker:
+    image: alpine:latest
+    command: ["sh", "-c", "while true; do sleep 30; done"]
+    depends_on:
+      - cache

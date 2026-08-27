@@ -144,6 +144,182 @@ condition to explain, not an exception to propagate.
 
 ---
 
+### 2.7 Two clients, on purpose
+
+`Dray.Docker` talks to the engine through a typed client (`Docker.DotNet.Enhanced`) for everything
+the client models, and through a small raw HTTP client (`DockerRawApi`) for two things it does not:
+
+- **The Inspect tab's raw JSON.** A typed client models the fields it knows and drops the rest.
+  Re-serialising its output would present Dray's vocabulary as the engine's, and the fields worth
+  seeing when something is behaving strangely are precisely the ones the client has never heard of.
+- **`system df`.** No typed binding exists. Without it the dashboard reported zeroes, which read as
+  measurements rather than as the absence of one.
+
+The raw client handles GET, returns text, and leaves every modelled call alone. It is not a second
+implementation of the engine API and must not become one.
+
+**Every raw path carries the API version.** Podman serves two different APIs on the same socket:
+`/v1.44/system/df` returns the Docker-compatible `{"Images": [...]}`, and `/system/df` returns
+podman's own `{"ImageUsage": {"Items": [...]}}`. An unversioned request therefore does not fail —
+it deserialises cleanly into a valid-looking object full of zeroes. This cost an afternoon; the
+version prefix is applied centrally so it cannot be forgotten per-call.
+
+---
+
+### 2.8 Reading a volume without running anything
+
+The Engine API exposes storage only through containers. There is no endpoint that reads a volume,
+so browsing one means mounting it into a container — which is the approach every competitor either
+skips or implements by running a shell inside a helper image.
+
+Dray creates the helper and **never starts it**. The archive endpoint (`GET/PUT /archive`) operates
+on a container's filesystem including its mounts, and does not require the container to have run.
+Verified against podman 6.0.2: a container created and never started serves both reads and writes
+of a mounted volume's contents.
+
+That buys three things:
+
+- **Nothing is executed.** Browsing a volume cannot run code, in the helper or anywhere else.
+- **The image does not matter.** No shell, no `ls`, no working entrypoint — so the helper is built
+  from an image already on the host and opening a volume does not quietly pull from a registry.
+  A `busybox` or `alpine` is preferred over the user's own images, matched on the *repository* and
+  not the whole reference: `library/nginx:alpine` contains "alpine" and is somebody's web server.
+- **Removal is safe.** The helper is removed with `RemoveVolumes: false`, emphatically — it exists
+  to expose the volume and must never take it with it.
+
+Helpers carry a `codes.redth.dray.helper` label and are:
+
+- **excluded from the container list**, because a container the user did not create and cannot
+  explain is one they will reasonably try to delete;
+- **excluded from a volume's "used by"**, because otherwise looking inside a volume would report it
+  as in use — the exact fact someone opens that screen to check;
+- **swept at connect**, because a Dray that was killed rather than closed never reaches disposal,
+  and the helpers otherwise accumulate one per volume ever opened.
+
+Listing a directory is the same problem as §2.6's: the two engines disagree, and neither documents
+it. Docker roots a directory tar at the requested directory's name (`etc/hosts` for `/etc`); podman
+returns `/` and `/hosts`. Assuming either shape silently yields an **empty directory** rather than
+an error, so the root prefix is read from the tar's own first entry.
+
+---
+
+### 2.9 CPU percentage is not computed the documented way
+
+Docker's published formula for container CPU is:
+
+```
+cpuDelta    = cpu_stats.cpu_usage.total_usage - precpu_stats.cpu_usage.total_usage
+systemDelta = cpu_stats.system_cpu_usage      - precpu_stats.system_cpu_usage
+percent     = cpuDelta / systemDelta * online_cpus * 100
+```
+
+Dray does not use it, because the multiply is only correct if `system_cpu_usage` is summed across
+cores. Docker's is. **Podman's is not** — it advances at roughly one CPU-second per wall second
+however many cores exist, so the multiply over-reports by exactly the core count.
+
+Measured on a four-core host, against a container running a single `while true; do :; done`:
+
+| | reading |
+|---|---|
+| ground truth (`cpuDelta` ÷ wall time) | **97.2%** |
+| `cpuDelta / systemDelta * 100` | 99.5% |
+| Docker's formula, with `* online_cpus` | **398.1%** |
+
+So Dray divides by **elapsed wall time** instead:
+
+```
+percent = cpuDelta_ns / (elapsed_seconds * 1e9) * 100
+```
+
+That needs no agreement between engines about what a counter means, and it is the definition of the
+number anyway: CPU-seconds consumed per second of real time, where 100% is one core fully used and a
+container on two of four cores reads 200% — which is what `docker stats` shows and what people
+cross-check against.
+
+The interval comes from the engine's own `read` and `preread` timestamps, not from when Dray
+received the two samples: a sample delayed in a queue must not read as a busier container.
+
+`CpuUsage.Percent` in `Dray.Core` holds this, with the measured case as a test.
+
+---
+
+### 2.10 One thing the event stream does not report
+
+`docs/ARCHITECTURE.md` §3 says the event stream is the source of truth and nothing writes to the
+store speculatively. There is exactly one exception, and it is not a design choice — it is an engine
+gap.
+
+**Podman emits no event for a rename.** Docker emits `container rename` with the new name in the
+actor attributes; podman emits nothing at all, verified by watching `/events` across a rename and
+capturing zero events. A store waiting for that event shows the old name until something unrelated
+happens to refresh the list.
+
+So `EngineManager.RenameAsync` writes the new name to the store itself once the engine has returned
+success. Nothing is being guessed: the user typed the name, the engine accepted it, and the write
+records a fact rather than predicting one. On Docker the matching event arrives afterwards and
+applying it is idempotent — `EntityStore.Rename` ignores a rename to the name already held.
+
+This is the whole exception. Every other state change still comes from the stream.
+
+---
+
+### 2.11 An engine that is not Docker-shaped at all
+
+§2.6 catalogues an engine that *impersonates* Docker and gets details wrong. Apple's `container`
+does not impersonate anything. Verified against version 1.3.0 on macOS 26.
+
+There is no HTTP API, no compatibility socket, and no shared field name. The only machine-readable
+surface is the CLI with `--format json`, so `Dray.Apple` drives processes. `EndpointScheme` gained
+`AppleContainer` because everything above the seam addresses an engine by endpoint, and a second
+engine should not need a second way of being addressed. A composite factory dispatches on the
+scheme; `DockerContextReader` finds the CLI by walking `PATH` and offers the host last, so a machine
+with both opens on the Docker-compatible engine where the user's containers already are.
+
+**Three absences are real, and are reported rather than filled in.**
+
+- **No event stream.** There is no `events` subcommand. `SupportsEvents` is false and
+  `RuntimeEventPump` polls — see §3.1.
+- **No exit codes, anywhere.** `ls` and `inspect` both report only `state: "stopped"`. A container
+  that ran `exit 7` and one that finished cleanly are indistinguishable. `ExitCode` is therefore
+  always null on this engine. Writing a zero would be worse than writing nothing: "Exited (0)" is a
+  claim, and it would be wrong for exactly the containers someone is investigating.
+- **No health checks.** The concept does not exist.
+
+**What was measured, because none of it is guessable:**
+
+- `container stats --no-stream` takes about **2.2 seconds** per call. The sampler waits out the
+  remainder of a 2.5-second period rather than adding a fixed delay, or the cadence compounds.
+- `cpuUsageUsec` is cumulative with no previous sample, and updates coarsely — one saturated core
+  reads between 65% and 105% across consecutive samples. `CpuUsage.Percent` needed no change:
+  dividing by elapsed wall time (§2.9) works on an engine that shares no counter semantics with
+  Docker at all, which is the second time that decision has paid for itself.
+- `container logs` **merges the container's stderr into its own stdout** — verified by discarding
+  the CLI's stderr and watching a line written to the container's stderr still arrive. So every line
+  is `StdOut`, and the CLI's own stderr is dropped rather than labelled as container output. There
+  is no timestamps flag either, so `LogLine.Timestamp` is null rather than stamped with the moment
+  Dray read the line.
+- **A container's id is its name.** There is no 64-hex id. `ContainerSummary.HasDistinctId` exists
+  so the UI does not render the name with its last few characters cut off and call it a short id.
+- The image descriptor's `size` is the **manifest's** size — 9218 bytes for alpine. Reported as
+  unreported rather than as a nine-kilobyte image.
+
+**Capabilities do the work.** `RuntimeCapabilities` gained `SupportsPause`, `SupportsShell`,
+`SupportsRename`, `SupportsVolumes`, `SupportsNetworks`, `SupportsStoppedFileAccess` and
+`SupportsLogMetadata`. Each is set from something measured, and the UI reads them to decide what to
+offer: `ContainerActions.For` filters pause, the Terminal tab is absent, Rename is absent, the log
+toolbar drops two toggles wired to nothing, and Volumes / Networks / Stacks explain that the concept
+does not exist here rather than showing an empty list that reads as "none yet".
+
+The principle is the one `ContainerAction.cs` already states for state filtering: *an action offered
+in the wrong state is either a no-op the user does not understand or an error the engine has to
+reject, and it teaches the user the UI is guessing.* A capability the engine lacks is the same
+mistake with a different cause.
+
+**Not one page was rewritten to add this engine.** That is the claim the seam was drawn to support,
+and it now has a second implementation behind it rather than an argument.
+
+---
+
 ## 3. State: the event stream is the source of truth
 
 The core rule from PRODUCT.md, made concrete.
@@ -165,6 +341,28 @@ Docker /events  ──▶  RuntimeEventPump  ──▶  EntityStore  ──▶  
 
 Blazor components subscribe to the store, not to a service, and re-render only the rows that changed.
 A 400-container list must not re-render because one container stopped.
+
+### 3.1 When there is no event stream
+
+Apple's `container` (§2.11) has no `events` subcommand, so `SupportsEvents` is false and the pump
+falls back to listing on an interval. Two things about that fallback are load-bearing.
+
+**It diffs; it does not reset.** `EntityStore.Reset` clears every pending action and re-announces
+every row, so calling it twice a second would flash the list and fire the change highlight
+constantly — a signal that exists to show what just happened would come to mean nothing. Instead
+each poll compares row by row and writes only what actually differs, so an idle engine produces zero
+store changes and the UI does not repaint at all.
+
+**That comparison cannot be `==`.** `ContainerSummary` is a record and `Ports` is a list, so two
+summaries built from two identical engine responses compare unequal *by reference*, every time. A
+poll loop using record equality would therefore find that everything changed on every tick — which
+is precisely the flashing the diff was meant to avoid, arriving through the back door.
+`ContainerSummary.SameAs` compares the fields a row renders, and a test asserts the trap by handing
+the pump fresh instances of unchanged data.
+
+The fallback is worse than a stream and is meant to look it: a change is noticed up to one interval
+late, and a container created and destroyed between two polls is never seen. The Hosts page says so
+under "Event stream" rather than leaving the user to notice.
 
 ---
 

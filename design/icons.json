@@ -14,48 +14,232 @@
     "Windows chrome renders the sprite too -- inventing Segoe Fluent codepoints we cannot verify",
     "would be exactly the guesswork this file exists to remove."
   ],
-
-  "geometry": { "viewBox": "0 0 24 24", "strokeWidth": 2, "linecap": "round", "linejoin": "round" },
-
+  "geometry": {
+    "viewBox": "0 0 24 24",
+    "strokeWidth": 2,
+    "linecap": "round",
+    "linejoin": "round"
+  },
   "icons": {
-    "dashboard":  { "sf": "square.grid.2x2",            "gtk": "view-grid-symbolic",           "svg": "<rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/>" },
-    "container":  { "sf": "shippingbox",                "gtk": "package-x-generic-symbolic",   "svg": "<rect x='3' y='6.5' width='18' height='13' rx='1.5'/><path d='M3 11h18'/><path d='M12 11v8.5'/>" },
-    "stack":      { "sf": "square.stack.3d.up",         "gtk": "view-list-symbolic",           "svg": "<rect x='2.5' y='3.5' width='7' height='5.5' rx='1'/><rect x='14.5' y='3.5' width='7' height='5.5' rx='1'/><rect x='8.5' y='15' width='7' height='5.5' rx='1'/><path d='M6 9v3h12V9M12 12v3'/>" },
-    "image":      { "sf": "square.3.layers.3d",         "gtk": "drive-multidisk-symbolic",     "svg": "<path d='M12 2.5 3 7l9 4.5L21 7l-9-4.5Z'/><path d='M3 12.5 12 17l9-4.5'/><path d='M3 17 12 21.5 21 17'/>" },
-    "volume":     { "sf": "externaldrive",              "gtk": "drive-harddisk-symbolic",      "svg": "<ellipse cx='12' cy='6' rx='8' ry='3'/><path d='M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6'/><path d='M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3'/>" },
-    "network":    { "sf": "point.3.connected.trianglepath.dotted", "gtk": "network-workgroup-symbolic", "svg": "<circle cx='12' cy='5' r='2.5'/><circle cx='5' cy='19' r='2.5'/><circle cx='19' cy='19' r='2.5'/><path d='M12 7.5v3.5M11 12.5 6.4 16.6M13 12.5l4.6 4.1'/>" },
-    "registry":   { "sf": "server.rack",                "gtk": "network-server-symbolic",      "svg": "<rect x='3' y='4' width='18' height='7' rx='1.5'/><rect x='3' y='13' width='18' height='7' rx='1.5'/><path d='M7 7.5h.01M7 16.5h.01'/>" },
-    "host":       { "sf": "desktopcomputer",            "gtk": "computer-symbolic",            "svg": "<rect x='2.5' y='4' width='19' height='12' rx='2'/><path d='M8 20.5h8M12 16v4.5'/>" },
-    "settings":   { "sf": "slider.horizontal.3",        "gtk": "emblem-system-symbolic",       "svg": "<path d='M4 6h3M11 6h9M4 12h7M15 12h5M4 18h1M9 18h11'/><circle cx='9' cy='6' r='2'/><circle cx='13' cy='12' r='2'/><circle cx='7' cy='18' r='2'/>" },
-
-    "play":       { "sf": "play.fill",                  "gtk": "media-playback-start-symbolic","svg": "<path d='M7.5 4.8v14.4L19.5 12 7.5 4.8Z'/>" },
-    "stop":       { "sf": "stop.fill",                  "gtk": "media-playback-stop-symbolic", "svg": "<rect x='6' y='6' width='12' height='12' rx='1.5'/>" },
-    "pause":      { "sf": "pause.fill",                 "gtk": "media-playback-pause-symbolic","svg": "<path d='M9 5v14M15 5v14'/>" },
-    "restart":    { "sf": "arrow.clockwise",            "gtk": "view-refresh-symbolic",        "svg": "<path d='M21 12a9 9 0 1 1-2.64-6.36'/><path d='M21 3v6h-6'/>" },
-    "refresh":    { "sf": "arrow.triangle.2.circlepath","gtk": "view-refresh-symbolic",        "svg": "<path d='M20.5 11.5A8.5 8.5 0 0 0 6.2 6.2L3.5 9'/><path d='M3.5 12.5a8.5 8.5 0 0 0 14.3 5.3l2.7-2.8'/><path d='M3.5 4.5V9h4.5M20.5 19.5V15H16'/>" },
-    "trash":      { "sf": "trash",                      "gtk": "user-trash-symbolic",          "svg": "<path d='M4 7h16'/><path d='M9 7V4.5h6V7'/><path d='M6.5 7 7.5 19.5h9L17.5 7'/><path d='M10.5 11v5M13.5 11v5'/>" },
-    "plus":       { "sf": "plus",                       "gtk": "list-add-symbolic",            "svg": "<path d='M12 5v14M5 12h14'/>" },
-    "search":     { "sf": "magnifyingglass",            "gtk": "system-search-symbolic",       "svg": "<circle cx='11' cy='11' r='6.5'/><path d='m15.8 15.8 4.7 4.7'/>" },
-    "filter":     { "sf": "line.3.horizontal.decrease", "gtk": "funnel-symbolic",              "svg": "<path d='M3.5 5h17l-6.5 7.6V19l-4 2v-8.4L3.5 5Z'/>" },
-    "copy":       { "sf": "doc.on.doc",                 "gtk": "edit-copy-symbolic",           "svg": "<rect x='9' y='9' width='12' height='12' rx='2'/><path d='M5.5 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.5'/>" },
-    "pull":       { "sf": "square.and.arrow.down",      "gtk": "document-save-symbolic",       "svg": "<path d='M12 3v12'/><path d='m7 10 5 5 5-5'/><path d='M4 20h16'/>" },
-    "push":       { "sf": "square.and.arrow.up",        "gtk": "document-send-symbolic",       "svg": "<path d='M12 15.5V3'/><path d='m7 8 5-5 5 5'/><path d='M4 20h16'/>" },
-    "build":      { "sf": "hammer",                     "gtk": "applications-engineering-symbolic", "svg": "<path d='M12 2.5 21 7v10l-9 4.5L3 17V7l9-4.5Z'/><path d='M3 7l9 4.5L21 7'/><path d='M12 11.5V21.5'/>" },
-    "terminal":   { "sf": "terminal",                   "gtk": "utilities-terminal-symbolic",  "svg": "<rect x='2.5' y='4' width='19' height='16' rx='2'/><path d='m7 9.5 3.5 3L7 15.5M13.5 15.5H17'/>" },
-    "logs":       { "sf": "text.alignleft",             "gtk": "text-x-generic-symbolic",      "svg": "<path d='M4 5.5h16M4 10h16M4 14.5h11M4 19h7'/>" },
-    "files":      { "sf": "folder",                     "gtk": "folder-symbolic",              "svg": "<path d='M13 3H5.5A1.5 1.5 0 0 0 4 4.5v15A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V10L13 3Z'/><path d='M13 3v7h7'/>" },
-    "inspect":    { "sf": "curlybraces",                "gtk": "text-x-script-symbolic",       "svg": "<path d='M8.5 3.5C6 3.5 6.5 8 6.5 9.5S4.5 12 4.5 12s2 1 2 2.5.5 6-2 6'/><path d='M15.5 3.5c2.5 0 2 4.5 2 6s2 2.5 2 2.5-2 1-2 2.5-.5 6 2 6'/>" },
-    "port":       { "sf": "arrow.right.square",         "gtk": "go-next-symbolic",             "svg": "<path d='M4 12h11'/><path d='m11.5 8.5 3.5 3.5-3.5 3.5'/><path d='M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4'/>" },
-    "link":       { "sf": "link",                       "gtk": "insert-link-symbolic",         "svg": "<path d='M10.5 13.5a4 4 0 0 0 5.66 0l3-3a4 4 0 1 0-5.66-5.66l-1.7 1.7'/><path d='M13.5 10.5a4 4 0 0 0-5.66 0l-3 3a4 4 0 1 0 5.66 5.66l1.7-1.7'/>" },
-    "external":   { "sf": "arrow.up.forward.square",    "gtk": "external-link-symbolic",       "svg": "<path d='M14 4h6v6'/><path d='m20 4-8.5 8.5'/><path d='M18 14v5.5A1.5 1.5 0 0 1 16.5 21h-12A1.5 1.5 0 0 1 3 19.5v-12A1.5 1.5 0 0 1 4.5 6H10'/>" },
-    "more":       { "sf": "ellipsis",                   "gtk": "view-more-symbolic",           "svg": "<circle cx='5' cy='12' r='1.6'/><circle cx='12' cy='12' r='1.6'/><circle cx='19' cy='12' r='1.6'/>" },
-
-    "check":      { "sf": "checkmark",                  "gtk": "object-select-symbolic",       "svg": "<path d='m4.5 12.5 5.5 5.5L19.5 6'/>" },
-    "warning":    { "sf": "exclamationmark.triangle",   "gtk": "dialog-warning-symbolic",      "svg": "<path d='M12 3.5 22 20H2L12 3.5Z'/><path d='M12 10v4.5M12 17.5h.01'/>" },
-    "error":      { "sf": "xmark.octagon",              "gtk": "dialog-error-symbolic",        "svg": "<circle cx='12' cy='12' r='9'/><path d='m9 9 6 6M15 9l-6 6'/>" },
-    "info":       { "sf": "info.circle",                "gtk": "dialog-information-symbolic",  "svg": "<circle cx='12' cy='12' r='9'/><path d='M12 11v6M12 7.5h.01'/>" },
-    "chevron-right": { "sf": "chevron.right",           "gtk": "go-next-symbolic",             "svg": "<path d='m9 5 7 7-7 7'/>" },
-    "chevron-down":  { "sf": "chevron.down",            "gtk": "go-down-symbolic",             "svg": "<path d='m5 9 7 7 7-7'/>" },
-    "close":      { "sf": "xmark",                      "gtk": "window-close-symbolic",        "svg": "<path d='m6 6 12 12M18 6 6 18'/>" }
+    "dashboard": {
+      "sf": "square.grid.2x2",
+      "gtk": "view-grid-symbolic",
+      "svg": "<rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/>"
+    },
+    "container": {
+      "sf": "shippingbox",
+      "gtk": "package-x-generic-symbolic",
+      "svg": "<rect x='3' y='6.5' width='18' height='13' rx='1.5'/><path d='M3 11h18'/><path d='M12 11v8.5'/>"
+    },
+    "stack": {
+      "sf": "square.stack.3d.up",
+      "gtk": "view-list-symbolic",
+      "svg": "<rect x='2.5' y='3.5' width='7' height='5.5' rx='1'/><rect x='14.5' y='3.5' width='7' height='5.5' rx='1'/><rect x='8.5' y='15' width='7' height='5.5' rx='1'/><path d='M6 9v3h12V9M12 12v3'/>"
+    },
+    "image": {
+      "sf": "square.3.layers.3d",
+      "gtk": "drive-multidisk-symbolic",
+      "svg": "<path d='M12 2.5 3 7l9 4.5L21 7l-9-4.5Z'/><path d='M3 12.5 12 17l9-4.5'/><path d='M3 17 12 21.5 21 17'/>"
+    },
+    "volume": {
+      "sf": "externaldrive",
+      "gtk": "drive-harddisk-symbolic",
+      "svg": "<ellipse cx='12' cy='6' rx='8' ry='3'/><path d='M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6'/><path d='M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3'/>"
+    },
+    "network": {
+      "sf": "point.3.connected.trianglepath.dotted",
+      "gtk": "network-workgroup-symbolic",
+      "svg": "<circle cx='12' cy='5' r='2.5'/><circle cx='5' cy='19' r='2.5'/><circle cx='19' cy='19' r='2.5'/><path d='M12 7.5v3.5M11 12.5 6.4 16.6M13 12.5l4.6 4.1'/>"
+    },
+    "registry": {
+      "sf": "server.rack",
+      "gtk": "network-server-symbolic",
+      "svg": "<rect x='3' y='4' width='18' height='7' rx='1.5'/><rect x='3' y='13' width='18' height='7' rx='1.5'/><path d='M7 7.5h.01M7 16.5h.01'/>"
+    },
+    "host": {
+      "sf": "desktopcomputer",
+      "gtk": "computer-symbolic",
+      "svg": "<rect x='2.5' y='4' width='19' height='12' rx='2'/><path d='M8 20.5h8M12 16v4.5'/>"
+    },
+    "settings": {
+      "sf": "slider.horizontal.3",
+      "gtk": "emblem-system-symbolic",
+      "svg": "<path d='M4 6h3M11 6h9M4 12h7M15 12h5M4 18h1M9 18h11'/><circle cx='9' cy='6' r='2'/><circle cx='13' cy='12' r='2'/><circle cx='7' cy='18' r='2'/>"
+    },
+    "play": {
+      "sf": "play.fill",
+      "gtk": "media-playback-start-symbolic",
+      "svg": "<path d='M7.5 4.8v14.4L19.5 12 7.5 4.8Z'/>"
+    },
+    "stop": {
+      "sf": "stop.fill",
+      "gtk": "media-playback-stop-symbolic",
+      "svg": "<rect x='6' y='6' width='12' height='12' rx='1.5'/>"
+    },
+    "pause": {
+      "sf": "pause.fill",
+      "gtk": "media-playback-pause-symbolic",
+      "svg": "<path d='M9 5v14M15 5v14'/>"
+    },
+    "restart": {
+      "sf": "arrow.clockwise",
+      "gtk": "view-refresh-symbolic",
+      "svg": "<path d='M21 12a9 9 0 1 1-2.64-6.36'/><path d='M21 3v6h-6'/>"
+    },
+    "refresh": {
+      "sf": "arrow.triangle.2.circlepath",
+      "gtk": "view-refresh-symbolic",
+      "svg": "<path d='M20.5 11.5A8.5 8.5 0 0 0 6.2 6.2L3.5 9'/><path d='M3.5 12.5a8.5 8.5 0 0 0 14.3 5.3l2.7-2.8'/><path d='M3.5 4.5V9h4.5M20.5 19.5V15H16'/>"
+    },
+    "trash": {
+      "sf": "trash",
+      "gtk": "user-trash-symbolic",
+      "svg": "<path d='M4 7h16'/><path d='M9 7V4.5h6V7'/><path d='M6.5 7 7.5 19.5h9L17.5 7'/><path d='M10.5 11v5M13.5 11v5'/>"
+    },
+    "plus": {
+      "sf": "plus",
+      "gtk": "list-add-symbolic",
+      "svg": "<path d='M12 5v14M5 12h14'/>"
+    },
+    "search": {
+      "sf": "magnifyingglass",
+      "gtk": "system-search-symbolic",
+      "svg": "<circle cx='11' cy='11' r='6.5'/><path d='m15.8 15.8 4.7 4.7'/>"
+    },
+    "filter": {
+      "sf": "line.3.horizontal.decrease",
+      "gtk": "funnel-symbolic",
+      "svg": "<path d='M3.5 5h17l-6.5 7.6V19l-4 2v-8.4L3.5 5Z'/>"
+    },
+    "copy": {
+      "sf": "doc.on.doc",
+      "gtk": "edit-copy-symbolic",
+      "svg": "<rect x='9' y='9' width='12' height='12' rx='2'/><path d='M5.5 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.5'/>"
+    },
+    "pull": {
+      "sf": "square.and.arrow.down",
+      "gtk": "document-save-symbolic",
+      "svg": "<path d='M12 3v12'/><path d='m7 10 5 5 5-5'/><path d='M4 20h16'/>"
+    },
+    "push": {
+      "sf": "square.and.arrow.up",
+      "gtk": "document-send-symbolic",
+      "svg": "<path d='M12 15.5V3'/><path d='m7 8 5-5 5 5'/><path d='M4 20h16'/>"
+    },
+    "build": {
+      "sf": "hammer",
+      "gtk": "applications-engineering-symbolic",
+      "svg": "<path d='M12 2.5 21 7v10l-9 4.5L3 17V7l9-4.5Z'/><path d='M3 7l9 4.5L21 7'/><path d='M12 11.5V21.5'/>"
+    },
+    "terminal": {
+      "sf": "terminal",
+      "gtk": "utilities-terminal-symbolic",
+      "svg": "<rect x='2.5' y='4' width='19' height='16' rx='2'/><path d='m7 9.5 3.5 3L7 15.5M13.5 15.5H17'/>"
+    },
+    "logs": {
+      "sf": "text.alignleft",
+      "gtk": "text-x-generic-symbolic",
+      "svg": "<path d='M4 5.5h16M4 10h16M4 14.5h11M4 19h7'/>"
+    },
+    "files": {
+      "sf": "folder",
+      "gtk": "folder-symbolic",
+      "svg": "<path d='M13 3H5.5A1.5 1.5 0 0 0 4 4.5v15A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V10L13 3Z'/><path d='M13 3v7h7'/>"
+    },
+    "folder": {
+      "sf": "folder",
+      "gtk": "folder-symbolic",
+      "svg": "<path d='M3 7.5a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6l1 1a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v8.8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'/>"
+    },
+    "file": {
+      "sf": "doc",
+      "gtk": "text-x-generic-symbolic",
+      "svg": "<path d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z'/><path d='M14 3v5h5'/>"
+    },
+    "folder-up": {
+      "sf": "arrow.up.doc",
+      "gtk": "go-up-symbolic",
+      "svg": "<path d='M12 19V6'/><path d='m6 12 6-6 6 6'/>"
+    },
+    "save": {
+      "sf": "square.and.arrow.down",
+      "gtk": "document-save-symbolic",
+      "svg": "<path d='M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z'/><path d='M17 21v-8H7v8'/><path d='M7 3v5h8'/>"
+    },
+    "reveal": {
+      "sf": "eye",
+      "gtk": "view-reveal-symbolic",
+      "svg": "<path d='M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z'/><circle cx='12' cy='12' r='3'/>"
+    },
+    "conceal": {
+      "sf": "eye.slash",
+      "gtk": "view-conceal-symbolic",
+      "svg": "<path d='M10.7 6.1A8.9 8.9 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-2.8 3.5'/><path d='M6.3 7.8A17 17 0 0 0 2.5 12S6 18 12 18a8.9 8.9 0 0 0 3.4-.65'/><path d='m3 3 18 18'/><path d='M9.9 9.9a3 3 0 0 0 4.2 4.2'/>"
+    },
+    "inspect": {
+      "sf": "curlybraces",
+      "gtk": "text-x-script-symbolic",
+      "svg": "<path d='M8.5 3.5C6 3.5 6.5 8 6.5 9.5S4.5 12 4.5 12s2 1 2 2.5.5 6-2 6'/><path d='M15.5 3.5c2.5 0 2 4.5 2 6s2 2.5 2 2.5-2 1-2 2.5-.5 6 2 6'/>"
+    },
+    "port": {
+      "sf": "arrow.right.square",
+      "gtk": "go-next-symbolic",
+      "svg": "<path d='M4 12h11'/><path d='m11.5 8.5 3.5 3.5-3.5 3.5'/><path d='M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4'/>"
+    },
+    "link": {
+      "sf": "link",
+      "gtk": "insert-link-symbolic",
+      "svg": "<path d='M10.5 13.5a4 4 0 0 0 5.66 0l3-3a4 4 0 1 0-5.66-5.66l-1.7 1.7'/><path d='M13.5 10.5a4 4 0 0 0-5.66 0l-3 3a4 4 0 1 0 5.66 5.66l1.7-1.7'/>"
+    },
+    "external": {
+      "sf": "arrow.up.forward.square",
+      "gtk": "external-link-symbolic",
+      "svg": "<path d='M14 4h6v6'/><path d='m20 4-8.5 8.5'/><path d='M18 14v5.5A1.5 1.5 0 0 1 16.5 21h-12A1.5 1.5 0 0 1 3 19.5v-12A1.5 1.5 0 0 1 4.5 6H10'/>"
+    },
+    "more": {
+      "sf": "ellipsis",
+      "gtk": "view-more-symbolic",
+      "svg": "<circle cx='5' cy='12' r='1.6'/><circle cx='12' cy='12' r='1.6'/><circle cx='19' cy='12' r='1.6'/>"
+    },
+    "check": {
+      "sf": "checkmark",
+      "gtk": "object-select-symbolic",
+      "svg": "<path d='m4.5 12.5 5.5 5.5L19.5 6'/>"
+    },
+    "warning": {
+      "sf": "exclamationmark.triangle",
+      "gtk": "dialog-warning-symbolic",
+      "svg": "<path d='M12 3.5 22 20H2L12 3.5Z'/><path d='M12 10v4.5M12 17.5h.01'/>"
+    },
+    "error": {
+      "sf": "xmark.octagon",
+      "gtk": "dialog-error-symbolic",
+      "svg": "<circle cx='12' cy='12' r='9'/><path d='m9 9 6 6M15 9l-6 6'/>"
+    },
+    "info": {
+      "sf": "info.circle",
+      "gtk": "dialog-information-symbolic",
+      "svg": "<circle cx='12' cy='12' r='9'/><path d='M12 11v6M12 7.5h.01'/>"
+    },
+    "chevron-left": {
+      "sf": "chevron.left",
+      "gtk": "go-previous-symbolic",
+      "svg": "<path d='m15 5-7 7 7 7'/>"
+    },
+    "chevron-right": {
+      "sf": "chevron.right",
+      "gtk": "go-next-symbolic",
+      "svg": "<path d='m9 5 7 7-7 7'/>"
+    },
+    "chevron-down": {
+      "sf": "chevron.down",
+      "gtk": "go-down-symbolic",
+      "svg": "<path d='m5 9 7 7 7-7'/>"
+    },
+    "close": {
+      "sf": "xmark",
+      "gtk": "window-close-symbolic",
+      "svg": "<path d='m6 6 12 12M18 6 6 18'/>"
+    }
   }
 }

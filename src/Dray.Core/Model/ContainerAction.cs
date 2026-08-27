@@ -59,8 +59,13 @@ public static class ContainerActions
     };
 
     /// <summary>The actions to offer for a container, already filtered by its state.</summary>
-    public static IEnumerable<ContainerAction> For(DockerState state)
-        => All.Where(a => AppliesTo(a, state));
+    /// <param name="canPause">
+    /// Whether the engine can pause at all. Filtered here rather than in each view, for the same
+    /// reason state is: an action the engine will refuse is a button that always fails, and one
+    /// failing button costs more trust than two missing ones.
+    /// </param>
+    public static IEnumerable<ContainerAction> For(DockerState state, bool canPause = true)
+        => All.Where(a => AppliesTo(a, state) && (canPause || a is not (ContainerAction.Pause or ContainerAction.Unpause)));
 
     /// <summary>
     /// Whether the action destroys something the user cannot get back, and so needs confirming.

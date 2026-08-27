@@ -1,0 +1,37 @@
+.nets {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+}
+
+.nets__card {
+    /* A network with twenty containers should scroll inside its own card rather than pushing the
+       next network off the page. */
+    max-height: 60vh;
+    overflow: auto;
+}
+
+.nets__spacer {
+    flex: 1 1 auto;
+}
+
+.nets__meta {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+/* A fact about the network, not a state — so it reads quieter than a status pill. */
+.nets__badge {
+    font-size: var(--text-xs);
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    padding: 1px var(--s2);
+    border-radius: var(--r-sm);
+    white-space: nowrap;
+}
+
+.nets__empty {
+    padding: var(--s3) var(--s4);
+    font-size: var(--text-sm);
+}

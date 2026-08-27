@@ -1,7 +1,255 @@
 @page "/networks"
+@inject EngineManager Engine
+@inject NavigationManager Nav
+@inject IShellBridge Shell
+@inject PruneService Prune
 
-<PageChromeScope Chrome="@(new PageChrome("Networks"))" />
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="s => _search = s" />
 
-<div class="page">
-    <EmptyState Icon="IconRef.Network" Title="Networks arrive in phase 4" Body="Inspect, create, connect and disconnect containers, and see which containers share which network." />
-</div>
+<EngineScope>
+    <div class="page page--flush">
+        @if (_notice is { } notice)
+        {
+            <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+                <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                <span>@notice</span>
+                <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost"
+                        OnClick="() => _notice = null" />
+            </div>
+        }
+
+        @if (Engine.HasNoHosts)
+        {
+            <NoEngine />
+        }
+        else if (Engine.Selected is { Capabilities.SupportsNetworks: false })
+        {
+            <NotOnThisEngine Feature="networks to manage" Icon="IconRef.Network"
+                             Instead="Containers here join a network when they are created, and each one's address is on its Inspect tab." />
+        }
+        else if (_error is { } error)
+        {
+            <EmptyState Icon="IconRef.Warning" Title="Could not list networks" Body="@error">
+                <Actions>
+                    <Button Label="Try again" Icon="IconRef.Refresh" OnClick="LoadAsync" />
+                </Actions>
+            </EmptyState>
+        }
+        else if (_networks is null)
+        {
+            <div class="stack-v">
+                @for (var i = 0; i < 4; i++)
+                {
+                    <Skeleton Width="@($"{50 + (i * 13 % 35)}%")" />
+                }
+            </div>
+        }
+        else
+        {
+            @* One card per network rather than a table: the interesting thing about a network is
+               which containers share it, and that is a list inside a row — which a table cannot
+               show without a disclosure per line. *@
+            <div class="nets">
+                @foreach (var network in Visible)
+                {
+                    <section class="nets__card card" @key="network.Id">
+                        <div class="panel__head">
+                            <h3 class="panel__title">@network.Name</h3>
+
+                            @if (network.IsPredefined)
+                            {
+                                <span class="nets__badge" title="Created by the engine; cannot be removed">built in</span>
+                            }
+
+                            @if (network.IsInternal)
+                            {
+                                <span class="nets__badge" title="No route out of this network">internal</span>
+                            }
+
+                            <span class="nets__spacer"></span>
+
+                            <span class="muted nets__meta mono">@network.Driver</span>
+
+                            @if (network.Subnets.Count > 0)
+                            {
+                                <span class="muted nets__meta mono">@string.Join(", ", network.Subnets)</span>
+                            }
+
+                            @if (!network.IsPredefined)
+                            {
+                                <Button Label="@($"Remove {network.Name}")" Icon="IconRef.Trash" IconOnly="true"
+                                        Variant="ButtonVariant.Ghost" Danger="true"
+                                        OnClick="() => RemoveAsync(network)" />
+                            }
+                        </div>
+
+                        @if (network.Members.Count == 0)
+                        {
+                            <p class="nets__empty muted">No containers are attached.</p>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <thead>
+                                    <tr><th>Container</th><th>Address</th><th>MAC</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var member in network.Members)
+                                    {
+                                        <tr @key="member.ContainerId">
+                                            <td>
+                                                <a href="@($"/containers/{member.ShortId}")">@member.Name</a>
+                                            </td>
+                                            <td class="mono">@(member.Address ?? "—")</td>
+                                            <td class="mono muted">@(member.MacAddress ?? "—")</td>
+                                            <td class="cell-actions">
+                                                <Button Label="@($"Disconnect {member.Name}")" Icon="IconRef.Close"
+                                                        IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                        OnClick="() => DisconnectAsync(network, member)" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </section>
+                }
+            </div>
+        }
+    </div>
+
+    @if (_creating)
+    {
+        <NetworkDialog Open="true" OpenChanged="open => _creating = open" OnCreated="LoadAsync" />
+    }
+</EngineScope>
+
+@code {
+    IReadOnlyList<NetworkSummary>? _networks;
+    string? _error;
+    string? _notice;
+    bool _noticeOk;
+    string _search = "";
+    bool _creating;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    IReadOnlyList<NetworkSummary> Visible
+    {
+        get
+        {
+            if (_networks is null) return [];
+            if (string.IsNullOrWhiteSpace(_search)) return _networks;
+
+            var needle = _search.Trim();
+
+            return
+            [
+                .. _networks.Where(n =>
+                    n.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                    || n.Members.Any(m => m.Name.Contains(needle, StringComparison.OrdinalIgnoreCase))),
+            ];
+        }
+    }
+
+    async Task LoadAsync()
+    {
+        _error = null;
+
+        try
+        {
+            _networks = await Engine.ListNetworksAsync();
+        }
+        catch (Exception ex)
+        {
+            _networks = null;
+            _error = ex.Message;
+        }
+    }
+
+    async Task RemoveAsync(NetworkSummary network)
+    {
+        var attached = network.Members.Count;
+
+        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+            $"Remove {network.Name}?",
+            attached > 0
+                ? $"{attached} container{(attached == 1 ? " is" : "s are")} still attached. Disconnect them first."
+                : "The network is deleted. Containers configured to use it will fail to start until it exists again.",
+            "Remove"));
+
+        if (answer != ConfirmResult.Confirm || attached > 0) return;
+
+        if (await Engine.RemoveNetworkAsync(network.Id) is { } failure) Notify(failure, ok: false);
+        else Notify($"Removed {network.Name}.", ok: true);
+
+        await LoadAsync();
+    }
+
+    async Task DisconnectAsync(NetworkSummary network, NetworkMember member)
+    {
+        // Not confirmed: disconnecting is reversible with one click on the other side, and
+        // confirming everything is how a user learns to click through confirmations.
+        if (await Engine.DisconnectNetworkAsync(network.Id, member.ContainerId) is { } failure)
+            Notify(failure, ok: false);
+        else
+            Notify($"Disconnected {member.Name} from {network.Name}.", ok: true);
+
+        await LoadAsync();
+    }
+
+    void Notify(string message, bool ok)
+    {
+        _notice = message;
+        _noticeOk = ok;
+    }
+
+    bool HasNetworks => Engine.Selected?.Capabilities.SupportsNetworks ?? true;
+
+    PageChrome Chrome => new(
+        "Networks",
+        Subtitle: !HasNetworks ? Engine.Selected?.Name
+            : _networks is null ? Engine.Selected?.Name
+            : $"{_networks.Count} on {Engine.Selected?.Name}",
+        Search: HasNetworks ? new ChromeSearch("Filter networks", _search) : null,
+        Actions: HasNetworks
+            ?
+            [
+                ChromeAction.Primary("create", "Create…", IconRef.Plus),
+                ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh),
+                ChromeAction.Destructive("prune", "Prune unused", IconRef.Trash),
+            ]
+            :
+            [
+                @* One control, so the toolbar still carries the page title: the web chrome hides
+                   itself entirely when a page declares nothing, and a page explaining itself with
+                   no heading at all is worse than a toolbar with one button. *@
+                ChromeAction.Secondary("hosts", "Switch engine…", IconRef.Host),
+            ]);
+
+    async Task HandleAction(string id)
+    {
+        switch (id)
+        {
+            case "hosts":
+                Nav.NavigateTo("/hosts");
+                break;
+
+            case "refresh":
+                await LoadAsync();
+                break;
+
+            case "create":
+                _creating = true;
+                break;
+
+            case "prune":
+                if (await Prune.RunAsync(PruneKind.Networks) is { } outcome)
+                {
+                    Notify(outcome.Message, outcome.Ok);
+                    await LoadAsync();
+                }
+                break;
+        }
+    }
+}

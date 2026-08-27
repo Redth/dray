@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Dray.Apple</RootNamespace>
+    <Description>IContainerRuntime over Apple's `container` runtime. The second implementation of the seam, and the proof it is one.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dray.Apple.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Dray.Core/Dray.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -35,6 +35,20 @@ public sealed record ChromeAction(
         => new(id, label, icon, ChromeActionKind.Destructive);
 }
 
+/// <summary>
+/// The way back out of a detail page.
+/// <para>
+/// Its own slot rather than another <see cref="ChromeAction"/>, because it is not one. There is at
+/// most one, it is navigation rather than a command, and every platform already agrees on where it
+/// belongs: leading, not trailing with the actions. Modelling it as an action meant each host had
+/// to special-case an id it should not have known about, and the web chrome rendered it as a
+/// forward-pointing button on the far right — the opposite of what it does.
+/// </para>
+/// </summary>
+/// <param name="Id">Raised through <c>InvokeAction</c> like any other, so pages handle it in one place.</param>
+/// <param name="Label">What it goes back to, e.g. "All containers". Shown as a tooltip where space is tight.</param>
+public sealed record ChromeBack(string Id, string Label);
+
 /// <summary>A search field in the chrome. Absent means the page has no search.</summary>
 public sealed record ChromeSearch(string Placeholder, string Text = "");
 
@@ -86,9 +100,20 @@ public sealed record PageChrome(
     string? Subtitle = null,
     ChromeSearch? Search = null,
     IReadOnlyList<ChromeAction>? Actions = null,
-    IReadOnlyList<ChromeFilter>? Filters = null)
+    IReadOnlyList<ChromeFilter>? Filters = null,
+    ChromeBack? Back = null)
 {
     public static readonly PageChrome Empty = new(string.Empty);
+
+    /// <summary>
+    /// Whether the chrome has anything but its title.
+    /// <para>
+    /// A web toolbar with no controls is a second copy of the page heading, which is why detail
+    /// pages looked like they had two titles. Native heads always draw their toolbar — the window
+    /// has one whether Dray fills it or not — so this is only consulted by the web chrome.
+    /// </para>
+    /// </summary>
+    public bool HasControls => Search is not null || ActionList.Count > 0 || FilterList.Count > 0;
 
     public IReadOnlyList<ChromeAction> ActionList => Actions ?? [];
 
@@ -108,6 +133,7 @@ public sealed record PageChrome(
            && Title == other.Title
            && Subtitle == other.Subtitle
            && Search == other.Search
+           && Back == other.Back
            && ActionList.SequenceEqual(other.ActionList)
            && FilterList.SequenceEqual(other.FilterList);
 
@@ -117,6 +143,7 @@ public sealed record PageChrome(
         hash.Add(Title);
         hash.Add(Subtitle);
         hash.Add(Search);
+        hash.Add(Back);
         foreach (var a in ActionList) hash.Add(a);
         foreach (var f in FilterList) hash.Add(f);
         return hash.ToHashCode();
@@ -134,7 +161,7 @@ public sealed record PageChrome(
     public string Signature =>
         string.Join(
             '|',
-            new[] { Search is null ? "-" : "search" }
+            new[] { Search is null ? "-" : "search", Back is null ? "-" : "back" }
                 .Concat(ActionList.Select(a => $"a:{a.Id}:{a.Kind}"))
                 .Concat(FilterList.Select(f => $"f:{f.Id}:{f.Options.Count}")));
 }

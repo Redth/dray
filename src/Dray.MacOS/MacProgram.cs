@@ -1,4 +1,8 @@
+using Dray.Core.Engine;
 using Dray.Core.Shell;
+using Dray.Apple;
+using Dray.Docker;
+using Dray.Ui.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Hosting;
@@ -41,6 +45,18 @@ public static class MacProgram
         builder.Services.AddSingleton<IShellState, ShellState>();
         builder.Services.AddSingleton<IShellBridge, MacShellBridge>();
         builder.Services.AddSingleton<IPlatformTheme, MacTheme>();
+
+        // The engine layer, same registrations as the dev host.
+        builder.Services.AddSingleton<IDockerConfigSource, SystemDockerConfigSource>();
+        builder.Services.AddSingleton<DockerContextReader>();
+        builder.Services.AddSingleton<IContainerRuntimeFactory>(
+            new CompositeRuntimeFactory(new AppleRuntimeFactory(), new DockerRuntimeFactory()));
+        builder.Services.AddSingleton<EngineManager>();
+        // Scoped: it holds one live stream per watched container and must go away with the view
+        // that asked for them.
+        builder.Services.AddScoped<StatsHub>();
+        builder.Services.AddScoped<PruneService>();
+        builder.Services.AddSingleton<RegistryReader>();
 
         builder.Services.AddSingleton<MacShellReadySignal>();
         builder.Services.AddSingleton<IShellReadySignal>(sp => sp.GetRequiredService<MacShellReadySignal>());

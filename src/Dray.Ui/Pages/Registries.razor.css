@@ -1,0 +1,22 @@
+/* Not an error — the credential works — but it is worth the user knowing, and the tooltip carries
+   the one-line fix. */
+.reg__plain {
+    color: var(--warn-ink);
+    background: var(--warn-tint);
+    padding: 1px var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    cursor: help;
+}
+
+.reg__note {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+.row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+}

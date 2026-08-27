@@ -29,3 +29,75 @@
     font-size: var(--text-sm);
     color: var(--muted);
 }
+
+/* Four rows, one grid, so the labels, sizes and bars all line up down the panel rather than each
+   row finding its own widths. */
+.disk {
+    display: grid;
+    grid-template-columns: minmax(6rem, auto) 1fr auto auto;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+}
+
+.disk__row {
+    display: contents;
+}
+
+.disk__label {
+    color: var(--ink);
+}
+
+.disk__bar {
+    display: block;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    overflow: hidden;
+}
+
+.disk__fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--muted);
+}
+
+/* The categorical key colours, not the semantic ones: these four are being told apart, not ranked.
+   Using --warn for build cache would say "something is wrong" about a cache doing its job. */
+.disk__fill--images { background: var(--key-1); }
+.disk__fill--containers { background: var(--key-2); }
+.disk__fill--volumes { background: var(--key-5); }
+.disk__fill--cache { background: var(--key-3); }
+
+.disk__size,
+.disk__free {
+    /* Digits in a column have to line up, or scanning four sizes means reading four sizes. */
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.disk__free {
+    min-width: 7rem;
+    text-align: right;
+}
+
+.disk__reclaim {
+    margin-left: auto;
+    color: var(--ok-ink);
+    background: var(--ok-tint);
+    border-radius: var(--r-sm);
+    padding: 1px var(--s2);
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 40rem) {
+    /* The free-able column is the first thing to go: it is the least scanned and the widest. */
+    .disk {
+        grid-template-columns: minmax(5rem, auto) 1fr auto;
+    }
+
+    .disk__free {
+        display: none;
+    }
+}

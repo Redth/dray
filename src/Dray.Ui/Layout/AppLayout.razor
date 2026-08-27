@@ -12,7 +12,13 @@
     <ConfirmHost />
 }
 
-<div class="app @(Caps.HasNativeSidebar ? null : "app--webchrome")">
+@* Mounted once, opened from anywhere. The key handler is on the app root rather than the document
+   so it cannot fire while a native menu or another window has focus. *@
+<CommandPalette @ref="_palette" />
+
+<div class="app @(Caps.HasNativeSidebar ? null : "app--webchrome")"
+     tabindex="-1"
+     @onkeydown="OnKeyDown">
     @if (!Caps.HasNativeSidebar)
     {
         <WebSidebar />
@@ -28,6 +34,20 @@
 </div>
 
 @code {
+    CommandPalette? _palette;
+
+    /// <summary>
+    /// ⌘K, or Ctrl+K where there is no Command key.
+    /// <para>
+    /// Both accepted on every platform rather than branching: the wrong one silently doing nothing
+    /// is worse than both working.
+    /// </para>
+    /// </summary>
+    void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "k" or "K" && (e.MetaKey || e.CtrlKey)) _palette?.Open();
+    }
+
     protected override void OnAfterRender(bool firstRender)
     {
         // Tells the host to drop its native loading overlay and fade the WebView in.

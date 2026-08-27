@@ -4,21 +4,31 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 
-<dialog @ref="_el" class="dialog" @onclose="HandleClose" aria-labelledby="@_titleId">
-    <div class="dialog__head">
-        <h2 class="dialog__title" id="@_titleId">@Title</h2>
-    </div>
+<dialog @ref="_el" class="dialog @Class" @onclose="HandleClose" aria-labelledby="@_titleId">
+    @* A dialog with no title is one whose content is its own heading — the command palette, whose
+       search field is the first thing and needs no label above it. *@
+    @if (Title.Length > 0)
+    {
+        <div class="dialog__head">
+            <h2 class="dialog__title" id="@_titleId">@Title</h2>
+        </div>
+    }
     <div class="dialog__body">@ChildContent</div>
-    <div class="dialog__foot">
-        @if (Footer is not null)
-        {
-            @Footer
-        }
-        else
-        {
-            <Button Label="@CancelLabel" Variant="ButtonVariant.Ghost" OnClick="CancelAsync" />
-        }
-    </div>
+    @* A dialog whose content is the whole interaction has no footer: the palette is dismissed with
+       Escape and committed with Enter, and a Cancel button under it would be furniture. *@
+    @if (!HideFooter)
+    {
+        <div class="dialog__foot">
+            @if (Footer is not null)
+            {
+                @Footer
+            }
+            else
+            {
+                <Button Label="@CancelLabel" Variant="ButtonVariant.Ghost" OnClick="CancelAsync" />
+            }
+        </div>
+    }
 </dialog>
 
 @code {
@@ -27,12 +37,22 @@
     IJSObjectReference? _module;
     bool _shown;
 
+    /// <summary>Empty means the dialog draws no heading — see the note in the markup.</summary>
     [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    /// <summary>
+    /// An extra class on the dialog itself, for the few that need a different shape. Declared
+    /// rather than captured: this component takes no unmatched attributes, so a typo is a build
+    /// error instead of an attribute that silently does nothing.
+    /// </summary>
+    [Parameter] public string? Class { get; set; }
     [Parameter] public bool Open { get; set; }
     [Parameter] public EventCallback<bool> OpenChanged { get; set; }
     [Parameter] public string CancelLabel { get; set; } = "Cancel";
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public RenderFragment? Footer { get; set; }
+
+    [Parameter] public bool HideFooter { get; set; }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

@@ -14,7 +14,9 @@ namespace Dray.MacOS;
 /// </summary>
 public sealed class BlazorContentPage : ContentPage
 {
-    /// <summary>Clears the unified titlebar so content does not slide under the toolbar.</summary>
+    /// <summary>
+    /// Fallback titlebar height, used only for the drag overlay before a window exists to measure.
+    /// </summary>
     const double TitlebarInset = 52;
 
     readonly MacOSBlazorWebView _webView;
@@ -31,12 +33,24 @@ public sealed class BlazorContentPage : ContentPage
         _shell = services.GetRequiredService<IShellState>();
 
         // Whatever the current page declared, rendered as real NSToolbar items.
+        //
+        // Deliberately NOT the window's title. Making it visible means AppKit reserves the
+        // toolbar's leading edge for it, which pushes the back button across to the actions on the
+        // right; the only toolbar style that avoids that is Expanded, which puts the title on its
+        // own full-width row above the sidebar and loses the inset-sidebar look entirely. The page
+        // heading stays in the content, where it costs nothing and sits where it belongs.
         _toolbar = new MacToolbarProjector(this, _shell);
 
         _webView = new MacOSBlazorWebView
         {
             HostPage = "wwwroot/index.html",
-            ContentInsets = new Thickness(0, TitlebarInset, 0, 0),
+
+            // Zero, deliberately. An inset here offsets the WebView's own scroll view, but Dray's
+            // scroll containers are inside the document, so the inset produced a static gap and no
+            // scrolling under the toolbar at all — and would double up with the CSS that now
+            // reserves the space. The web layer owns the offset via --chrome-top, which MacTheme
+            // reports from the real measured titlebar height.
+            ContentInsets = new Thickness(0),
             HideScrollPocketOverlay = true,
             Opacity = 0,
         };

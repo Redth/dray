@@ -1,0 +1,222 @@
+@* Monaco, wrapped.
+
+   Owns the editor instance and the unsaved-changes state; knows nothing about where the file came
+   from. That keeps it usable for a container's filesystem and a volume's alike, which are the same
+   editor over two different transports. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IPlatformTheme Theme
+
+<div class="editor">
+    <div class="editor__bar chrome">
+        <span class="editor__dir mono" title="@File.Path">@Directory</span>
+        <span class="editor__file mono" title="@File.Path">@FileName</span>
+
+        @if (IsDirty)
+        {
+            <span class="editor__dirty" title="Unsaved changes">Edited</span>
+        }
+
+        <span class="editor__spacer"></span>
+
+        @if (_message is { } message)
+        {
+            <span class="editor__message @(_failed ? "is-error" : null)" role="status">@message</span>
+        }
+
+        @if (ReadOnly)
+        {
+            <span class="muted editor__ro">Read only</span>
+        }
+        else
+        {
+            <Button Label="Revert" Icon="IconRef.Refresh" Variant="ButtonVariant.Ghost"
+                    Disabled="@(!IsDirty || _saving)" OnClick="RevertAsync" />
+
+            <Button Label="@(_saving ? "Saving…" : "Save")" Icon="IconRef.Save" Variant="ButtonVariant.Primary"
+                    Disabled="@(!IsDirty || _saving)" OnClick="SaveAsync" />
+        }
+
+        <Button Label="Close" Icon="IconRef.Close" Variant="ButtonVariant.Ghost" IconOnly="true" OnClick="CloseAsync" />
+    </div>
+
+    <div class="editor__host" @ref="_host"></div>
+</div>
+
+@code {
+    /// <summary>The file to edit. Changing it swaps the editor's content rather than remounting.</summary>
+    [Parameter, EditorRequired] public FileContent File { get; set; } = default!;
+
+    /// <summary>Persist the edited bytes. Returns null on success, or a sentence to show the user.</summary>
+    [Parameter, EditorRequired] public Func<string, byte[], Task<string?>> OnSave { get; set; } = default!;
+
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>Raised whenever unsaved state changes, so the owner can guard navigation.</summary>
+    [Parameter] public EventCallback<bool> OnDirtyChanged { get; set; }
+
+    [Parameter] public bool ReadOnly { get; set; }
+
+    ElementReference _host;
+    IJSObjectReference? _module;
+    IJSObjectReference? _editor;
+    DotNetObjectReference<CodeEditor>? _self;
+
+    string _loadedPath = "";
+    string? _message;
+    bool _failed;
+    bool _saving;
+
+    public bool IsDirty { get; private set; }
+
+    string FileName => File.Path[(File.Path.LastIndexOf('/') + 1)..];
+
+    /// <summary>The directory, with its trailing slash, so the two spans read as one path.</summary>
+    string Directory => File.Path[..(File.Path.LastIndexOf('/') + 1)];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/monaco.js");
+
+            _editor = await _module.InvokeAsync<IJSObjectReference>(
+                "editor.create", _host, _self, new
+                {
+                    text = File.Text,
+                    language = File.Language,
+                    readOnly = ReadOnly,
+                });
+
+            _loadedPath = File.Path;
+
+            // The editor resolves its own palette from the document, but only when told to look
+            // again — an appearance change mid-edit would otherwise leave a light editor in a dark
+            // window until the file was reopened.
+            Theme.Changed += OnThemeChanged;
+            return;
+        }
+
+        // The owner swapped the file underneath us. Replacing the content is much cheaper than
+        // tearing down a 5 MB editor and building another.
+        if (_editor is not null && _loadedPath != File.Path)
+        {
+            _loadedPath = File.Path;
+            _message = null;
+
+            await _module!.InvokeVoidAsync("editor.setValue", _editor, File.Text, File.Language);
+            await SetDirtyAsync(false);
+        }
+    }
+
+    [JSInvokable("OnDirtyChanged")]
+    public async Task JsDirtyChanged(bool dirty)
+    {
+        await SetDirtyAsync(dirty);
+        StateHasChanged();
+    }
+
+    [JSInvokable("OnSaveRequested")]
+    public async Task JsSaveRequested()
+    {
+        await SaveAsync();
+        StateHasChanged();
+    }
+
+    void OnThemeChanged() => _ = InvokeAsync(async () =>
+    {
+        if (_editor is null || _module is null) return;
+
+        try
+        {
+            await _module.InvokeVoidAsync("editor.retheme", _editor);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    });
+
+    async Task SetDirtyAsync(bool dirty)
+    {
+        if (IsDirty == dirty) return;
+
+        IsDirty = dirty;
+        await OnDirtyChanged.InvokeAsync(dirty);
+    }
+
+    async Task SaveAsync()
+    {
+        if (_editor is null || _saving || ReadOnly) return;
+
+        _saving = true;
+        _message = null;
+        _failed = false;
+
+        try
+        {
+            var text = await _module!.InvokeAsync<string>("editor.getValue", _editor);
+
+            // Encoding goes through FileContent so the file's own line endings and trailing
+            // newline survive — saving an unchanged file must produce identical bytes.
+            var result = await OnSave(File.Path, File.Encode(text));
+
+            if (result is null)
+            {
+                await _module!.InvokeVoidAsync("editor.markClean", _editor);
+                await SetDirtyAsync(false);
+
+                _message = "Saved";
+            }
+            else
+            {
+                _message = result;
+                _failed = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message;
+            _failed = true;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    async Task RevertAsync()
+    {
+        if (_editor is null) return;
+
+        await _module!.InvokeVoidAsync("editor.setValue", _editor, File.Text, File.Language);
+        await SetDirtyAsync(false);
+
+        _message = null;
+        _failed = false;
+    }
+
+    async Task CloseAsync() => await OnClose.InvokeAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        Theme.Changed -= OnThemeChanged;
+
+        try
+        {
+            if (_editor is not null)
+            {
+                await _module!.InvokeVoidAsync("editor.dispose", _editor);
+                await _editor.DisposeAsync();
+            }
+
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The WebView went away first, which happens on app shutdown and is not a failure.
+        }
+
+        _self?.Dispose();
+    }
+}

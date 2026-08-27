@@ -14,6 +14,16 @@ public enum EndpointScheme
 
     /// <summary>SSH to a remote host's socket.</summary>
     Ssh,
+
+    /// <summary>
+    /// Apple's <c>container</c> runtime, driven through its CLI.
+    /// <para>
+    /// Not a socket at all: it has no Docker-compatible endpoint and no HTTP API Dray can reach.
+    /// It is a scheme here because everything above the runtime seam addresses an engine by
+    /// endpoint, and a second engine should not need a second way of being addressed.
+    /// </para>
+    /// </summary>
+    AppleContainer,
 }
 
 /// <summary>TLS material for a <see cref="EndpointScheme.Tcp"/> endpoint.</summary>
@@ -64,6 +74,10 @@ public sealed record DockerEndpoint
             System.IO.Path.GetFileName(Path?.TrimEnd('/')) is { Length: > 0 } name ? name : Raw,
         EndpointScheme.Ssh => $"ssh://{(User is null ? "" : User + "@")}{Host}{(Port is null ? "" : ":" + Port)}",
         EndpointScheme.Tcp => $"tcp://{Host}{(Port is null ? "" : ":" + Port)}",
+
+        // The CLI's own path, so a Homebrew install and a hand-built one are distinguishable in
+        // the picker the same way two docker.socks are.
+        EndpointScheme.AppleContainer => ShortenHome(Path) ?? Raw,
         _ => Raw,
     };
 

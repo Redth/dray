@@ -42,8 +42,26 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
 
+  <!-- macOS reads an app's accent colour from its compiled asset catalog at launch; there is no
+       runtime API. The colorset itself is generated from design/tokens.json so the brand cannot
+       drift between AppKit and the web layer. -->
+  <ItemGroup>
+    <!-- Assets.xcassets is globbed into ImageAsset by the SDK already, so it needs no include
+         here. It does need an exclude: the Razor SDK's default Content glob picks up **/*.json,
+         which claims the catalog's Contents.json files a second time and asks the bundler to copy
+         them in loose alongside the compiled Assets.car. Only the compiled catalog belongs in the
+         bundle. -->
+    <Content Remove="Assets.xcassets/**" />
+
+    <!-- A plain Info.plist here is ignored: the SDK generates the manifest from MSBuild
+         properties. Extra keys must be merged in through a partial manifest. -->
+    <PartialAppManifest Include="PartialInfo.plist" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../Dray.Ui/Dray.Ui.csproj" />
+    <ProjectReference Include="../Dray.Docker/Dray.Docker.csproj" />
+    <ProjectReference Include="../Dray.Apple/Dray.Apple.csproj" />
   </ItemGroup>
 
   <!--

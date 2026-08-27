@@ -14,7 +14,9 @@
             <p class="muted" style="max-width: 72ch; margin-bottom: var(--s4)">
                 Every host works the same behind this picker — a local socket, a WSL2 distro, or SSH
                 to a machine elsewhere. Only the selected host streams events; the rest are checked
-                when you open this page.
+                when you open this page. Engines differ in what they can do, and the panel below
+                says what the selected one supports rather than leaving you to find out by
+                pressing something.
             </p>
 
             <div class="table-wrap">
@@ -66,9 +68,21 @@
                     <div class="panel__body">
                         <div class="caps">
                             <Capability Name="Event stream" Supported="selected.Capabilities.SupportsEvents"
-                                        Absent="Dray would have to poll, and lists would update slowly." />
+                                        Absent="Dray checks this engine every couple of seconds instead, so a change can be that late — and something that appears and disappears between checks is never seen." />
                             <Capability Name="Container stats" Supported="selected.Capabilities.SupportsStats"
                                         Absent="CPU and memory columns stay empty on this engine." />
+                            <Capability Name="Shell" Supported="selected.Capabilities.SupportsShell"
+                                        Absent="The Terminal tab is hidden. Use the engine's own exec command in a terminal." />
+                            <Capability Name="Pause and resume" Supported="selected.Capabilities.SupportsPause"
+                                        Absent="Those buttons are hidden. Stop and start are unaffected." />
+                            <Capability Name="Rename" Supported="selected.Capabilities.SupportsRename"
+                                        Absent="This engine identifies a container by its name, so renaming means recreating it." />
+                            <Capability Name="Volumes" Supported="selected.Capabilities.SupportsVolumes"
+                                        Absent="Containers mount host directories directly instead." />
+                            <Capability Name="Networks" Supported="selected.Capabilities.SupportsNetworks"
+                                        Absent="Networks are attached at creation and cannot be managed afterwards." />
+                            <Capability Name="Compose" Supported="selected.Capabilities.SupportsCompose"
+                                        Absent="The Stacks page has nothing to read on this engine." />
                             <Capability Name="BuildKit" Supported="selected.Capabilities.SupportsBuildKit"
                                         Absent="Builds fall back to the legacy builder." />
                         </div>
@@ -97,6 +111,7 @@
         HostOrigin.DockerContext => "docker context",
         HostOrigin.Environment => "DOCKER_HOST",
         HostOrigin.WslDistro => "WSL2",
+        HostOrigin.AppleContainer => "Apple container",
         _ => "found on this machine",
     };
 

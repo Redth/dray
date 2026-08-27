@@ -61,6 +61,18 @@ public sealed record DiskUsage(
     long VolumesReclaimableBytes,
     long BuildCacheBytes)
 {
+    /// <summary>
+    /// The engine could not tell us.
+    /// <para>
+    /// Distinct from a measured zero, and the distinction matters: "0 B reclaimable" invites the
+    /// user to stop looking, while "unknown" invites them to look elsewhere. Not every engine
+    /// implements <c>system df</c>, so this is a real state rather than a defensive one.
+    /// </para>
+    /// </summary>
+    public static readonly DiskUsage Unknown = new(-1, -1, -1, -1, -1, -1) { IsKnown = false };
+
+    public bool IsKnown { get; init; } = true;
+
     public long TotalBytes => ImagesBytes + ContainersBytes + VolumesBytes + BuildCacheBytes;
 
     public long ReclaimableBytes => ImagesReclaimableBytes + VolumesReclaimableBytes + BuildCacheBytes;
@@ -83,6 +95,20 @@ public interface IContainerRuntime : IAsyncDisposable
     Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<ContainerSummary>> ListContainersAsync(bool includeStopped = true, CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a container from an image and, unless told otherwise, start it.
+    /// <para>
+    /// Returns the new container's id. Its own method rather than a <see cref="ContainerAction"/>
+    /// for the reason <see cref="RenameAsync"/> is: every action there takes only an id, and this
+    /// one carries a whole request.
+    /// </para>
+    /// <para>
+    /// The container appears in the list through the event stream — or the poll — like any other,
+    /// so nothing writes it to the store here.
+    /// </para>
+    /// </summary>
+    Task<string> RunAsync(RunRequest request, CancellationToken ct = default);
 
     /// <summary>
     /// Perform one action on one container.
@@ -120,6 +146,106 @@ public interface IContainerRuntime : IAsyncDisposable
     /// <summary>Write one file back, preserving its mode. Works on a stopped container.</summary>
     Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default);
 
+    /// <summary>
+    /// Give a container a different name.
+    /// <para>
+    /// Its own method rather than a <see cref="ContainerAction"/>: every other action takes only an
+    /// id, and threading a payload through that enum would make six actions carry a parameter that
+    /// only one of them uses.
+    /// </para>
+    /// </summary>
+    Task RenameAsync(string containerId, string name, CancellationToken ct = default);
+
+    /// <summary>
+    /// Everything the engine knows about one container.
+    /// <para>
+    /// Separate from the list call because it is a different shape and a different cost: the list
+    /// endpoint returns a summary for every container, this returns the whole record for one.
+    /// </para>
+    /// </summary>
+    Task<ContainerInspect> InspectContainerAsync(string containerId, CancellationToken ct = default);
+
+    Task<IReadOnlyList<ImageSummary>> ListImagesAsync(bool includeDangling = true, CancellationToken ct = default);
+
+    /// <summary>An image's layers, newest first.</summary>
+    Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default);
+
+    /// <summary>Delete an image. <paramref name="force"/> removes it even when a container uses it.</summary>
+    Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default);
+
+    /// <summary>Point another tag at an existing image.</summary>
+    Task TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default);
+
+    /// <summary>
+    /// Pull an image, reporting progress as the engine reports it — per layer, out of order.
+    /// </summary>
+    IAsyncEnumerable<PullProgress> PullImageAsync(string reference, CancellationToken ct = default);
+
+    /// <summary>
+    /// Build an image from a directory containing a Dockerfile, streaming the engine's output.
+    /// <para>
+    /// The context is tarred and sent to the engine, which is why this takes a directory rather
+    /// than a file: a Dockerfile that copies anything needs its neighbours too.
+    /// </para>
+    /// </summary>
+    IAsyncEnumerable<BuildProgress> BuildImageAsync(BuildRequest request, CancellationToken ct = default);
+
+    Task<IReadOnlyList<NetworkSummary>> ListNetworksAsync(CancellationToken ct = default);
+
+    Task CreateNetworkAsync(NetworkRequest request, CancellationToken ct = default);
+
+    Task RemoveNetworkAsync(string networkId, CancellationToken ct = default);
+
+    Task ConnectNetworkAsync(string networkId, string containerId, CancellationToken ct = default);
+
+    Task DisconnectNetworkAsync(string networkId, string containerId, bool force = false, CancellationToken ct = default);
+
+    Task<IReadOnlyList<VolumeSummary>> ListVolumesAsync(CancellationToken ct = default);
+
+    Task CreateVolumeAsync(string name, CancellationToken ct = default);
+
+    Task RemoveVolumeAsync(string name, bool force = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// What a prune would remove, without removing it.
+    /// <para>
+    /// Computed from what the engine already reports rather than by asking it to dry-run, because
+    /// no engine offers a dry run. PRODUCT.md requires the preview to match reality, so this errs
+    /// toward naming exactly what the same filters would delete.
+    /// </para>
+    /// </summary>
+    Task<PrunePreview> PreviewPruneAsync(PruneKind kind, CancellationToken ct = default);
+
+    Task<PruneResult> PruneAsync(PruneKind kind, CancellationToken ct = default);
+
+    /// <summary>
+    /// Open a volume for browsing.
+    /// <para>
+    /// A volume has no filesystem API of its own — the engine only ever exposes storage through a
+    /// container — so implementations mount it into one. The session owns whatever it created and
+    /// must clean it up on disposal.
+    /// </para>
+    /// </summary>
+    Task<IVolumeSession> OpenVolumeAsync(string volumeName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Start an interactive process inside a running container.
+    /// <para>
+    /// Throws <see cref="NoShellException"/> when the container is not running or the image has no
+    /// shell — both ordinary outcomes with an explanation attached, not faults.
+    /// </para>
+    /// </summary>
+    Task<IExecSession> StartExecAsync(string containerId, ExecOptions options, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sample a container's resource use until cancelled.
+    /// <para>
+    /// Streamed, not polled: the engine already emits a sample a second. Ends on its own when the
+    /// container stops, which is a normal completion rather than an error.
+    /// </para>
+    /// </summary>
+    IAsyncEnumerable<ContainerStats> StreamStatsAsync(string containerId, CancellationToken ct = default);
+
     Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default);
 
     Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default);
@@ -129,6 +255,25 @@ public interface IContainerRuntime : IAsyncDisposable
     /// connection surfaces as an exception so the pump can decide to reconnect.
     /// </summary>
     IAsyncEnumerable<RuntimeEvent> WatchEventsAsync(CancellationToken ct = default);
+}
+
+/// <summary>
+/// A volume, open for browsing.
+/// <para>
+/// Holds engine-side resources for as long as it lives, so it is scoped to one browsing session
+/// and disposed when the user navigates away. Paths are relative to the volume's own root: the
+/// caller asks for <c>/data</c> and never learns where the session mounted it.
+/// </para>
+/// </summary>
+public interface IVolumeSession : IAsyncDisposable
+{
+    string VolumeName { get; }
+
+    Task<DirectoryListing> ListDirectoryAsync(string path, CancellationToken ct = default);
+
+    Task<byte[]> ReadFileAsync(string path, CancellationToken ct = default);
+
+    Task WriteFileAsync(string path, byte[] content, CancellationToken ct = default);
 }
 
 /// <summary>

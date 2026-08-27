@@ -1,7 +1,262 @@
 @page "/volumes"
+@inject EngineManager Engine
+@inject NavigationManager Nav
+@inject IShellBridge Shell
+@inject PruneService Prune
 
-<PageChromeScope Chrome="@(new PageChrome("Volumes"))" />
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="s => _search = s" />
 
-<div class="page">
-    <EmptyState Icon="IconRef.Volume" Title="Volumes arrive in phase 4" Body="Including browsing what is actually inside a volume — the thing no other Docker GUI does today." />
-</div>
+<EngineScope>
+    <div class="page page--flush">
+        @if (_notice is { } notice)
+        {
+            <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+                <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                <span>@notice</span>
+                <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost"
+                        OnClick="() => _notice = null" />
+            </div>
+        }
+
+        @if (Engine.HasNoHosts)
+        {
+            <NoEngine />
+        }
+        else if (Engine.Selected is { Capabilities.SupportsVolumes: false })
+        {
+            @* An empty list here would read as "none yet" and put a Create button in front of
+               something the engine cannot do. *@
+            <NotOnThisEngine Feature="volumes" Icon="IconRef.Volume"
+                             Instead="Containers here mount host directories directly, which you can browse in Finder." />
+        }
+        else if (_error is { } error)
+        {
+            <EmptyState Icon="IconRef.Warning" Title="Could not list volumes" Body="@error">
+                <Actions>
+                    <Button Label="Try again" Icon="IconRef.Refresh" OnClick="LoadAsync" />
+                </Actions>
+            </EmptyState>
+        }
+        else if (_volumes is null)
+        {
+            <div class="stack-v">
+                @for (var i = 0; i < 6; i++)
+                {
+                    <Skeleton Width="@($"{45 + (i * 11 % 40)}%")" />
+                }
+            </div>
+        }
+        else if (Visible.Count == 0)
+        {
+            <EmptyState Icon="IconRef.Volume"
+                        Title="@(_search.Length > 0 ? "No volumes match" : "No volumes")"
+                        Body="@(_search.Length > 0
+                            ? "Nothing here matches the current search."
+                            : "This engine has no volumes. One appears the first time a container asks for persistent storage.")">
+                <Actions>
+                    <Button Label="Create a volume…" Icon="IconRef.Plus" Variant="ButtonVariant.Primary"
+                            OnClick="() => _creating = true" />
+                </Actions>
+            </EmptyState>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Driver</th>
+                            <th>Used by</th>
+                            <th>Stack</th>
+                            <th class="num">Size</th>
+                            <th class="num">Created</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var volume in Visible)
+                        {
+                            <tr @key="volume.Name" @ondblclick="() => Open(volume)">
+                                <td>
+                                    <div class="cell-name">
+                                        <a href="@Route(volume)" @onclick:stopPropagation>@volume.DisplayName</a>
+
+                                        @* Only when the display name is not the real one. For a
+                                           named volume they are identical, and printing both puts
+                                           the same word twice in one cell. *@
+                                        @if (volume.IsAnonymous)
+                                        {
+                                            <span class="mono muted">@volume.Name</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="muted">@volume.Driver</td>
+                                <td>
+                                    @if (volume.UsedBy.Count == 0)
+                                    {
+                                        @* The fact that matters before deleting one. *@
+                                        <span class="muted">nothing</span>
+                                    }
+                                    else
+                                    {
+                                        @string.Join(", ", volume.UsedBy)
+                                    }
+                                </td>
+                                <td>@(volume.Stack ?? "—")</td>
+                                <td class="num mono muted">
+                                    @* Null means the engine did not measure it, which is not the
+                                       same as empty and must not read as zero. *@
+                                    @(volume.SizeBytes is { } size ? Humanize.Bytes(size) : "—")
+                                </td>
+                                <td class="num muted">@(volume.Created is { } c ? Humanize.Since(c) : "—")</td>
+                                <td class="cell-actions">
+                                    <Button Label="@($"Remove {volume.DisplayName}")" Icon="IconRef.Trash"
+                                            IconOnly="true" Variant="ButtonVariant.Ghost" Danger="true"
+                                            OnClick="() => RemoveAsync(volume)" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    @if (_creating)
+    {
+        <VolumeDialog Open="true" OpenChanged="open => _creating = open" OnCreated="LoadAsync" />
+    }
+</EngineScope>
+
+@code {
+    IReadOnlyList<VolumeSummary>? _volumes;
+    string? _error;
+    string? _notice;
+    bool _noticeOk;
+    string _search = "";
+    bool _creating;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    IReadOnlyList<VolumeSummary> Visible
+    {
+        get
+        {
+            if (_volumes is null) return [];
+            if (string.IsNullOrWhiteSpace(_search)) return _volumes;
+
+            var needle = _search.Trim();
+
+            return
+            [
+                .. _volumes.Where(v =>
+                    v.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                    || (v.Stack?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || v.UsedBy.Any(u => u.Contains(needle, StringComparison.OrdinalIgnoreCase))),
+            ];
+        }
+    }
+
+    async Task LoadAsync()
+    {
+        _error = null;
+
+        try
+        {
+            _volumes = await Engine.ListVolumesAsync();
+        }
+        catch (Exception ex)
+        {
+            _volumes = null;
+            _error = ex.Message;
+        }
+    }
+
+    async Task RemoveAsync(VolumeSummary volume)
+    {
+        var holders = volume.UsedBy;
+
+        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+            $"Remove {volume.DisplayName}?",
+            holders.Count > 0
+                // Forcing exists, and Dray does not offer it: removing a volume out from under a
+                // running container corrupts whatever is mid-write, and the button that does it
+                // would sit one click from the one that does not.
+                ? $"Still in use by {Humanize.Names([.. holders])}. Remove those containers first."
+                : "Everything stored in this volume is deleted. There is no undo and no copy.",
+            "Remove",
+
+            // Typed: a volume is the one thing in Dray that holds data the user cannot recreate.
+            holders.Count > 0 ? null : "delete"));
+
+        if (answer != ConfirmResult.Confirm || holders.Count > 0) return;
+
+        if (await Engine.RemoveVolumeAsync(volume.Name) is { } failure) Notify(failure, ok: false);
+        else Notify($"Removed {volume.DisplayName}.", ok: true);
+
+        await LoadAsync();
+    }
+
+    void Notify(string message, bool ok)
+    {
+        _notice = message;
+        _noticeOk = ok;
+    }
+
+    static string Route(VolumeSummary volume) => $"/volumes/{Uri.EscapeDataString(volume.Name)}";
+
+    void Open(VolumeSummary volume) => Nav.NavigateTo(Route(volume));
+
+    /// <summary>True when the selected engine has managed volumes at all.</summary>
+    bool HasVolumes => Engine.Selected?.Capabilities.SupportsVolumes ?? true;
+
+    PageChrome Chrome => new(
+        "Volumes",
+        Subtitle: !HasVolumes ? Engine.Selected?.Name
+            : _volumes is null ? Engine.Selected?.Name
+            : $"{_volumes.Count} on {Engine.Selected?.Name}",
+
+        // No search bar over a page that is explaining itself.
+        Search: HasVolumes ? new ChromeSearch("Filter volumes", _search) : null,
+        Actions: HasVolumes
+            ?
+            [
+                ChromeAction.Primary("create", "Create…", IconRef.Plus),
+                ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh, "⌘R"),
+                ChromeAction.Destructive("prune", "Prune unused", IconRef.Trash),
+            ]
+            :
+            [
+                @* One control, so the toolbar still carries the page title: the web chrome hides
+                   itself entirely when a page declares nothing, and a page explaining itself with
+                   no heading at all is worse than a toolbar with one button. *@
+                ChromeAction.Secondary("hosts", "Switch engine…", IconRef.Host),
+            ]);
+
+    async Task HandleAction(string id)
+    {
+        switch (id)
+        {
+            case "hosts":
+                Nav.NavigateTo("/hosts");
+                break;
+
+            case "refresh":
+                await LoadAsync();
+                break;
+
+            case "create":
+                _creating = true;
+                break;
+
+            case "prune":
+                if (await Prune.RunAsync(PruneKind.Volumes) is { } outcome)
+                {
+                    Notify(outcome.Message, outcome.Ok);
+                    await LoadAsync();
+                }
+                break;
+        }
+    }
+}

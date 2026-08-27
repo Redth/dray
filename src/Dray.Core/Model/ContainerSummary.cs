@@ -33,8 +33,18 @@ public sealed record ContainerSummary
 
     public IReadOnlyList<PortBinding> Ports { get; init; } = [];
 
-    /// <summary>Compose project name, from the <c>com.docker.compose.project</c> label.</summary>
-    public string? Stack { get; init; }
+    /// <summary>
+    /// What compose says about this container, when compose created it.
+    /// <para>
+    /// One field rather than four loose ones: project, service, config files and working directory
+    /// are only ever meaningful together, and a container that is not part of a stack has none of
+    /// them.
+    /// </para>
+    /// </summary>
+    public ComposeMembership? Compose { get; init; }
+
+    /// <summary>Compose project name. The list's Stack column, and the most-used part of <see cref="Compose"/>.</summary>
+    public string? Stack => Compose?.Project;
 
     public double? CpuPercent { get; init; }
 
@@ -44,4 +54,42 @@ public sealed record ContainerSummary
 
     /// <summary>The short id users actually recognise.</summary>
     public string ShortId => Id.Length <= 12 ? Id : Id[..12];
+
+    /// <summary>
+    /// Whether the id is worth showing next to the name.
+    /// <para>
+    /// On Apple's runtime a container's id <i>is</i> its name, so the short id renders as the name
+    /// with its last few characters cut off — which looks like a truncation bug and tells the user
+    /// nothing they cannot already see.
+    /// </para>
+    /// </summary>
+    public bool HasDistinctId => !string.Equals(Id, Name, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether two rows describe the same container in the same state.
+    /// <para>
+    /// <b>Not</b> record equality, and the difference is not academic. <see cref="Ports"/> is a
+    /// list, so two summaries built from two identical engine responses compare unequal by
+    /// reference — every time. A poll loop deciding what changed with <c>==</c> would therefore
+    /// find that everything changed on every tick, rewrite every row, and fire the change
+    /// highlight on a list nobody had touched.
+    /// </para>
+    /// </summary>
+    public bool SameAs(ContainerSummary other)
+        => Id == other.Id
+        && Name == other.Name
+        && Image == other.Image
+        && State == other.State
+        && Health == other.Health
+        && ExitCode == other.ExitCode
+        && Since == other.Since
+        && CpuPercent == other.CpuPercent
+        && MemoryBytes == other.MemoryBytes
+        // Project, service and replica are the parts a row renders. The rest of a membership —
+        // config files, working directory — is a list and a path that only the stack pages read,
+        // and comparing the list would reintroduce exactly the reference problem above.
+        && Compose?.Project == other.Compose?.Project
+        && Compose?.Service == other.Compose?.Service
+        && Compose?.Replica == other.Compose?.Replica
+        && Ports.SequenceEqual(other.Ports);
 }

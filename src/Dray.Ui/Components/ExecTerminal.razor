@@ -1,0 +1,275 @@
+@* A shell inside a container.
+
+   The exec session is owned here and disposed with the component, because an abandoned exec leaves
+   a process running inside the user's container — a worse leak than an idle connection. *@
+@implements IAsyncDisposable
+@inject EngineManager Engine
+@inject IPlatformTheme Theme
+@inject IShellBridge Shell
+@inject IJSRuntime JS
+
+<div class="term">
+    <div class="term__bar chrome">
+        @if (_session is { } session)
+        {
+            <span class="term__shell mono">@session.Command</span>
+        }
+
+        @if (_exitCode is { } code)
+        {
+            <span class="term__exit @(code == 0 ? null : "is-error")">
+                Session ended @(code == 0 ? "" : $"· exit {code}")
+            </span>
+        }
+
+        <span class="term__spacer"></span>
+
+        @if (_session is not null)
+        {
+            <input class="input term__find" type="search" placeholder="Find"
+                   @bind="_needle" @bind:event="oninput" @onkeydown="OnFindKeyAsync" />
+
+            <Button Label="Clear" Icon="IconRef.Close" Variant="ButtonVariant.Ghost" OnClick="ClearAsync" />
+        }
+
+        <Button Label="@(_session is null ? "Connect" : "Restart")"
+                Icon="IconRef.Restart" Variant="ButtonVariant.Ghost"
+                Disabled="_connecting" OnClick="RestartAsync" />
+    </div>
+
+    @if (_error is { } error)
+    {
+        <div class="term__message">
+            <EmptyState Icon="IconRef.Terminal" Title="No shell here" Body="@error">
+                <Actions>
+                    <Button Label="Try again" Icon="IconRef.Refresh" OnClick="RestartAsync" Disabled="_connecting" />
+                </Actions>
+            </EmptyState>
+        </div>
+    }
+
+    @* Kept mounted even while an error shows, so reconnecting does not have to rebuild xterm and
+       lose the scrollback of the previous session. *@
+    <div class="term__host @(_error is null ? null : "is-hidden")" @ref="_host"></div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ContainerSummary Container { get; set; } = default!;
+
+    ElementReference _host;
+    IJSObjectReference? _module;
+    IJSObjectReference? _terminal;
+    DotNetObjectReference<ExecTerminal>? _self;
+
+    IExecSession? _session;
+    CancellationTokenSource? _pump;
+    string? _error;
+    int? _exitCode;
+    bool _connecting;
+    string _needle = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _self = DotNetObjectReference.Create(this);
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/terminal.js");
+        _terminal = await _module.InvokeAsync<IJSObjectReference>("terminal.create", _host, _self);
+
+        Theme.Changed += OnThemeChanged;
+
+        await ConnectAsync();
+    }
+
+    async Task ConnectAsync()
+    {
+        if (_connecting) return;
+
+        _connecting = true;
+        _error = null;
+        _exitCode = null;
+
+        try
+        {
+            _session = await Engine.StartExecAsync(Container.Id, ExecOptions.InteractiveShell);
+            _pump = new CancellationTokenSource();
+
+            _ = PumpAsync(_session, _pump.Token);
+
+            await _module!.InvokeVoidAsync("terminal.focus", _terminal);
+        }
+        catch (NoShellException ex)
+        {
+            // A first-class outcome: scratch images have no shell and stopped containers run
+            // nothing. The message explains which.
+            _error = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _connecting = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Feed the terminal until the process ends.
+    /// <para>
+    /// Runs detached rather than awaited: this is an open-ended stream, and awaiting it here would
+    /// block the render that shows the terminal it is writing into.
+    /// </para>
+    /// </summary>
+    async Task PumpAsync(IExecSession session, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var chunk in session.ReadAsync(ct))
+            {
+                if (_module is null || _terminal is null) break;
+                await _module.InvokeVoidAsync("terminal.write", ct, _terminal, chunk);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+
+        if (ct.IsCancellationRequested) return;
+
+        // The shell exited — the user typed `exit`, or the container stopped underneath them.
+        // Saying so is the difference between "finished" and "frozen".
+        _exitCode = await session.GetExitCodeAsync(CancellationToken.None) ?? 0;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable("OnInput")]
+    public async Task OnInput(string data)
+    {
+        if (_session is not { } session) return;
+
+        try
+        {
+            await session.WriteAsync(data);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// A URL in the terminal was clicked.
+    /// <para>
+    /// Routed through the shell so a native head opens the system browser. Letting the WebView
+    /// follow the link itself would navigate the app away and there would be no way back.
+    /// </para>
+    /// </summary>
+    [JSInvokable("OnLinkActivated")]
+    public Task OnLinkActivated(string uri) => Shell.OpenExternalAsync(uri);
+
+    [JSInvokable("OnResize")]
+    public async Task OnResize(int columns, int rows)
+    {
+        if (_session is not { } session) return;
+
+        try
+        {
+            await session.ResizeAsync(columns, rows);
+        }
+        catch
+        {
+            // The size is advisory. A failed resize leaves the pty at its previous dimensions,
+            // which is worth nothing to report.
+        }
+    }
+
+    void OnThemeChanged() => _ = InvokeAsync(async () =>
+    {
+        if (_module is null || _terminal is null) return;
+
+        try
+        {
+            await _module.InvokeVoidAsync("terminal.retheme", _terminal);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    });
+
+    /// <summary>Enter searches forward, Shift+Enter back — what every find field does.</summary>
+    async Task OnFindKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || _module is null || _terminal is null) return;
+
+        await _module.InvokeAsync<bool>("terminal.find", _terminal, _needle, !e.ShiftKey);
+    }
+
+    async Task ClearAsync()
+    {
+        if (_module is null || _terminal is null) return;
+        await _module.InvokeVoidAsync("terminal.clear", _terminal);
+    }
+
+    async Task RestartAsync()
+    {
+        await CloseSessionAsync();
+        await ClearAsync();
+        await ConnectAsync();
+    }
+
+    async Task CloseSessionAsync()
+    {
+        if (_pump is { } pump)
+        {
+            await pump.CancelAsync();
+            pump.Dispose();
+            _pump = null;
+        }
+
+        if (_session is { } session)
+        {
+            _session = null;
+            await session.DisposeAsync();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Theme.Changed -= OnThemeChanged;
+
+        await CloseSessionAsync();
+
+        try
+        {
+            if (_terminal is not null)
+            {
+                await _module!.InvokeVoidAsync("terminal.dispose", _terminal);
+                await _terminal.DisposeAsync();
+            }
+
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The WebView went away first, which happens on app shutdown.
+        }
+        catch (JSException)
+        {
+            // A third-party addon that fails to tear itself down must not become an unhandled
+            // exception on the circuit — Blazor reports those to the user as "Dray hit an
+            // unhandled error and needs to reload", for a terminal that was being closed anyway.
+        }
+
+        _self?.Dispose();
+    }
+}

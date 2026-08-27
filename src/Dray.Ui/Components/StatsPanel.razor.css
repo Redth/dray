@@ -1,0 +1,39 @@
+/* Four independent readings, so a grid rather than a row: they wrap to two columns on a narrow
+   window instead of shrinking until the numbers are unreadable. */
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+    gap: var(--s3);
+}
+
+.stats__card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    min-width: 0;
+}
+
+.stats__label {
+    font-size: var(--text-xs);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* The number is the point of the card, so it carries the weight — and tabular figures keep it from
+   shifting sideways as the value changes once a second. */
+.stats__value {
+    font-size: var(--text-xl);
+    font-weight: var(--text-xl-weight);
+    line-height: var(--text-xl-lh);
+    font-variant-numeric: tabular-nums;
+}
+
+.stats__detail {
+    font-size: var(--text-xs);
+    margin-bottom: var(--s2);
+    overflow-wrap: anywhere;
+}

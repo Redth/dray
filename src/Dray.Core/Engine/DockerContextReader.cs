@@ -183,6 +183,14 @@ public sealed class DockerContextReader(IDockerConfigSource source)
             if (seen.Add(Identity(probed.Endpoint))) hosts.Add(probed);
         }
 
+        // Apple's runtime is last on purpose. It is a real engine and belongs in the picker, but
+        // it is nobody's default: a machine with both should open on the Docker-compatible one,
+        // which is where the user's existing containers are.
+        foreach (var apple in ProbeAppleContainer())
+        {
+            if (seen.Add(Identity(apple.Endpoint))) hosts.Add(apple);
+        }
+
         // Nothing is current yet if the selected context was missing; fall back to the first host
         // so the app opens somewhere rather than nowhere.
         if (hosts.Count > 0 && !hosts.Any(h => h.IsCurrent))
@@ -303,6 +311,56 @@ public sealed class DockerContextReader(IDockerConfigSource source)
             Endpoint = endpoint,
             Origin = HostOrigin.DockerContext,
         };
+    }
+
+    /// <summary>
+    /// Apple's <c>container</c> runtime, when it is installed.
+    /// <para>
+    /// Found by walking <c>PATH</c> rather than by asking the shell, because a probe must not
+    /// depend on a login shell's configuration and must not cost a process launch during startup.
+    /// </para>
+    /// <para>
+    /// Installed is not running: this offers the host, and connecting decides. The alternative —
+    /// running <c>container system status</c> here — would make discovery wait on a subprocess for
+    /// an engine most users do not have.
+    /// </para>
+    /// </summary>
+    IEnumerable<DockerHost> ProbeAppleContainer()
+    {
+        // Only exists on macOS, and only on Apple silicon. Probing elsewhere finds nothing and
+        // costs a PATH walk on every launch.
+        if (!OperatingSystem.IsMacOS()) yield break;
+
+        if (FindOnPath("container") is not { } executable) yield break;
+
+        yield return new DockerHost
+        {
+            Id = "apple:container",
+            Name = "Apple container",
+            Description = "Apple's containerization framework, driven through its CLI",
+            Endpoint = new DockerEndpoint
+            {
+                Scheme = EndpointScheme.AppleContainer,
+                Raw = executable,
+                Path = executable,
+            },
+            Origin = HostOrigin.AppleContainer,
+        };
+    }
+
+    /// <summary>The first directory on <c>PATH</c> holding an executable of this name, or null.</summary>
+    string? FindOnPath(string executable)
+    {
+        var path = source.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(path)) return null;
+
+        foreach (var directory in path.Split(':', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(directory, executable);
+            if (source.FileExists(candidate)) return candidate;
+        }
+
+        return null;
     }
 
     IEnumerable<DockerHost> ProbeWellKnown()

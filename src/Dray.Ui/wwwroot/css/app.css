@@ -136,6 +136,21 @@ input, textarea, select {
   flex-direction: row;
 }
 
+/* Height of native chrome the content sits beneath. Zero by default: with a web toolbar the
+   toolbar is a sibling in normal flow and takes its own space. A native head overrides this with
+   the real measured titlebar height (DESIGN.md section 9.1), and everything below reserves it. */
+:root {
+  --chrome-top: 0px;
+
+  /* The margin content keeps from the window edges.
+
+     On a native head this is overwritten with the inset macOS uses around its own sidebar card,
+     measured from the real view — content on a different margin from the system's own chrome reads
+     as two designs in one window. The web head has no such card to line up with, so it keeps a
+     roomier default. */
+  --chrome-inset: var(--s4);
+}
+
 .content {
   flex: 1 1 auto;
   min-width: 0;
@@ -149,11 +164,30 @@ input, textarea, select {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: var(--s5);
+
+  /* The scroll container is this element, not the WebView's own scroll view, so reserving the
+     toolbar's height has to happen here. Padding rather than a margin or a spacer keeps the
+     content scrolling UNDER the translucent native toolbar, which is the macOS idiom — a margin
+     would leave an opaque gap and give the whole thing away. */
+  padding: calc(var(--chrome-top) + var(--s4)) var(--chrome-inset) var(--chrome-inset);
 }
 
+/* Full-bleed content — the container and image tables. Still reserves the chrome, and still gets
+   breathing room at the sides: a table jammed against the sidebar divider and the window edge
+   reads as unfinished, however dense the design is meant to be. */
 .page--flush {
-  padding: 0;
+  padding: calc(var(--chrome-top) + var(--s3)) var(--chrome-inset) var(--chrome-inset);
+}
+
+/* Content that owns its own scrolling — the log view — cannot use padding, because the toolbar
+   region must stay clear while the inner surface scrolls independently. */
+.page--fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--chrome-top);
+  overflow: hidden;
 }
 
 .page-title {
@@ -336,10 +370,444 @@ input, textarea, select {
 
 /* ---------------------------------------------------------------- panel & separators */
 
+/* A table's identity column: the name people read, with the identifier they can act on beneath
+   it. Shared, because containers, volumes, images and networks are all named this way and a
+   per-page copy is a per-page drift. */
+.cell-name {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.cell-name .mono {
+  font-size: var(--text-xs);
+}
+
+.cell-name a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cell-name a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cell-actions {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ framework overlays
+
+   Blazor ships two pieces of UI of its own: a bar that appears when an unhandled exception reaches
+   the framework, and a modal that appears when a circuit drops. Both are recognisably Blazor —
+   a yellow strip reading "An unhandled error has occurred", and a grey box about reconnecting to
+   "the server". Dray is a desktop app; a user has no server, and being shown one is both confusing
+   and a giveaway that this is a web page in a window.
+
+   These are plain CSS on the framework's own element ids, not components, because they have to
+   render when the app that would render a component is precisely what has failed. */
+
+.overlay-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-dialog);
+  padding: var(--s4) var(--s5);
+  max-width: 34rem;
+  text-align: center;
+}
+
+.overlay-title {
+  font-size: var(--text-md);
+  font-weight: var(--text-md-weight);
+  margin-bottom: var(--s1);
+}
+
+.overlay-body {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: var(--text-sm-lh);
+}
+
+/* A button that has to work with no framework behind it, so it cannot be the Button component. */
+.overlay-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s4);
+  padding: var(--s2) var(--s4);
+  border-radius: var(--r-sm);
+  background: var(--brand);
+  color: var(--on-brand);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  border: 0;
+}
+
+.overlay-action:hover {
+  background: var(--brand-hi);
+}
+
+.overlay-action:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---- unhandled error ---- */
+
+/* Blazor reveals this by setting an inline display, so the default has to be display:none rather
+   than the hidden attribute alone. */
+#blazor-error-ui {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-toast);
+  place-items: center;
+  padding: var(--s5);
+  background: var(--scrim);
+}
+
+/* The framework sets `display: block`; the layout wants a grid. Overriding it here rather than
+   fighting the inline style keeps the reveal working. */
+#blazor-error-ui[style*="display"] {
+  display: grid !important;
+}
+
+#blazor-error-ui .overlay-card {
+  border-color: var(--danger);
+}
+
+/* Revealed by the host's error handler only when it has something to put inside. An empty
+   "Technical details" that opens onto nothing is worse than no disclosure at all. */
+#dray-error-details {
+  display: none;
+  margin-top: var(--s3);
+  text-align: left;
+}
+
+#dray-error-details summary {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+}
+
+#dray-error-details summary:hover {
+  color: var(--ink);
+}
+
+#dray-error-detail {
+  max-height: 30vh;
+  margin: var(--s2) 0 0;
+  padding: var(--s2);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  font-size: var(--text-xs);
+  line-height: var(--text-sm-lh);
+  color: var(--muted);
+  user-select: text;
+}
+
+/* ---- lost connection ---- */
+
+/* Only the dev host can reach these: the shipped app hosts Blazor in a WebView with no circuit to
+   lose. Styled anyway, because an unstyled panic screen during development is still the app. */
+#components-reconnect-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  place-items: center;
+  padding: var(--s5);
+  background: var(--scrim);
+}
+
+#components-reconnect-modal.components-reconnect-show,
+#components-reconnect-modal.components-reconnect-failed,
+#components-reconnect-modal.components-reconnect-rejected {
+  display: grid;
+}
+
+/* Each state shows one message. They are all in the markup so the framework only has to change a
+   class on the container. */
+#components-reconnect-modal .on-retrying,
+#components-reconnect-modal .on-failed,
+#components-reconnect-modal .on-rejected {
+  display: none;
+}
+
+#components-reconnect-modal.components-reconnect-show .on-retrying,
+#components-reconnect-modal.components-reconnect-failed .on-failed,
+#components-reconnect-modal.components-reconnect-rejected .on-rejected {
+  display: block;
+}
+
+.overlay-spinner {
+  width: 20px;
+  height: 20px;
+  margin: 0 auto var(--s3);
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: overlay-spin 700ms linear infinite;
+}
+
+@keyframes overlay-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* An engine refusal, shown where the user was working rather than as a modal — a failed Stop is
+   information, not a decision. Shared: the containers table and the file browser both report
+   this way, and a second copy would drift. */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  background: var(--danger-tint);
+  color: var(--danger-ink);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+
+.banner span {
+  flex: 1 1 auto;
+}
+
+/* The same bar reporting something that worked. Same shape so it lands in the same place, a
+   different tone so it is not read as another failure. */
+.banner--ok {
+  background: var(--ok-tint);
+  color: var(--ok-ink);
+}
+
+/* The shell every detail page shares: a header of facts, then a body that scrolls on its own.
+   Container detail and volume detail are the same shape, and were the same stylesheet copied
+   twice until the second one arrived without it. */
+.detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+
+  /* This page scrolls internally (the log view), so it reserves the native chrome itself rather
+     than inheriting .page's padding. */
+  padding-top: var(--chrome-top);
+}
+
+.detail__head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s1) var(--s4);
+  padding: var(--s4) var(--chrome-inset) var(--s3);
+  flex: 0 0 auto;
+}
+
+/* Pinned to the first column and row rather than left to auto-placement. The actions cell is
+   absent on a host with a native toolbar, and without this the meta line silently reflows up
+   beside the title there and not in the web head — the same page laid out two ways for a reason
+   nobody chose. */
+.detail__title {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.detail__meta {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.detail__title h2 {
+  font-size: var(--text-lg);
+  font-weight: var(--text-lg-weight);
+}
+
+.detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  font-size: var(--text-xs);
+}
+
+.detail__actions {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: start;
+}
+
+/* Actions stay visible here, unlike in the table: this page is about one container, so hiding
+   them behind hover would be hiding the point of the page. */
+.detail__actions ::deep .btn {
+  opacity: 1;
+}
+
+/* The card a detail page's content lives in: tabs, panels, browser, editor. Insets it from the
+   window so the ground shows around it, which is what stops the content reading as a slab bolted
+   to the native sidebar. */
+.detail__card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0 var(--chrome-inset) var(--chrome-inset);
+}
+
+.detail__banner {
+  margin: 0 var(--chrome-inset) var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+/* The body of a detail page. Carries the height chain down to whatever fills it — the log view
+   and the file browser both scroll internally, and a `display: block` here silently collapses
+   them to their content height. */
+.detail__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A .page inside a card must not reserve the native chrome again.
+
+   .page and .page--flush add --chrome-top because they are normally the window's own scroll
+   container and content has to clear the toolbar. Inside a card, the page around it has already
+   done that — so the offset was being applied twice and every panel sat a full toolbar's height
+   too low, which on macOS is 52px of nothing above the content. */
+.card .page,
+.card .page--flush,
+.card .page--fill {
+  padding-top: var(--s3);
+}
+
+/* Inside a card the tab bar is the card's own header, so it takes the card's padding rather than
+   the page's and its rule runs the full width. */
+.card > .detail__tabs {
+  padding: 0 var(--s3);
+  background: var(--surface-2);
+}
+
+/* A card inside a card is always wrong — it reads as a bug, and the inner border fights the outer
+   one for the eye. Panels and table wrappers already carry their own surface and border for when
+   they sit directly on the page ground; inside a card they flatten into sections, separated by
+   the rule under their heading rather than by a box. */
+.card .panel,
+.card .table-wrap {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.card .panel > .panel__head {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.card .panel > .kv,
+.card .panel > .table {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* A tab in a tablist. Shared: the detail page's tab bar and the Inspect panel's summary/raw
+   switch are the same control at two levels of the same screen. */
+.tab {
+  padding: var(--s2) var(--s3);
+  font-size: var(--text-base);
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--brand);
+}
+
+/* An aside explaining why a screen looks the way it does — an unpublished port, a masked value,
+   a listing read out of a tar.
+
+   The icon and the text are the only two flex children. The text must be wrapped in its own
+   element: a bare text node beside inline markup would make every inline span a flex item too,
+   which lays "-p" out as its own column rather than as part of the sentence. */
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  font-size: var(--text-xs);
+  line-height: var(--text-sm-lh);
+}
+
+.note > span {
+  max-width: 68ch;
+}
+
+/* A definition list of facts about one thing. Label column sized to its content so the values
+   line up, which is what makes a list of twelve facts scannable rather than a wall. */
+.kv {
+  display: grid;
+  grid-template-columns: minmax(auto, 12rem) 1fr;
+  gap: var(--s2) var(--s4);
+  padding: var(--s3);
+  font-size: var(--text-sm);
+  align-items: baseline;
+}
+
+.kv dt {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.kv dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Labels and other long key/value sets, where the keys are themselves long identifiers. */
+.kv--dense {
+  grid-template-columns: minmax(auto, 18rem) 1fr;
+  gap: var(--s1) var(--s3);
+  font-size: var(--text-xs);
+}
+
+/* A card: a block of content raised off the window ground.
+
+   Content pages sit in these rather than running edge to edge. Full-bleed reads fine in a browser
+   but wrong beside a native sidebar, where the sidebar is itself an inset rounded surface and a
+   square-cornered slab of content butted against it looks like a rendering failure rather than a
+   layout.
+
+   `overflow: hidden` is not optional. A table's first header cell, a tab bar's bottom rule and an
+   editor's own background all paint over a rounded corner and square it off; clipping at the card
+   is the only place that fixes all of them at once. */
+.card,
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
+  overflow: hidden;
 }
 
 .panel__head {
@@ -368,10 +836,11 @@ input, textarea, select {
 
 /* ---------------------------------------------------------------- table */
 
+/* A card that scrolls. `auto` clips to the radius just as `hidden` does, so the corners survive. */
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   background: var(--surface);
 }
 
@@ -391,6 +860,9 @@ input, textarea, select {
 
 .table thead th {
   position: sticky;
+
+  /* Sticks to the top of the scroll container. The container already reserves --chrome-top via
+     padding, so 0 is correct here — the header lands exactly at the toolbar's lower edge. */
   top: 0;
   z-index: var(--z-sticky);
   background: var(--surface-2);

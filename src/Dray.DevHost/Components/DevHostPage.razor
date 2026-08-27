@@ -21,6 +21,60 @@
 </head>
 <body>
     <App @rendermode="InteractiveServer" />
+
+    <!-- Blazor's own unhandled-error element, restyled. Its id is fixed by the framework; the
+         content is ours, because "An unhandled error has occurred" is the wrong register for a
+         desktop app and says nothing a user can act on. -->
+    <div id="blazor-error-ui" role="alert" aria-live="assertive">
+        <div class="overlay-card">
+            <p class="overlay-title">Dray needs to restart</p>
+            <p class="overlay-body">
+                Something went wrong that Dray could not recover from. Your containers are
+                unaffected &mdash; nothing here changes what is running on the engine.
+            </p>
+            <!-- Behind a disclosure: a stack trace is what makes this diagnosable in a WebView
+                 with no devtools, and also the thing that turns a calm message into an alarming
+                 one. The script below reveals the <details> only when there is something in it. -->
+            <details id="dray-error-details">
+                <summary>Technical details</summary>
+                <pre id="dray-error-detail"></pre>
+            </details>
+
+            <a class="overlay-action reload" href=".">Restart Dray</a>
+        </div>
+    </div>
+
+    <!-- Blazor's reconnect modal, restyled. The framework toggles the classes; every message is
+         present in the markup so it only has to change one on the container. -->
+    <div id="components-reconnect-modal" role="alertdialog" aria-live="assertive">
+        <div class="overlay-card">
+            <div class="on-retrying">
+                <div class="overlay-spinner" aria-hidden="true"></div>
+                <p class="overlay-title">Reconnecting</p>
+                <p class="overlay-body">
+                    Dray lost its connection to the local development host. Retrying
+                    <span id="components-reconnect-current-attempt"></span> of
+                    <span id="components-reconnect-max-retries"></span>&hellip;
+                </p>
+            </div>
+
+            <div class="on-failed">
+                <p class="overlay-title">Could not reconnect</p>
+                <p class="overlay-body">The development host is not responding. It may have stopped.</p>
+                <button class="overlay-action" type="button" onclick="window.Blazor.reconnect()">Try again</button>
+            </div>
+
+            <div class="on-rejected">
+                <p class="overlay-title">This session ended</p>
+                <p class="overlay-body">
+                    The development host restarted, so this session is no longer valid. Reloading
+                    starts a fresh one.
+                </p>
+                <a class="overlay-action" href=".">Reload</a>
+            </div>
+        </div>
+    </div>
+
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>

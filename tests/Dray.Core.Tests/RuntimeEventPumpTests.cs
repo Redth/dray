@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Dray.Core.Engine;
 using Dray.Core.Model;
 using Microsoft.Extensions.Time.Testing;
+using Dray.Core.Tests.Fakes;
 using Xunit;
 
 namespace Dray.Core.Tests;
@@ -10,7 +11,7 @@ namespace Dray.Core.Tests;
 public class RuntimeEventPumpTests
 {
     static ContainerSummary Container(string id, string name, DockerState state = DockerState.Running)
-        => new() { Id = id, Name = name, Image = "nginx:1", State = state };
+        => new() { Id = id, Name = name, Image = "nginx:1", State = state, Ports = [new PortBinding(8080, 80)] };
 
     static RuntimeEvent Event(string action, string id, params (string Key, string Value)[] attributes)
         => new(RuntimeEntity.Container, action, id, attributes.ToDictionary(a => a.Key, a => a.Value), DateTimeOffset.UnixEpoch);
@@ -79,6 +80,107 @@ public class RuntimeEventPumpTests
     }
 
     // ---------------------------------------------------------------- failure
+
+    // ---------------------------------------------------------------- no event stream
+
+    [Fact]
+    public async Task AnEngineWithNoEventStreamIsPolledInstead()
+    {
+        // Apple's runtime has no `events` subcommand at all. Waiting on a stream that will never
+        // speak would leave the list frozen at whatever the cold seed found.
+        var runtime = new FakeRuntime { SupportsEvents = false, Containers = [Container("a", "web")] };
+        var store = new EntityStore();
+        var time = new FakeTimeProvider();
+
+        await using var pump = new RuntimeEventPump(runtime, store, time)
+        {
+            PollInterval = TimeSpan.FromSeconds(2),
+        };
+
+        pump.Start();
+        Assert.True(await WaitFor(() => pump.State == HostConnectionState.Connected));
+        Assert.Equal(1, runtime.ListCalls);
+
+        runtime.Containers = [Container("a", "web", DockerState.Exited), Container("b", "api")];
+        time.Advance(TimeSpan.FromSeconds(2));
+
+        Assert.True(await WaitFor(() => store.Count == 2));
+        Assert.Equal(DockerState.Exited, store.Find("a")!.State);
+    }
+
+    [Fact]
+    public async Task PollingNoticesAContainerThatIsGone()
+    {
+        var runtime = new FakeRuntime { SupportsEvents = false, Containers = [Container("a", "web"), Container("b", "api")] };
+        var store = new EntityStore();
+        var time = new FakeTimeProvider();
+
+        await using var pump = new RuntimeEventPump(runtime, store, time) { PollInterval = TimeSpan.FromSeconds(2) };
+
+        pump.Start();
+        Assert.True(await WaitFor(() => store.Count == 2));
+
+        runtime.Containers = [Container("a", "web")];
+        time.Advance(TimeSpan.FromSeconds(2));
+
+        Assert.True(await WaitFor(() => store.Count == 1));
+        Assert.Null(store.Find("b"));
+    }
+
+    [Fact]
+    public async Task AnUnchangedListProducesNoStoreChangesAtAll()
+    {
+        var runtime = new FakeRuntime { SupportsEvents = false, Containers = [Container("a", "web")] };
+        var store = new EntityStore();
+        var time = new FakeTimeProvider();
+
+        await using var pump = new RuntimeEventPump(runtime, store, time) { PollInterval = TimeSpan.FromSeconds(2) };
+
+        pump.Start();
+        Assert.True(await WaitFor(() => pump.State == HostConnectionState.Connected));
+
+        // Counted after the cold seed, so only what polling itself causes is measured.
+        var changes = 0;
+        store.Changed += _ => changes++;
+
+        for (var i = 0; i < 3; i++)
+        {
+            time.Advance(TimeSpan.FromSeconds(2));
+            Assert.True(await WaitFor(() => runtime.ListCalls >= 2 + i));
+        }
+
+        // The whole point of diffing rather than resetting. A reset twice a second would flash the
+        // list, clear every pending action, and fire the change highlight on rows nobody touched —
+        // and Ports being a list means record equality would report a change every single time.
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
+    public async Task PollingThatFailsDegradesTheHostTheSameWayADroppedStreamDoes()
+    {
+        var runtime = new FakeRuntime { SupportsEvents = false, Containers = [Container("a", "web")] };
+        var store = new EntityStore();
+        var time = new FakeTimeProvider();
+
+        await using var pump = new RuntimeEventPump(runtime, store, time)
+        {
+            PollInterval = TimeSpan.FromSeconds(2),
+            InitialRetryDelay = TimeSpan.FromSeconds(1),
+        };
+
+        pump.Start();
+        Assert.True(await WaitFor(() => pump.State == HostConnectionState.Connected));
+
+        runtime.ConnectFailure = new RuntimeConnectionException("The engine went away.");
+        runtime.ListFailure = new RuntimeConnectionException("The engine went away.");
+        time.Advance(TimeSpan.FromSeconds(2));
+
+        Assert.True(await WaitFor(() => pump.State == HostConnectionState.Degraded));
+
+        // Still listed, marked stale: the container exists, Dray just cannot see it.
+        Assert.Equal(1, store.Count);
+        Assert.Equal(DockerState.Unknown, store.Find("a")!.State);
+    }
 
     [Fact]
     public async Task AHostThatNeverConnectedIsUnreachableNotDegraded()
@@ -269,7 +371,7 @@ public class RuntimeEventPumpTests
 }
 
 /// <summary>An engine under test control: no sockets, no timing, no Docker.</summary>
-sealed class FakeRuntime : IContainerRuntime
+sealed class FakeRuntime : StubRuntime
 {
     Channel<RuntimeEvent> _events = Channel.CreateUnbounded<RuntimeEvent>();
 
@@ -281,9 +383,10 @@ sealed class FakeRuntime : IContainerRuntime
 
     public int ListCalls { get; private set; }
 
-    public RuntimeCapabilities Capabilities { get; private set; } = RuntimeCapabilities.None;
+    /// <summary>Whether this engine has an event stream. False is Apple's runtime.</summary>
+    public bool SupportsEvents { get; set; } = true;
 
-    public Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default)
+    public override Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default)
     {
         ConnectCalls++;
         if (ConnectFailure is not null) throw ConnectFailure;
@@ -291,43 +394,41 @@ sealed class FakeRuntime : IContainerRuntime
         // A fresh channel per connection, mirroring a real reconnect.
         if (_events.Reader.Completion.IsCompleted) _events = Channel.CreateUnbounded<RuntimeEvent>();
 
-        Capabilities = new RuntimeCapabilities { ApiVersion = "1.45", Flavor = EngineFlavor.Docker };
+        Capabilities = new RuntimeCapabilities
+        {
+            ApiVersion = "1.45",
+            Flavor = EngineFlavor.Docker,
+            SupportsEvents = SupportsEvents,
+        };
         return Task.FromResult(Capabilities);
     }
 
-    public Task<IReadOnlyList<ContainerSummary>> ListContainersAsync(bool includeStopped = true, CancellationToken ct = default)
+    public Exception? ListFailure { get; set; }
+
+    public override Task<IReadOnlyList<ContainerSummary>> ListContainersAsync(bool includeStopped = true, CancellationToken ct = default)
     {
         ListCalls++;
-        return Task.FromResult(Containers);
+        if (ListFailure is not null) throw ListFailure;
+
+        // Fresh instances with fresh lists, the way a real runtime deserializing a response
+        // produces them. Handing back the same objects every call would let a caller comparing
+        // with == look correct while the real thing found every row changed.
+        return Task.FromResult<IReadOnlyList<ContainerSummary>>(
+            [.. Containers.Select(c => c with { Ports = [.. c.Ports] })]);
     }
 
     public List<(string Id, ContainerAction Action)> Performed { get; } = [];
 
-    public Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
+    public override Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
     {
         Performed.Add((containerId, action));
         return Task.CompletedTask;
     }
 
-    public IAsyncEnumerable<LogLine> StreamLogsAsync(string containerId, LogOptions options, CancellationToken ct = default)
-        => AsyncEnumerable.Empty<LogLine>();
-
-    public Task<DirectoryListing> ListDirectoryAsync(string containerId, string path, bool containerIsRunning, CancellationToken ct = default)
-        => Task.FromResult(new DirectoryListing(path, [], ListingMethod.Exec));
-
-    public Task<byte[]> ReadFileAsync(string containerId, string path, CancellationToken ct = default)
-        => Task.FromResult(Array.Empty<byte>());
-
-    public Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default)
-        => Task.CompletedTask;
-
-    public Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
+    public override Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
         => Task.FromResult(new SystemInfo(0, 0, 0, 0, "fake", "1.0"));
 
-    public Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default)
-        => Task.FromResult(new DiskUsage(0, 0, 0, 0, 0, 0));
-
-    public async IAsyncEnumerable<RuntimeEvent> WatchEventsAsync(
+    public override async IAsyncEnumerable<RuntimeEvent> WatchEventsAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         await foreach (var e in _events.Reader.ReadAllAsync(ct)) yield return e;
@@ -338,5 +439,5 @@ sealed class FakeRuntime : IContainerRuntime
     /// <summary>Drop the stream the way a reset connection would.</summary>
     public void FailStream(Exception error) => _events.Writer.TryComplete(error);
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

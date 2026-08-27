@@ -1,0 +1,189 @@
+@* Build an image from a Dockerfile.
+
+   The engine's output is shown verbatim rather than reformatted: people read build logs by pattern,
+   and rewriting them makes a familiar thing unfamiliar at exactly the moment something has gone
+   wrong. *@
+@implements IAsyncDisposable
+@inject EngineManager Engine
+@inject IShellBridge Shell
+@inject ShellCapabilities Caps
+
+<Dialog Title="Build an image" Open="Open" OpenChanged="OnOpenChanged">
+    <ChildContent>
+        <div class="field">
+            <label class="field__label" for="build-context">Build context</label>
+            <div class="build__path">
+                <input id="build-context" class="input mono" placeholder="/path/to/project"
+                       @bind="_context" @bind:event="oninput" spellcheck="false" disabled="@_building" />
+
+                @if (Caps.HasNativeDialogs)
+                {
+                    <Button Label="Choose…" Icon="IconRef.Files" Variant="ButtonVariant.Secondary"
+                            Disabled="_building" OnClick="PickAsync" />
+                }
+            </div>
+        </div>
+
+        <div class="field">
+            <label class="field__label" for="build-tag">
+                Tag <span class="muted">— optional; an untagged build is dangling</span>
+            </label>
+            <input id="build-tag" class="input mono" placeholder="myapp:dev"
+                   @bind="_tag" @bind:event="oninput" spellcheck="false" disabled="@_building" />
+        </div>
+
+        <div class="build__options">
+            <label class="toggle">
+                <input type="checkbox" @bind="_noCache" disabled="@_building" />
+                <span>Ignore the cache</span>
+            </label>
+
+            <label class="toggle">
+                <input type="checkbox" @bind="_pull" disabled="@_building" />
+                <span>Pull a newer base image</span>
+            </label>
+        </div>
+
+        @if (_error is { } error)
+        {
+            <p class="build__error">@error</p>
+        }
+        else if (_output.Count == 0)
+        {
+            <p class="build__hint muted">
+                Everything under the context is sent to the engine, so choose the project directory
+                rather than a parent of it. A <span class="mono">.dockerignore</span> keeps the
+                upload small.
+            </p>
+        }
+
+        @if (_output.Count > 0)
+        {
+            <pre class="build__log mono"><code>@string.Join('\n', _output)</code></pre>
+        }
+
+        @if (_done is { } done)
+        {
+            <p class="build__done">@done</p>
+        }
+    </ChildContent>
+    <Footer>
+        <Button Label="@(_building ? "Cancel" : "Close")" Variant="ButtonVariant.Ghost" OnClick="CloseAsync" />
+        <Button Label="@(_building ? Progress : "Build")" Variant="ButtonVariant.Primary" Busy="_building"
+                Disabled="@(_building || _context.Trim().Length == 0)" OnClick="StartAsync" />
+    </Footer>
+</Dialog>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Raised once a build succeeds, so the image list behind can refresh.</summary>
+    [Parameter] public EventCallback OnBuilt { get; set; }
+
+    string _context = "";
+    string _tag = "";
+    bool _noCache;
+    bool _pull;
+    bool _building;
+    string? _error;
+    string? _done;
+
+    readonly List<string> _output = [];
+    CancellationTokenSource? _cts;
+    (int Current, int Total)? _step;
+
+    /// <summary>
+    /// The button's label while building. The engine reports steps, not a percentage, so this
+    /// counts steps rather than inventing one.
+    /// </summary>
+    string Progress => _step is { } s ? $"Step {s.Current}/{s.Total}…" : "Building…";
+
+    async Task PickAsync()
+    {
+        if (await Shell.PickFolderAsync("Choose the build context") is { } chosen) _context = chosen;
+    }
+
+    async Task StartAsync()
+    {
+        if (_building) return;
+
+        _building = true;
+        _error = null;
+        _done = null;
+        _step = null;
+        _output.Clear();
+        _cts = new CancellationTokenSource();
+
+        var request = new BuildRequest(
+            _context.Trim(),
+            Tag: string.IsNullOrWhiteSpace(_tag) ? null : _tag.Trim(),
+            NoCache: _noCache,
+            Pull: _pull);
+
+        try
+        {
+            await foreach (var step in Engine.BuildImageAsync(request, _cts.Token))
+            {
+                if (step.IsError)
+                {
+                    _error = step.Error;
+                    break;
+                }
+
+                if (step.Step is { } progress) _step = progress;
+
+                _output.Add(step.Text);
+
+                // Bounded: a large build produces thousands of lines and only the tail is on screen.
+                if (_output.Count > 800) _output.RemoveRange(0, _output.Count - 800);
+
+                StateHasChanged();
+            }
+
+            if (_error is null)
+            {
+                _done = request.Tag is null ? "Built." : $"Built {request.Tag}.";
+                await OnBuilt.InvokeAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _done = "Build cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _building = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    async Task CloseAsync()
+    {
+        // Cancelling stops Dray reading the stream; the engine finishes the layer it is on. Saying
+        // otherwise would be a lie — a build is not a transaction Dray can roll back.
+        if (_cts is { } cts) await cts.CancelAsync();
+
+        await OpenChanged.InvokeAsync(false);
+    }
+
+    async Task OnOpenChanged(bool open)
+    {
+        if (!open) await CloseAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_cts is { } cts)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+        }
+    }
+}

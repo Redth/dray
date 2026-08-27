@@ -34,6 +34,15 @@ const RULES = [
     msg: 'raw rgb()/hsl() colour — use a semantic token, or color-mix() over one',
   },
   {
+    // The one this file missed for a while. OKLCH is how design/tokens.json authors colour, so a
+    // raw oklch() in a component is not an unusual way to write a colour — it is the *same* way,
+    // bypassing the generator, the gamut check and the contrast gate. lab/lch/color() are here for
+    // the same reason.
+    id: 'raw-modern-color',
+    re: /\b(?:oklch|oklab|lch|lab|color)\s*\(/g,
+    msg: 'raw oklch()/lab()/color() — author it in design/tokens.json and use the generated token',
+  },
+  {
     id: 'named-color',
     re: /(?<![-\w])(?:color|background|background-color|border-color|fill|stroke)\s*:\s*(?:red|green|blue|orange|yellow|purple|grey|gray|black|white|pink|cyan|magenta)\b/gi,
     msg: 'CSS named colour — use a semantic token',

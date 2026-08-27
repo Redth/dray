@@ -1,0 +1,53 @@
+.build__path {
+    display: flex;
+    gap: var(--s2);
+}
+
+.build__path .input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.build__options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s4);
+    margin-top: var(--s2);
+}
+
+.build__hint,
+.build__error,
+.build__done {
+    margin-top: var(--s3);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    max-width: 56ch;
+}
+
+.build__error {
+    color: var(--danger-ink);
+    background: var(--danger-tint);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+}
+
+.build__done {
+    color: var(--ok-ink);
+    background: var(--ok-tint);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+}
+
+/* Fixed height so a long build does not grow the dialog past its own buttons. */
+.build__log {
+    max-height: 34vh;
+    overflow: auto;
+    margin: var(--s3) 0 0;
+    padding: var(--s3);
+    background: var(--surface-2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}

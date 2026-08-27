@@ -3,8 +3,7 @@
         disabled="@(Disabled || Busy)"
         title="@(Tooltip ?? (IconOnly ? Label : null))"
         aria-label="@(IconOnly ? Label : null)"
-        @onclick="OnClick"
-        @attributes="Extra">
+        @onclick="OnClick">
     @if (Icon is { } icon)
     {
         <Icon Name="icon" Size="IconSize.Md" />
@@ -32,5 +31,9 @@
     [Parameter] public string? Tooltip { get; set; }
     [Parameter] public string? Class { get; set; }
     [Parameter] public EventCallback OnClick { get; set; }
-    [Parameter(CaptureUnmatchedValues = true)] public IDictionary<string, object>? Extra { get; set; }
+    // Deliberately no CaptureUnmatchedValues. A catch-all makes a misspelt parameter compile
+    // silently and do nothing: `IsEnabled="..."` on this component was accepted as a stray HTML
+    // attribute for weeks, so Save, Revert, Rename and four other buttons never actually disabled.
+    // Without it, the same typo is a build error. Anything genuinely needed — a data attribute, an
+    // aria role — is added here as a real parameter.
 }

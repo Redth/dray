@@ -134,6 +134,31 @@ public sealed class EntityStore
         Changed?.Invoke(new StoreChange(existed ? StoreChangeKind.Updated : StoreChangeKind.Added, container.Id));
     }
 
+    /// <summary>
+    /// Record a rename the engine has already accepted.
+    /// <para>
+    /// A deliberate exception to "the event stream is the source of truth", and the only one.
+    /// Docker emits a <c>rename</c> event; <b>podman emits nothing at all</b> — verified by
+    /// watching <c>/events</c> across a rename, which produced zero events. Waiting for a stream
+    /// that will never speak leaves the list showing the old name until something unrelated
+    /// happens to refresh it.
+    /// </para>
+    /// <para>
+    /// Safe to write here because nothing is being guessed: the engine returned success for a name
+    /// the user typed, so this records a fact rather than predicting one. Applying the matching
+    /// event later, on an engine that does send one, is idempotent.
+    /// </para>
+    /// </summary>
+    public void Rename(string id, string name)
+    {
+        if (_containers.GetValueOrDefault(id) is not { } existing) return;
+        if (existing.Name == name) return;
+
+        _containers[id] = existing with { Name = name };
+        Touch(id);
+        Changed?.Invoke(new StoreChange(StoreChangeKind.Updated, id));
+    }
+
     public void Remove(string id)
     {
         if (!_containers.TryRemove(id, out _)) return;

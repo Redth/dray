@@ -1,0 +1,128 @@
+@* A container's environment, with the secrets covered up.
+
+   Every other Docker GUI prints these in plain text. That is fine alone at a desk and wrong in a
+   screen-share, a screenshot attached to a ticket, or a recorded call — and those are exactly the
+   moments someone opens this tab. See EnvVar.IsSecret for what counts and why the rule is one the
+   user can predict. *@
+@inject IShellBridge Shell
+
+<div class="page page--flush">
+    @if (Inspect.Environment.Count == 0)
+    {
+        <EmptyState Icon="IconRef.Settings" Title="No environment variables"
+                    Body="This container was started without any, and its image declares none." />
+    }
+    else
+    {
+        <div class="panel">
+            <div class="panel__head">
+                <h3 class="panel__title">Environment</h3>
+
+                <span class="muted">@Inspect.Environment.Count variables</span>
+
+                @if (SecretCount > 0)
+                {
+                    <span class="env__hidden">
+                        <Icon Name="IconRef.Conceal" Size="IconSize.Sm" />
+                        @SecretCount hidden
+                    </span>
+
+                    <Button Label="@(_revealAll ? "Hide all" : "Reveal all")"
+                            Icon="@(_revealAll ? IconRef.Conceal : IconRef.Reveal)"
+                            Variant="ButtonVariant.Ghost"
+                            OnClick="ToggleAll" />
+                }
+            </div>
+
+            <table class="table env">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Value</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in Inspect.Environment)
+                    {
+                        var shown = !entry.IsSecret || _revealAll || _revealed.Contains(entry.Key);
+
+                        <tr @key="entry.Key" class="@(entry.IsSecret ? "is-secret" : null)">
+                            <td class="mono env__key">@entry.Key</td>
+                            <td class="mono env__value">
+                                @if (shown)
+                                {
+                                    @if (entry.Value.Length == 0)
+                                    {
+                                        <span class="muted">(empty)</span>
+                                    }
+                                    else
+                                    {
+                                        @entry.Value
+                                    }
+                                }
+                                else
+                                {
+                                    @* A fixed-width mask rather than one dot per character: the
+                                       length of a password is information too. *@
+                                    <span class="env__mask" aria-label="Hidden value">••••••••••••</span>
+                                }
+                            </td>
+                            <td class="env__actions">
+                                @if (entry.IsSecret)
+                                {
+                                    <Button Label="@(shown ? "Hide" : "Reveal")"
+                                            Icon="@(shown ? IconRef.Conceal : IconRef.Reveal)"
+                                            Variant="ButtonVariant.Ghost" IconOnly="true"
+                                            OnClick="() => Toggle(entry.Key)" />
+                                }
+
+                                <Button Label="@($"Copy {entry.Key}")" Icon="IconRef.Copy"
+                                        Variant="ButtonVariant.Ghost" IconOnly="true"
+                                        OnClick="() => CopyAsync(entry.Value)" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (SecretCount > 0)
+        {
+            <p class="note muted">
+                <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                <span>
+                    Values are hidden based on the variable's name, so a secret with an unusual name
+                    may still be shown. Copy works whether a value is revealed or not.
+                </span>
+            </p>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ContainerInspect Inspect { get; set; } = default!;
+
+    readonly HashSet<string> _revealed = new(StringComparer.Ordinal);
+    bool _revealAll;
+
+    int SecretCount => Inspect.Environment.Count(e => e.IsSecret);
+
+    void Toggle(string key)
+    {
+        if (!_revealed.Add(key)) _revealed.Remove(key);
+    }
+
+    void ToggleAll()
+    {
+        _revealAll = !_revealAll;
+
+        // Clearing on the way back down means "Hide all" genuinely hides everything, including
+        // values revealed one at a time beforehand.
+        if (!_revealAll) _revealed.Clear();
+    }
+
+    // Through the shell rather than the browser clipboard: the native heads have a real
+    // pasteboard, and LogView already takes this path.
+    Task CopyAsync(string value) => Shell.WriteClipboardAsync(value);
+}

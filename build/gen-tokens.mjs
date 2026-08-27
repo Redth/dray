@@ -170,6 +170,43 @@ ${csBlock('dark')}
 }
 `;
 
+// ---------------------------------------------------------------- macOS accent colour
+
+/**
+ * macOS reads an app's accent colour from its asset catalog at launch — there is no runtime API
+ * for it — so the brand has to reach AppKit as a compiled colorset rather than a token lookup.
+ * Generating it here keeps it on the same single source as everything else; hand-writing the file
+ * would be a second place the brand colour lives, which is exactly what DESIGN.md forbids.
+ */
+function accentColorSet() {
+  const channel = (oklch, i) => oklchToSrgb(oklch)[i].toFixed(3);
+  const entry = (theme, appearances) => ({
+    idiom: 'universal',
+    ...(appearances ? { appearances } : {}),
+    color: {
+      'color-space': 'srgb',
+      components: {
+        red: channel(resolved[theme].brand, 0),
+        green: channel(resolved[theme].brand, 1),
+        blue: channel(resolved[theme].brand, 2),
+        alpha: '1.000',
+      },
+    },
+  });
+
+  return JSON.stringify(
+    {
+      colors: [
+        entry('light'),
+        entry('dark', [{ appearance: 'luminosity', value: 'dark' }]),
+      ],
+      info: { author: 'dray', version: 1 },
+    },
+    null,
+    2
+  ) + '\n';
+}
+
 // ---------------------------------------------------------------- DESIGN.md tables
 
 function mdTable(theme) {
@@ -201,6 +238,7 @@ design = spliceMarkers(design, 'palette-dark', mdTable('dark'));
 const outputs = [
   [join(repoRoot, 'src/Dray.Ui/wwwroot/css/tokens.css'), css],
   [join(repoRoot, 'src/Dray.Core/Theme/Tokens.g.cs'), cs],
+  [join(repoRoot, 'src/Dray.MacOS/Assets.xcassets/AccentColor.colorset/Contents.json'), accentColorSet()],
   [designPath, design],
 ];
 

@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="../Dray.Ui/Dray.Ui.csproj" />
     <ProjectReference Include="../Dray.Docker/Dray.Docker.csproj" />
+    <ProjectReference Include="../Dray.Apple/Dray.Apple.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,160 @@
+@page "/volumes/{Name}"
+@implements IAsyncDisposable
+@inject EngineManager Engine
+@inject NavigationManager Nav
+@inject ShellCapabilities Caps
+
+<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
+<EngineScope>
+    <div class="detail">
+        <div class="detail__head">
+            <div class="detail__title">
+                @if (!Caps.HasNativeToolbar)
+                {
+                    <BackButton To="/volumes" Label="All volumes" />
+                }
+
+                <h2>@(Volume?.DisplayName ?? Name)</h2>
+            </div>
+            <div class="detail__meta mono muted">
+                @if (Volume is { } volume)
+                {
+                    <span>@volume.Driver</span>
+
+                    @if (volume.UsedBy.Count > 0)
+                    {
+                        <span>used by @string.Join(", ", volume.UsedBy)</span>
+                    }
+                    else
+                    {
+                        <span>not in use</span>
+                    }
+
+                    @if (volume.Mountpoint is { } mountpoint)
+                    {
+                        @* Shown as provenance, not as something to open: inside a VM this path
+                           exists in the VM, not on the user's disk. *@
+                        <span title="Path inside the engine's storage, which may be inside a VM">@mountpoint</span>
+                    }
+                }
+            </div>
+        </div>
+
+        <div class="detail__card card">
+            <div class="detail__body">
+                @if (_error is { } error)
+                {
+                    <div class="page">
+                        <EmptyState Icon="IconRef.Warning" Title="Could not open this volume" Body="@error">
+                            <Actions>
+                                <Button Label="Try again" Icon="IconRef.Refresh" OnClick="OpenAsync" />
+                                <Button Label="All volumes" Icon="IconRef.Volume" OnClick="@(() => Nav.NavigateTo("/volumes"))" />
+                            </Actions>
+                        </EmptyState>
+                    </div>
+                }
+                else if (_session is not { } session)
+                {
+                    <div class="page page--flush">
+                        <p class="muted">Opening the volume…</p>
+                        <Skeleton Width="45%" />
+                        <Skeleton Width="60%" />
+                    </div>
+                }
+                else
+                {
+                    <FileBrowser @key="Name"
+                                 SourceKey="@Name"
+                                 ListAsync="(path, ct) => session.ListDirectoryAsync(path, ct)"
+                                 ReadAsync="(path, ct) => session.ReadFileAsync(path, ct)"
+                                 WriteAsync="WriteAsync" />
+                }
+            </div>
+        </div>
+    </div>
+</EngineScope>
+
+@code {
+    [Parameter] public string Name { get; set; } = "";
+
+    IVolumeSession? _session;
+    VolumeSummary? _volume;
+    string? _error;
+    string? _openedName;
+
+    VolumeSummary? Volume => _volume;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var name = Uri.UnescapeDataString(Name);
+        if (_openedName == name) return;
+
+        await CloseSessionAsync();
+        _openedName = name;
+
+        await OpenAsync();
+    }
+
+    /// <summary>
+    /// Open the volume for browsing.
+    /// <para>
+    /// The session holds a helper container on the engine for as long as this page is open, which
+    /// is why it is disposed on navigation rather than left to a finaliser.
+    /// </para>
+    /// </summary>
+    async Task OpenAsync()
+    {
+        var name = Uri.UnescapeDataString(Name);
+        _error = null;
+
+        try
+        {
+            // The summary is for the header only; failing to find it must not stop the browse,
+            // since the volume may have been created since the list was last read.
+            _volume = (await Engine.ListVolumesAsync()).FirstOrDefault(v => v.Name == name);
+
+            _session = await Engine.OpenVolumeAsync(name);
+        }
+        catch (Exception ex)
+        {
+            _session = null;
+            _error = ex.Message;
+        }
+    }
+
+    async Task<string?> WriteAsync(string path, byte[] content, CancellationToken ct)
+    {
+        if (_session is not { } session) return "This volume is no longer open.";
+
+        try
+        {
+            await session.WriteFileAsync(path, content, ct);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    async Task CloseSessionAsync()
+    {
+        if (_session is not { } session) return;
+
+        _session = null;
+        await session.DisposeAsync();
+    }
+
+    PageChrome Chrome => new(
+        Volume?.DisplayName ?? Uri.UnescapeDataString(Name),
+        Subtitle: Engine.Selected?.Name,
+        Back: new ChromeBack("back", "All volumes"));
+
+    void HandleAction(string id)
+    {
+        if (id == "back") Nav.NavigateTo("/volumes");
+    }
+
+    public async ValueTask DisposeAsync() => await CloseSessionAsync();
+}

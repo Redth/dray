@@ -32,6 +32,7 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
 
     public event Action? Changed;
 
+
     public DrayTheme Current => IsDark ? DrayTheme.Dark : DrayTheme.Light;
 
     public IReadOnlyDictionary<string, string> TokenOverrides() => Overrides();
@@ -40,6 +41,67 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
     {
         _observer?.Dispose();
         _observer = null;
+    }
+
+    /// <summary>
+    /// Height of the titlebar plus toolbar, in points. Falls back to the standard unified height
+    /// when no window exists yet — which is the case on the very first paint.
+    /// </summary>
+    public static double TitlebarHeight()
+    {
+        var window = NSApplication.SharedApplication.KeyWindow ?? NSApplication.SharedApplication.MainWindow;
+        if (window is null) return 52;
+
+        var height = (double)(window.Frame.Height - window.ContentLayoutRect.Height);
+        return height is > 20 and < 200 ? height : 52;
+    }
+
+    /// <summary>
+    /// The inset macOS uses around its own sidebar card, in points.
+    /// <para>
+    /// On macOS 26 the sidebar is a rounded card floating on the window, not a full-height pane, and
+    /// content laid out beside it has to sit on the same margin or the window looks like two designs
+    /// bolted together. Measured from the real view rather than assumed: the value is Apple's, it is
+    /// not published, and it is exactly the kind of number that changes in a point release.
+    /// </para>
+    /// <para>
+    /// Falls back to 8 — what macOS 26.6 measures — when there is no card to measure, which is the
+    /// case before the window exists and on any earlier macOS where the sidebar is full-bleed.
+    /// </para>
+    /// </summary>
+    public static double SidebarInset()
+    {
+        var window = NSApplication.SharedApplication.KeyWindow ?? NSApplication.SharedApplication.MainWindow;
+        if (window?.ContentView is not { } root) return DefaultSidebarInset;
+
+        var inset = FindGlassInset(root, 0);
+        return inset is > 0 and < 40 ? inset.Value : DefaultSidebarInset;
+    }
+
+    const double DefaultSidebarInset = 8;
+
+    /// <summary>
+    /// Find the inset of the first glass-backed view in the tree.
+    /// <para>
+    /// Matched on the type name because the class is what draws the card, and its origin within its
+    /// container <i>is</i> the inset. Walking by name is unlovely, but the alternative — assuming a
+    /// position in the split view's subview order — breaks the first time MAUI changes how it builds
+    /// a flyout page.
+    /// </para>
+    /// </summary>
+    static double? FindGlassInset(NSView view, int depth)
+    {
+        if (depth > 8) return null;
+
+        if (view.GetType().Name.Contains("Glass", StringComparison.Ordinal) && view.Frame.X > 0)
+            return view.Frame.X;
+
+        foreach (var child in view.Subviews)
+        {
+            if (FindGlassInset(child, depth + 1) is { } found) return found;
+        }
+
+        return null;
     }
 
     public static bool IsDark
@@ -85,6 +147,14 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
             // buttons.
             Add(overrides, "focus", NSColor.KeyboardFocusIndicator);
         });
+
+        // The content view runs the full height of the window under a unified titlebar, so the
+        // web layer has to reserve the toolbar's height itself. Measured rather than hardcoded:
+        // the height changes with the toolbar style and whether a window is in full screen.
+        overrides["chrome-top"] = $"{TitlebarHeight():0}px";
+
+        // Content lines up with the system's own sidebar card rather than with a margin Dray chose.
+        overrides["chrome-inset"] = $"{SidebarInset():0}px";
 
 #if DEBUG
         Console.Error.WriteLine($"[dray:theme] {(IsDark ? "dark" : "light")} " +

@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using Dray.Core.Engine;
 using Dray.Core.Model;
+using Dray.Core.Tests.Fakes;
 using Xunit;
 
 namespace Dray.Core.Tests;
@@ -256,6 +257,8 @@ sealed class FakeRuntimeFactory : IContainerRuntimeFactory
 
     public List<TrackedRuntime> Created { get; } = [];
 
+    public bool Handles(DockerEndpoint endpoint) => true;
+
     public IContainerRuntime Create(DockerEndpoint endpoint)
     {
         var runtime = new TrackedRuntime(endpoint.Raw)
@@ -269,7 +272,7 @@ sealed class FakeRuntimeFactory : IContainerRuntimeFactory
     }
 }
 
-sealed class TrackedRuntime(string endpoint) : IContainerRuntime
+sealed class TrackedRuntime(string endpoint) : StubRuntime
 {
     readonly TaskCompletionSource _never = new();
 
@@ -283,9 +286,7 @@ sealed class TrackedRuntime(string endpoint) : IContainerRuntime
 
     public Exception? ConnectFailure { get; init; }
 
-    public RuntimeCapabilities Capabilities { get; private set; } = RuntimeCapabilities.None;
-
-    public Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default)
+    public override Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default)
     {
         if (ConnectFailure is not null) throw ConnectFailure;
 
@@ -293,14 +294,14 @@ sealed class TrackedRuntime(string endpoint) : IContainerRuntime
         return Task.FromResult(Capabilities);
     }
 
-    public Task<IReadOnlyList<ContainerSummary>> ListContainersAsync(bool includeStopped = true, CancellationToken ct = default)
+    public override Task<IReadOnlyList<ContainerSummary>> ListContainersAsync(bool includeStopped = true, CancellationToken ct = default)
         => Task.FromResult(Containers);
 
     public List<(string Id, ContainerAction Action)> Performed { get; } = [];
 
     public Exception? ActionFailure { get; set; }
 
-    public Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
+    public override Task PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
     {
         if (ActionFailure is not null) throw ActionFailure;
 
@@ -308,25 +309,7 @@ sealed class TrackedRuntime(string endpoint) : IContainerRuntime
         return Task.CompletedTask;
     }
 
-    public IAsyncEnumerable<LogLine> StreamLogsAsync(string containerId, LogOptions options, CancellationToken ct = default)
-        => AsyncEnumerable.Empty<LogLine>();
-
-    public Task<DirectoryListing> ListDirectoryAsync(string containerId, string path, bool containerIsRunning, CancellationToken ct = default)
-        => Task.FromResult(new DirectoryListing(path, [], ListingMethod.Exec));
-
-    public Task<byte[]> ReadFileAsync(string containerId, string path, CancellationToken ct = default)
-        => Task.FromResult(Array.Empty<byte>());
-
-    public Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default)
-        => Task.CompletedTask;
-
-    public Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
-        => Task.FromResult(new SystemInfo(0, 0, 0, 0, null, null));
-
-    public Task<DiskUsage> GetDiskUsageAsync(CancellationToken ct = default)
-        => Task.FromResult(new DiskUsage(0, 0, 0, 0, 0, 0));
-
-    public async IAsyncEnumerable<RuntimeEvent> WatchEventsAsync(
+    public override async IAsyncEnumerable<RuntimeEvent> WatchEventsAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         EventsWatched = true;
@@ -340,7 +323,7 @@ sealed class TrackedRuntime(string endpoint) : IContainerRuntime
         yield break;
     }
 
-    public ValueTask DisposeAsync()
+    public override ValueTask DisposeAsync()
     {
         Disposed = true;
         _never.TrySetResult();

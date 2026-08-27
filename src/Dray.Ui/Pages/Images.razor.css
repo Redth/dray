@@ -1,0 +1,12 @@
+/* A dangling image is junk by definition, so it recedes — the eye should land on the images the
+   user recognises. */
+.is-dangling {
+    color: var(--muted);
+}
+
+.row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+}

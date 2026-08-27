@@ -10,18 +10,27 @@
 
 <div class="log">
     <div class="log__bar chrome">
-        <label class="toggle">
-            <input type="checkbox" @bind="_showTimestamps" />
-            <span>Timestamps</span>
-        </label>
+        @* Timestamps and stream separation are the engine's to provide. Where it provides
+           neither, these two toggles are switches wired to nothing — one would change no line on
+           screen and the other would empty the view. Wrap is Dray's own and always applies. *@
+        @if (HasLogMetadata)
+        {
+            <label class="toggle">
+                <input type="checkbox" @bind="_showTimestamps" />
+                <span>Timestamps</span>
+            </label>
+        }
         <label class="toggle">
             <input type="checkbox" @bind="_wrap" />
             <span>Wrap</span>
         </label>
-        <label class="toggle">
-            <input type="checkbox" @bind="_stderrOnly" />
-            <span>stderr only</span>
-        </label>
+        @if (HasLogMetadata)
+        {
+            <label class="toggle">
+                <input type="checkbox" @bind="_stderrOnly" />
+                <span>stderr only</span>
+            </label>
+        }
 
         <input class="input log__filter" type="search" placeholder="Filter lines"
                @bind="_filter" @bind:event="oninput" />
@@ -89,6 +98,9 @@
     CancellationTokenSource? _cts;
     Task? _pump;
     string? _streamingFor;
+
+    /// <summary>Whether the engine attaches a timestamp and a stream to each line.</summary>
+    bool HasLogMetadata => Engine.Selected?.Capabilities.SupportsLogMetadata ?? true;
 
     bool _showTimestamps = true;
     bool _wrap;

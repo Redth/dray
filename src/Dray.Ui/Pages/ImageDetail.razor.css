@@ -1,0 +1,41 @@
+.img__note {
+    padding: var(--s3) var(--s4);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+    max-width: 64ch;
+}
+
+/* The instruction is the interesting column and by far the longest. Clamped to three lines so one
+   enormous RUN cannot bury the nineteen layers around it, and expandable because the whole line is
+   sometimes exactly what you came to read. */
+.img__instruction {
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.img__instruction.is-open {
+    -webkit-line-clamp: unset;
+    display: block;
+}
+
+.img__instruction:hover {
+    color: var(--ink);
+}
+
+/* Metadata layers — ENV, CMD, LABEL — add no bytes and are not what anyone is scanning for. */
+.is-empty {
+    color: var(--muted);
+}
+
+.img__layers .num {
+    width: 8ch;
+    white-space: nowrap;
+}

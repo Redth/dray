@@ -1,0 +1,19 @@
+@* The way out of a detail page, sitting with the title it is leaving.
+
+   Rendered in the content rather than in the chrome, because the web head has no window chrome to
+   put it in and the native heads draw their own leading toolbar item from PageChrome.Back. Both
+   end up in the same place visually — to the left of the thing being looked at. *@
+@inject NavigationManager Nav
+
+<button type="button" class="back" @onclick="Go" title="@Label" aria-label="@Label">
+    <Icon Name="IconRef.ChevronLeft" Size="IconSize.Sm" />
+</button>
+
+@code {
+    [Parameter, EditorRequired] public string To { get; set; } = "";
+
+    /// <summary>Where it goes, for the tooltip and for screen readers. "Back" alone says nothing.</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    void Go() => Nav.NavigateTo(To);
+}
