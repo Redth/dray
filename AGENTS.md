@@ -11,6 +11,7 @@ compose stacks, locally and on any host reachable through a Docker context.
 | [`DESIGN.md`](DESIGN.md) | Colour, type, spacing, components, motion, native integration. Binding. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Project layout, runtime seam, state flow, the native↔web seam |
 | [`docs/NATIVE-SHELL.md`](docs/NATIVE-SHELL.md) | What to lift from MAUI.Sherpa verbatim, and the five places it frays |
+| [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md) | Secret handling. Dray stores none; read before touching auth |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phases, demos, exit criteria |
 
 ## The rules that have teeth
@@ -34,6 +35,10 @@ re-fetch on a timer is a bug, not a fallback.
 
 **Destructive operations are typed, not clicked.** Irreversible bulk operations require the user to
 type the target's name. The brand colour never appears on a destructive action.
+
+**Dray never stores a secret.** Registry credentials go through the Docker credential helper
+protocol, SSH stays with `ssh` and the agent, TLS material stays where the context put it. A
+credential is never rendered, never logged, and never written to `config.json`.
 
 **Zero network dependencies at boot.** No CDN links, no webfonts, no remote assets. The app must
 render correctly with the network unplugged.

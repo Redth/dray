@@ -41,6 +41,7 @@ The token files are generated and gitignored, so the generator runs first.
 | [`DESIGN.md`](DESIGN.md) | The visual contract — colour, type, components, native integration |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Projects, runtime seam, state flow |
 | [`docs/NATIVE-SHELL.md`](docs/NATIVE-SHELL.md) | Native shell patterns and their failure modes |
+| [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md) | How secrets are handled — and why Dray stores none |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phases with demos and exit criteria |
 | [`AGENTS.md`](AGENTS.md) | Contributor and agent rules |
 

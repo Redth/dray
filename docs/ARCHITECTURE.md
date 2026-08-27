@@ -213,12 +213,16 @@ again on every appearance change. That is what makes the seam invisible (DESIGN.
 
 ## 5. Security
 
-- **Never write registry credentials to `config.json` in plaintext.** Use the platform credential
-  helpers (`docker-credential-osxkeychain`, `-wincred`, `-secretservice`) over their documented
-  stdin/stdout protocol, so Dray and the Docker CLI share one credential store.
-- Dray's own secrets (remote host profiles, SSH passphrase hints) go to macOS Keychain / Windows
-  Credential Manager / libsecret. Note Sherpa's finding that ad-hoc Debug signing rotates the macOS
-  code signature each rebuild and invalidates Keychain items — Debug builds need a file fallback.
+- **Dray invents no secret store.** Registry credentials go through the Docker credential helper
+  protocol so Dray and the CLI share one store; SSH keys stay with `ssh` and the agent; TLS material
+  stays where the context put it. Full design, including the resolution order and the
+  missing-helper failure mode, is in [`docs/CREDENTIALS.md`](CREDENTIALS.md).
+- A named-but-missing helper is a supported state, not an exception — an uninstalled engine takes
+  its bundled helper with it and leaves `credsStore` pointing at nothing, which breaks every
+  registry operation including anonymous pulls.
+- Dray's own secrets, if a feature ever needs one, go to Keychain / Credential Manager / libsecret.
+  Note Sherpa's finding that ad-hoc Debug signing rotates the macOS code signature each rebuild and
+  invalidates Keychain items — Debug builds need a fallback.
 - **The Docker socket is root-equivalent.** Any action that would grant escalated access — a
   privileged container, a bind mount of `/`, mounting the socket itself — is called out in the UI at
   the point of the action, not buried in an advanced tab.
