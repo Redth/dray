@@ -53,15 +53,32 @@ are done — native `NSOutlineView` sidebar and `NSToolbar` both projected from 
 `PageChrome`, with the theme handoff verified in light and dark. Windows and GTK heads are next.
 Greyscale and both-theme checks pass on `/gallery`.
 
-**Demo:** all three platforms open a window with a native sidebar and a fake container table, in light
-and dark, and you cannot see where native chrome ends and the WebView begins.
-**Exit:** OS theme toggle repaints in one frame on all three · greyscale screenshot of the state pills
-is legible · app launches with networking disabled · no route, nav entry, icon or colour is declared
-in more than one place.
+**Demo:** the platform opens a window with a native sidebar and a container table, in light and dark,
+and you cannot see where native chrome ends and the WebView begins.
+**Exit:** OS theme toggle repaints in one frame · greyscale screenshot of the state pills is legible ·
+app launches with networking disabled · no route, nav entry, icon or colour is declared in more than
+one place.
+
+> **Windows and GTK4 heads are deferred.** Neither can be run or verified on the development
+> machine, so writing them now would produce untested code whose first real check is CI. The seams
+> they need — `NavigationManifest`, `PageChrome`, `IconRef`, `IShellBridge`, `IPlatformTheme` — are
+> all in place and exercised by the macOS head and `Dray.DevHost`, so adding a head later is
+> additive rather than structural. Picked up when there is a machine to run them on.
 
 ---
 
 ## Phase 2 — Engine connection
+
+> **Working without a live engine.** The development machine has no reachable Docker: no Docker
+> Desktop or OrbStack installed, two declared contexts whose sockets are both dead, and a podman
+> install with no machine. Provisioning one is the user's call, not a side effect of building.
+>
+> Almost all of this phase is testable regardless, because the interesting logic is not the HTTP
+> calls: context discovery parses real files that exist on this machine, and the event pump, entity
+> store, connection state machine and capability degradation are all driven through a transport
+> seam that a fake can satisfy. The "no engine found" first-run state is the machine's actual
+> state, so it gets verified for real rather than simulated. Only the transport itself stays
+> unverified until an engine is available.
 
 - `IContainerRuntime` + `Dray.Docker` over `Docker.DotNet.Enhanced`
 - Context discovery, the host picker, per-host connection state machine
