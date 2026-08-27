@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  design:
+    name: Design system
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # DESIGN.md section 11, gate 1 — every contrast pair recomputed from the tokens.
+      - name: Verify contrast
+        run: node build/verify-contrast.mjs
+
+      # Generated files must match their source. Catches a hand-edited tokens.css
+      # or a stale palette table in DESIGN.md.
+      - name: Check generated files are current
+        run: node build/gen-tokens.mjs --check
+
+      # DESIGN.md section 11, gate 2 — no raw colour or type literals in UI source.
+      - name: Token lint
+        run: node build/lint-tokens.mjs
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: design
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-26
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # Generated sources are gitignored, so they must be produced before build.
+      - name: Generate tokens
+        run: node build/gen-tokens.mjs
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test --no-build -c Release --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.name }}
+          path: '**/*.trx'
+          if-no-files-found: ignore

@@ -1,0 +1,21 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- CI overrides with the tag version via -p:AppVersion=x.y.z -->
+    <AppVersion>0.1.0</AppVersion>
+    <AppCommitSha>dev</AppCommitSha>
+    <Version>$(AppVersion)</Version>
+    <InformationalVersion>$(AppVersion)+$(AppCommitSha)</InformationalVersion>
+
+    <Authors>Jon Dick</Authors>
+    <Product>Dray</Product>
+    <RepositoryUrl>https://github.com/Redth/dray</RepositoryUrl>
+  </PropertyGroup>
+</Project>

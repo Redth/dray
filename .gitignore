@@ -1,0 +1,28 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+*.binlog
+*.user
+*.suo
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.DS_Store
+
+# .NET
+project.lock.json
+*.nupkg
+
+# Node (build scripts only; no npm deps expected)
+node_modules/
+
+# Generated — regenerate with `node build/gen-tokens.mjs`
+src/Dray.Ui/wwwroot/css/tokens.css
+src/Dray.Core/Theme/Tokens.g.cs
+
+# macOS app bundles
+*.app/
+*.dmg
