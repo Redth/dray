@@ -87,6 +87,11 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
             SupportsNetworks = false,
             SupportsLogMetadata = false,
 
+            // `container image` has pull, push, save, load, tag, list, inspect, delete and prune,
+            // and no search. Checked against the subcommand list on 1.3.0 — an image here is
+            // pulled by name or not at all.
+            SupportsRegistrySearch = false,
+
             // `container exec -i` streams in both directions, and `container volume` manages
             // volumes properly. Both were reported unsupported here on the strength of a glance at
             // the subcommand list; testing them showed otherwise.
@@ -607,6 +612,15 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
         System.Runtime.InteropServices.Architecture.X64 => "linux/amd64",
         var other => $"linux/{other.ToString().ToLowerInvariant()}",
     };
+
+    /// <summary>
+    /// This engine cannot search. The capability says so and the UI hides the control, so reaching
+    /// here means something asked anyway — which is worth a sentence rather than an empty list
+    /// that reads as "nothing matched".
+    /// </summary>
+    public Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
+        string term, int limit = 25, CancellationToken ct = default)
+        => throw new NotSupportedException("This engine cannot search a registry. Pull an image by name instead.");
 
     public async IAsyncEnumerable<PullProgress> PullImageAsync(
         string reference, [EnumeratorCancellation] CancellationToken ct = default)

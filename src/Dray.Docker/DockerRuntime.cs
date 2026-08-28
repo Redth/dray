@@ -358,6 +358,17 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public Task TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default)
         => DockerImages.TagAsync(Client, imageId, repository, tag, ct);
 
+    public async Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
+        string term, int limit = 25, CancellationToken ct = default)
+    {
+        if (_raw is null) throw new InvalidOperationException("Not connected to an engine.");
+        if (string.IsNullOrWhiteSpace(term)) return [];
+
+        var path = $"/images/search?term={Uri.EscapeDataString(term.Trim())}&limit={Math.Clamp(limit, 1, 100)}";
+
+        return ImageSearch.Parse(await _raw.GetStringAsync(path, ct).ConfigureAwait(false));
+    }
+
     public Task SaveImageAsync(
         string reference, string destinationPath, IProgress<long>? progress = null, CancellationToken ct = default)
         => _raw is null

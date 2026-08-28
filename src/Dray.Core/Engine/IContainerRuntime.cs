@@ -194,6 +194,17 @@ public interface IContainerRuntime : IAsyncDisposable
         string reference, RegistryCredential? credential, CancellationToken ct = default);
 
     /// <summary>
+    /// Search the registry for repositories matching a term.
+    /// <para>
+    /// Through the engine rather than over HTTP from here: the engine already holds the registry
+    /// configuration and the credentials, and Dray reaching Docker Hub directly would be a second
+    /// network path with its own proxy settings, its own TLS trust and its own way to be wrong.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
+        string term, int limit = 25, CancellationToken ct = default);
+
+    /// <summary>
     /// Write an image to a tar archive on this machine.
     /// <para>
     /// The archive is the engine's own format, and the two engines do not agree on it: Docker

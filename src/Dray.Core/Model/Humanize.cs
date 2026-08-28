@@ -53,6 +53,19 @@ public static class Humanize
     }
 
     /// <summary>A CPU percentage. Null renders as an em dash, never "0%", which would be a lie.</summary>
+    /// <summary>
+    /// A count at a glance: 13612 becomes 13.6k. Used where the exact number is not the point and
+    /// the column it sits in is narrow — the full figure stays in the tooltip.
+    /// </summary>
+    public static string Count(int value) => value switch
+    {
+        < 0 => "—",
+        < 1_000 => value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        < 10_000 => (value / 1000d).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "k",
+        < 1_000_000 => (value / 1000).ToString(System.Globalization.CultureInfo.InvariantCulture) + "k",
+        _ => (value / 1_000_000d).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "M",
+    };
+
     public static string Percent(double? value)
         => value is null ? "—" : value.Value.ToString("0.#", CultureInfo.InvariantCulture) + "%";
 

@@ -69,6 +69,10 @@ public abstract class StubRuntime : IContainerRuntime
     public virtual Task TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default)
         => Task.CompletedTask;
 
+    public virtual Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
+        string term, int limit = 25, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ImageSearchResult>>([]);
+
     public virtual Task SaveImageAsync(
         string reference, string destinationPath, IProgress<long>? progress = null, CancellationToken ct = default)
         => Task.CompletedTask;

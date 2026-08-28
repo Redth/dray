@@ -138,6 +138,12 @@ public sealed record RuntimeCapabilities
     /// </summary>
     public bool SupportsImageArchive { get; init; } = true;
 
+    /// <summary>
+    /// Whether the engine will search a registry on Dray's behalf. Docker and podman both do;
+    /// Apple's runtime has no search subcommand, so its images are pulled by name or not at all.
+    /// </summary>
+    public bool SupportsRegistrySearch { get; init; } = true;
+
     /// <summary>The daemon is running rootless, which changes what ports and mounts are possible.</summary>
     public bool IsRootless { get; init; }
 

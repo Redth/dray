@@ -330,6 +330,15 @@ public sealed class EngineManager : IAsyncDisposable
     public Task<string?> TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default)
         => TryAsync(runtime => runtime.TagImageAsync(imageId, repository, tag, ct));
 
+    /// <summary>Ask the engine to search a registry. Throws what the engine said, for the caller to show.</summary>
+    public async Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
+        string term, int limit = 25, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return [];
+
+        return await runtime.SearchImagesAsync(term, limit, ct).ConfigureAwait(false);
+    }
+
     /// <returns>Null on success, or a sentence explaining what went wrong.</returns>
     public Task<string?> SaveImageAsync(
         string reference, string destinationPath, IProgress<long>? progress = null, CancellationToken ct = default)

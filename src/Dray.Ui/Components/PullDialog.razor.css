@@ -20,3 +20,72 @@
     padding: var(--s2) var(--s3);
     border-radius: var(--r-sm);
 }
+
+/* Results, as a list rather than a dropdown: the dialog has the room, and a popup over a dialog is
+   one layer too many for something the user is reading rather than picking blind. */
+.pull__results {
+    list-style: none;
+    margin: var(--s2) 0 0;
+    padding: 0;
+    max-height: 15rem;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+}
+
+.pull__result {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0 var(--s2);
+    width: 100%;
+    padding: var(--s2) var(--s3);
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+}
+
+.pull__results li:last-child .pull__result {
+    border-bottom: 0;
+}
+
+.pull__result:hover {
+    background: var(--surface-2);
+}
+
+.pull__result:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+}
+
+.pull__result-name {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    font-size: var(--text-base);
+    min-width: 0;
+}
+
+/* The description wraps under both columns — it is the part that explains the choice, and cutting
+   it to one line makes every result look the same. */
+.pull__result-body {
+    grid-column: 1 / -1;
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+}
+
+.pull__stars {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+.pull__badge {
+    padding: 1px 5px;
+    border-radius: var(--r-sm);
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+    font-size: var(--text-xs);
+    font-weight: var(--text-xs-weight);
+}
