@@ -11,12 +11,15 @@
    This is a menu, not a dialog: it belongs to the control it came from and moves with it. See
    docs/NATIVE-SHELL.md section 4 for why that distinction decides whether something is native. *@
 
-@if (Actions.Count > 0)
+@if (Actions.Count > 0 || !Trigger)
 {
-    <button type="button" class="btn @TriggerClass btn--icon"
-            popovertarget="@_id" aria-label="@Label" title="@Label" @ref="_trigger">
-        <Icon Name="IconRef.More" Size="IconSize.Md" />
-    </button>
+    @if (Trigger)
+    {
+        <button type="button" class="btn @TriggerClass btn--icon"
+                popovertarget="@_id" aria-label="@Label" title="@Label" @ref="_trigger">
+            <Icon Name="IconRef.More" Size="IconSize.Md" />
+        </button>
+    }
 
     <div class="menu" id="@_id" popover="auto" @ref="_panel">
         @foreach (var action in Actions)
@@ -44,6 +47,13 @@
     /// <summary>Weight of the trigger. Ghost where it sits among other quiet controls.</summary>
     [Parameter] public string TriggerClass { get; set; } = "btn--secondary";
 
+    /// <summary>
+    /// Whether this draws its own ⋯. False where something else does — the data grid draws the
+    /// button itself, in a cell it renders, and opens this menu at it. One menu then serves every
+    /// row instead of four hundred menus serving one each.
+    /// </summary>
+    [Parameter] public bool Trigger { get; set; } = true;
+
     readonly string _id = $"menu-{Guid.NewGuid():N}";
 
     ElementReference _trigger;
@@ -54,9 +64,17 @@
 
     int _attachedFor = -1;
 
+    /// <summary>Open the menu at a point, for a caller that drew its own button.</summary>
+    public async Task OpenAtAsync(double x, double y)
+    {
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+
+        await _module.InvokeVoidAsync("menu.openAt", _panel, x, y);
+    }
+
     protected override async Task OnAfterRenderAsync(bool first)
     {
-        if (Actions.Count == 0) return;
+        if (Actions.Count == 0 || !Trigger) return;
 
         _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
 

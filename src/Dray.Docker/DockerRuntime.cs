@@ -136,6 +136,18 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         Name = c.Names?.FirstOrDefault()?.TrimStart('/') ?? c.ID[..Math.Min(12, c.ID.Length)],
 
         Image = c.Image,
+
+        // The digest of what actually ran, which is not the tag it was started from: a tag moves
+        // and this does not, so it is the answer to "is this the build I think it is".
+        ImageId = c.ImageID,
+
+        IpAddress = FirstAddress(c),
+
+        // Only when the list was asked for sizes. Docker returns 0 rather than absent when it was
+        // not asked, and a reported zero and an unmeasured one are different answers — so an
+        // unasked-for size stays null rather than claiming the container has written nothing.
+        DiskBytes = c.SizeRw > 0 ? c.SizeRw : null,
+
         State = ParseState(c.State),
         Health = ParseHealthFromStatus(c.Status),
         ExitCode = ParseExitCode(c.Status),
@@ -145,6 +157,19 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             ? new Dictionary<string, string>(labels, StringComparer.Ordinal)
             : null),
     };
+
+    /// <summary>
+    /// The address on the first network the container is attached to.
+    /// <para>
+    /// Null when there is none, which is a real answer: a stopped container has no address, and
+    /// neither does one on the host network. Docker reports an empty string for both, and passing
+    /// that through would put a blank where the column expects to say so.
+    /// </para>
+    /// </summary>
+    static string? FirstAddress(ContainerListResponse c)
+        => c.NetworkSettings?.Networks?
+            .Select(n => n.Value?.IPAddress)
+            .FirstOrDefault(a => !string.IsNullOrWhiteSpace(a));
 
     static DockerState ParseState(string? state) => state?.ToLowerInvariant() switch
     {

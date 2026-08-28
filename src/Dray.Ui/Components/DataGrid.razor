@@ -1,0 +1,135 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IShellBridge Shell
+
+@* Every table in Dray.
+
+   Sorting, column resizing, auto-fit and virtualization come from Tabulator; what each column
+   means, what order columns give way in, and what every value says come from C#. The grid renders
+   its own cells, so a cell is a GridCell rather than a component — see grid.js for the trade and
+   why the set is closed.
+
+   The row menu is one popover for the whole grid rather than one per row: a table of four hundred
+   rows would otherwise carry four hundred of them, and only ever shows one. *@
+
+<div class="grid" @ref="_el"></div>
+
+<OverflowMenu @ref="_menu" Actions="_rowActions" Label="More actions" TriggerClass="grid__hidden"
+              OnAction="RunAsync" />
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<GridColumn> Columns { get; set; } = [];
+
+    /// <summary>
+    /// One dictionary per row, keyed by column field, plus <c>__key</c> identifying the row.
+    /// </summary>
+    [Parameter, EditorRequired] public IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows { get; set; } = [];
+
+    /// <summary>The actions for one row, asked for when its ⋯ is pressed.</summary>
+    [Parameter] public Func<string, IReadOnlyList<RowAction>>? ActionsFor { get; set; }
+
+    /// <summary>Raised with the row key and the chosen action id.</summary>
+    [Parameter] public EventCallback<(string Row, string Action)> OnAction { get; set; }
+
+    /// <summary>Shown in place of the grid when there are no rows.</summary>
+    [Parameter] public string Placeholder { get; set; } = "Nothing here";
+
+    ElementReference _el;
+    OverflowMenu? _menu;
+
+    IJSObjectReference? _module;
+    IJSObjectReference? _grid;
+    DotNetObjectReference<DataGrid>? _self;
+
+    string? _openRow;
+    IReadOnlyList<RowAction> _rowActions = [];
+
+    string _built = "";
+
+    protected override async Task OnAfterRenderAsync(bool first)
+    {
+        if (first)
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/grid.js");
+            _self = DotNetObjectReference.Create(this);
+
+            _grid = await _module.InvokeAsync<IJSObjectReference>("grid.create", _el, Spec(), _self);
+            _built = Signature;
+            return;
+        }
+
+        if (_module is null || _grid is null || _built == Signature) return;
+
+        // Data only — the grid is never rebuilt for new rows, so a sort the user chose and a column
+        // they dragged both survive a container starting somewhere else.
+        _built = Signature;
+        await _module.InvokeVoidAsync("grid.update", _grid, Payload());
+    }
+
+    /// <summary>Cheap stand-in for "the data changed", so a render with the same rows does nothing.</summary>
+    string Signature => string.Join('|', Rows.Select(r => string.Concat(r.Values.Select(v => v?.ToString()))));
+
+    object Spec() => new
+    {
+        columns = Columns.Select(c => new
+        {
+            field = c.Field,
+            title = c.Title,
+            cell = c.Cell.ToString(),
+            priority = c.Priority,
+            sortable = c.Sortable,
+            numeric = c.Numeric,
+            minWidth = c.MinWidth,
+        }),
+
+        rows = Payload(),
+        placeholder = Placeholder,
+    };
+
+    object Payload() => Rows;
+
+    /// <summary>A chip was clicked: its long form goes on the clipboard.</summary>
+    [JSInvokable]
+    public Task OnCopy(string value) => Shell.WriteClipboardAsync(value);
+
+    /// <summary>
+    /// A row's ⋯ was pressed. The menu is built for that row and opened where the button is.
+    /// </summary>
+    [JSInvokable]
+    public async Task OnMenu(string key, double left, double bottom, double right)
+    {
+        _openRow = key;
+        _rowActions = ActionsFor?.Invoke(key) ?? [];
+
+        StateHasChanged();
+
+        // After the render that filled it, or the menu opens showing the previous row's actions.
+        await Task.Yield();
+
+        if (_menu is not null) await _menu.OpenAtAsync(right, bottom);
+    }
+
+    async Task RunAsync(string action)
+    {
+        if (_openRow is { } row) await OnAction.InvokeAsync((row, action));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_module is not null)
+            {
+                if (_grid is not null) await _module.InvokeVoidAsync("grid.destroy", _grid);
+
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit went first — nothing to tear down.
+        }
+
+        _self?.Dispose();
+    }
+}

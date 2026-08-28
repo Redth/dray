@@ -136,6 +136,25 @@ export const menu = {
     return state;
   },
 
+  /**
+   * Open a menu at a point, for a caller that drew its own button — the data grid renders the ⋯
+   * inside a cell it owns, so there is no element here to anchor to.
+   */
+  openAt(panel, x, y) {
+    if (!panel) return;
+
+    if (panel.matches(':popover-open')) panel.hidePopover();
+    panel.showPopover();
+
+    const p = panel.getBoundingClientRect();
+
+    const top = y + p.height > window.innerHeight - 8 ? Math.max(8, y - p.height - 4) : y + 4;
+    const left = Math.min(Math.max(8, x - p.width), Math.max(8, window.innerWidth - p.width - 8));
+
+    panel.style.top = `${top}px`;
+    panel.style.left = `${left}px`;
+  },
+
   close(panel) {
     if (panel?.matches(':popover-open')) panel.hidePopover();
   },

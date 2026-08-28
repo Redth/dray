@@ -1,0 +1,123 @@
+/* Tabulator, restyled from Dray's tokens.
+
+   The vendored stylesheet is the base only — its themes paint a grid that looks like a web page's
+   table, with its own greys, its own borders and its own idea of a header. Everything visible here
+   is overridden so the grid reads as the same control as the rest of the app, in either appearance
+   and on either platform's palette.
+
+   ::deep throughout: Tabulator builds its own DOM inside this element, so none of it carries the
+   scope attribute. */
+
+.grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+}
+
+.grid ::deep .tabulator {
+    background: transparent;
+    border: 0;
+    font-size: var(--table-text);
+    color: var(--ink);
+}
+
+/* The header is the app's own: the surface a table header has everywhere else, and the label
+   colour that goes with it. */
+.grid ::deep .tabulator .tabulator-header {
+    background: var(--selected, var(--surface-2));
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-weight: var(--text-xs-weight);
+}
+
+.grid ::deep .tabulator .tabulator-col {
+    background: transparent;
+    border-right: 0;
+}
+
+.grid ::deep .tabulator .tabulator-col-title {
+    font-size: var(--text-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: var(--row-pad-y) var(--s3);
+}
+
+/* The drag target for resizing. Invisible until pointed at, because a column of visible grab
+   handles is a lot of furniture for something used occasionally. */
+.grid ::deep .tabulator .tabulator-col-resize-handle {
+    width: 6px;
+}
+
+.grid ::deep .tabulator .tabulator-col-resize-handle:hover {
+    background: var(--line-strong);
+}
+
+.grid ::deep .tabulator .tabulator-row {
+    background: transparent;
+    border-bottom: 1px solid var(--line);
+    min-height: var(--row-h);
+}
+
+.grid ::deep .tabulator .tabulator-row:hover {
+    background: var(--surface-2);
+}
+
+.grid ::deep .tabulator .tabulator-cell {
+    border-right: 0;
+    padding: var(--row-pad-y) var(--s3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.grid ::deep .tabulator .tabulator-placeholder {
+    color: var(--muted);
+    font-size: var(--text-base);
+}
+
+/* ---------------------------------------------------------------- cells */
+
+/* A name with what identifies it a second way underneath — the short id, the tag. Two lines in one
+   cell rather than two columns, because the second is only ever read next to the first. */
+.grid ::deep .grid__name {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.grid ::deep .grid__sub {
+    font-size: var(--text-xs);
+    color: var(--muted);
+}
+
+/* Short on screen, whole on the clipboard. Looks like the value it is, not like a button, until
+   pointed at. */
+.grid ::deep .grid__chip {
+    padding: 1px var(--s2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    cursor: pointer;
+}
+
+.grid ::deep .grid__chip:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
+}
+
+.grid ::deep .grid__chip:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}
+
+.grid ::deep .grid__more {
+    color: var(--muted);
+}
+
+/* The menu the grid opens has no button of its own — the grid draws that in a cell. */
+.grid__hidden {
+    display: none;
+}

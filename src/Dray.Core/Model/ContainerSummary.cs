@@ -46,9 +46,34 @@ public sealed record ContainerSummary
     /// <summary>Compose project name. The list's Stack column, and the most-used part of <see cref="Compose"/>.</summary>
     public string? Stack => Compose?.Project;
 
+    /// <summary>
+    /// The resolved image id — the digest of what actually ran, which is not the same thing as the
+    /// tag it was started from. A tag moves; this does not.
+    /// </summary>
+    public string? ImageId { get; init; }
+
+    /// <summary>
+    /// The address on the first network it is attached to, or null when it has none — a container
+    /// on the host network, or a stopped one, genuinely has no address and must not show a stale
+    /// one.
+    /// </summary>
+    public string? IpAddress { get; init; }
+
     public double? CpuPercent { get; init; }
 
     public long? MemoryBytes { get; init; }
+
+    /// <summary>Bytes across the network since it started, received and sent together.</summary>
+    public long? NetworkBytes { get; init; }
+
+    /// <summary>
+    /// Bytes written to the container's own writable layer — not its volumes.
+    /// <para>
+    /// Null unless the engine was asked for sizes, which is markedly slower on every refresh: it
+    /// walks each container's filesystem. Null therefore means "not measured", never "empty".
+    /// </para>
+    /// </summary>
+    public long? DiskBytes { get; init; }
 
     public ContainerStatus Status => ContainerStatusVocabulary.Resolve(State, Health, ExitCode);
 
