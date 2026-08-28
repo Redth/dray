@@ -3,3 +3,24 @@
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: var(--s4);
 }
+
+.hosts__service {
+    margin-top: var(--s4);
+}
+
+/* The sentence and the button on one line: the sentence explains the state, the button changes it,
+   and stacking them makes a two-line panel out of one fact. */
+.hosts__servicebody {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+}
+
+.hosts__note {
+    margin: 0;
+    font-size: var(--text-sm);
+}
+
+.hosts__spacer {
+    flex: 1 1 auto;
+}

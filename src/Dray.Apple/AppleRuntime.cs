@@ -31,7 +31,8 @@ namespace Dray.Apple;
 /// <item><b>No health checks.</b> The concept does not exist here.</item>
 /// </list>
 /// </summary>
-public sealed class AppleRuntime(IProcessRunner? runner = null, string? executable = null) : IContainerRuntime
+public sealed class AppleRuntime(IProcessRunner? runner = null, string? executable = null)
+    : IContainerRuntime, IEngineService
 {
     /// <summary>The CLI's name, used when discovery did not hand over a path.</summary>
     internal const string DefaultExecutable = "container";
@@ -937,6 +938,70 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     // ---------------------------------------------------------------- plumbing
+
+    // ---------------------------------------------------------------- the service
+
+    /// <summary>
+    /// What `container system status` says.
+    /// <para>
+    /// Asked for as JSON rather than parsed out of the table: the table is a display format and its
+    /// columns are not a contract. The JSON is one object with a <c>status</c> of "running", and an
+    /// <c>apiServerVersion</c> that is the service's own — which is not necessarily the CLI's.
+    /// </para>
+    /// </summary>
+    public async Task<EngineServiceState> ServiceStatusAsync(CancellationToken ct = default)
+    {
+        var result = await RunAsync(["system", "status", "--format", "json"], ct).ConfigureAwait(false);
+
+        // A non-zero exit is the normal way this answers when the service is down, so it is a
+        // state rather than a failure.
+        if (result.ExitCode != 0)
+        {
+            return new EngineServiceState(
+                false,
+                Detail: Sentence(result) ?? "The container service is not running.");
+        }
+
+        try
+        {
+            var status = JsonSerializer.Deserialize<AppleSystemStatus>(result.StandardOutput, Json);
+
+            return new EngineServiceState(
+                string.Equals(status?.Status, "running", StringComparison.OrdinalIgnoreCase),
+                status?.ApiServerVersion,
+                status?.InstallRoot is { Length: > 0 } root ? $"Installed at {root}" : null);
+        }
+        catch (JsonException)
+        {
+            // An answer Dray cannot read is not the same as a service that is down. It exited
+            // zero, so something is answering — reporting it as stopped would be a state nobody
+            // measured, and would offer a Start button for a service already running.
+            return new EngineServiceState(true, Detail: "The engine answered in a format Dray does not recognise.");
+        }
+    }
+
+    public async Task<string?> StartServiceAsync(CancellationToken ct = default)
+    {
+        var result = await RunAsync(["system", "start"], ct).ConfigureAwait(false);
+        return result.ExitCode == 0 ? null : Sentence(result) ?? "The container service did not start.";
+    }
+
+    public async Task<string?> StopServiceAsync(CancellationToken ct = default)
+    {
+        var result = await RunAsync(["system", "stop"], ct).ConfigureAwait(false);
+        return result.ExitCode == 0 ? null : Sentence(result) ?? "The container service did not stop.";
+    }
+
+    /// <summary>The engine's own words, trimmed to the first line, or null when it said nothing.</summary>
+    static string? Sentence(ProcessResult result)
+    {
+        var text = result.StandardError.Trim();
+        if (text.Length == 0) text = result.StandardOutput.Trim();
+
+        return text.Length == 0 ? null : text.Split('\n')[0].Trim();
+    }
+
+    sealed record AppleSystemStatus(string? Status, string? ApiServerVersion, string? InstallRoot);
 
     Task<ProcessResult> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
         => _runner.RunAsync(Executable, args, null, ct);

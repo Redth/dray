@@ -1,5 +1,7 @@
 @page "/hosts"
+@implements IDisposable
 @inject EngineManager Engine
+@inject IShellBridge Shell
 
 <PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
 
@@ -61,6 +63,58 @@
                 </table>
             </div>
 
+            @if (_error is { } problem)
+            {
+                <div class="banner" role="alert">
+                    <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                    <span>@problem</span>
+                    <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true"
+                            Variant="ButtonVariant.Ghost" OnClick="() => _error = null" />
+                </div>
+            }
+
+            @* An engine whose service runs on this machine can be started and stopped from here.
+               Apple's container is the case: its CLI answers --version whether or not the API
+               server behind it is up, so an engine that looks installed can fail every call — and
+               the fix is one command nobody has a reason to know. *@
+            @if (Engine.CanControlService)
+            {
+                <div class="panel hosts__service">
+                    <div class="panel__head">
+                        <span class="panel__title">Engine service</span>
+
+                        @if (_service is { } state)
+                        {
+                            <StatePill Status="ServiceStatus(state)" />
+                        }
+                    </div>
+
+                    <div class="panel__body hosts__servicebody">
+                        <p class="muted hosts__note">
+                            @(_service?.Detail ?? "Checking the service…")
+                            @if (_service?.Version is { Length: > 0 } version)
+                            {
+                                <span class="mono"> · @version</span>
+                            }
+                        </p>
+
+                        <span class="hosts__spacer"></span>
+
+                        @if (_service is { Running: false })
+                        {
+                            <Button Label="Start service" Icon="IconRef.Play" Variant="ButtonVariant.Primary"
+                                    Busy="_working" Disabled="_working" OnClick="StartServiceAsync" />
+                        }
+                        else if (_service is { Running: true })
+                        {
+                            <Button Label="Stop service" Icon="IconRef.Stop" Variant="ButtonVariant.Secondary"
+                                    Danger="true" Busy="_working" Disabled="_working"
+                                    OnClick="StopServiceAsync" />
+                        }
+                    </div>
+                </div>
+            }
+
             @if (Engine.Selected is { Capabilities.Flavor: not EngineFlavor.Unknown } selected)
             {
                 <div class="panel" style="margin-top: var(--s4)">
@@ -99,12 +153,103 @@
         Subtitle: Engine.HasNoHosts ? null : $"{Engine.Hosts.Count} known",
         Actions: [ChromeAction.Secondary("refresh", "Look again", IconRef.Refresh)]);
 
+    EngineServiceState? _service;
+    bool _working;
+
+    /// <summary>Which host the service state belongs to, so it is not shown for a different one.</summary>
+    string? _serviceFor;
+
+    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
+
+    /// <summary>
+    /// Re-check when the selection changes, and only then. Changed also fires for every container
+    /// event on the selected host, and asking the engine about its service each time would be a
+    /// process launched per event — the polling this design exists to avoid.
+    /// </summary>
+    void OnEngineChanged()
+    {
+        if (_serviceFor == Engine.Selected?.Id) return;
+
+        _ = InvokeAsync(RefreshServiceAsync);
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender) return;
+
         // Checked when the page opens rather than on a timer: probing a remote host costs a
         // connection, and doing it for hosts nobody is looking at is the polling this design avoids.
-        if (firstRender) await Engine.ProbeOthersAsync();
+        await Engine.ProbeOthersAsync();
+        await RefreshServiceAsync();
     }
+
+    async Task RefreshServiceAsync()
+    {
+        _serviceFor = Engine.Selected?.Id;
+
+        if (Engine.ServiceStatusAsync() is not { } pending)
+        {
+            // The engine has no service Dray can see. Cleared rather than left showing the last
+            // engine's answer.
+            _service = null;
+            StateHasChanged();
+            return;
+        }
+
+        _service = await pending;
+        StateHasChanged();
+    }
+
+    public void Dispose() => Engine.Changed -= OnEngineChanged;
+
+    /// <summary>
+    /// The service's state in the app's own vocabulary, so it reads as every other state does —
+    /// tint, glyph and word (DESIGN.md 2.4).
+    /// </summary>
+    static ContainerStatus ServiceStatus(EngineServiceState state) => state.Running
+        ? new ContainerStatus(StateTone.Ok, "●", "Running")
+        : new ContainerStatus(StateTone.Danger, "■", "Stopped");
+
+    async Task StartServiceAsync()
+    {
+        _working = true;
+
+        try
+        {
+            _error = await Engine.StartServiceAsync();
+            await RefreshServiceAsync();
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    async Task StopServiceAsync()
+    {
+        // Everything running under it stops with it, so this is confirmed like any other stop.
+        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+            "Stop the engine service?",
+            "Every container it is running stops with it. Nothing is deleted, and starting the "
+            + "service again brings the containers back to whatever state they were left in.",
+            "Stop service"));
+
+        if (answer != ConfirmResult.Confirm) return;
+
+        _working = true;
+
+        try
+        {
+            _error = await Engine.StopServiceAsync();
+            await RefreshServiceAsync();
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    string? _error;
 
     static string Source(DockerHost host) => host.Origin switch
     {

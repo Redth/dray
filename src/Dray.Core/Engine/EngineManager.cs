@@ -170,6 +170,43 @@ public sealed class EngineManager : IAsyncDisposable
     /// </para>
     /// </summary>
     /// <returns>Null on success, or a sentence explaining what went wrong.</returns>
+    /// <summary>
+    /// Whether the selected engine's background service is something Dray can see and control.
+    /// <para>
+    /// A type test rather than a capability flag, because this is not a property of the connection
+    /// — it is a property of the engine running on this machine. Dray cannot start a service over
+    /// SSH and should not offer to.
+    /// </para>
+    /// </summary>
+    public bool CanControlService => _runtime is IEngineService;
+
+    /// <summary>What the selected engine's service is doing, or null where there is nothing to ask.</summary>
+    public Task<EngineServiceState>? ServiceStatusAsync(CancellationToken ct = default)
+        => _runtime is IEngineService service ? service.ServiceStatusAsync(ct) : null;
+
+    public async Task<string?> StartServiceAsync(CancellationToken ct = default)
+    {
+        if (_runtime is not IEngineService service) return "This engine has no service Dray can start.";
+
+        var error = await service.StartServiceAsync(ct).ConfigureAwait(false);
+
+        // A service that has just started changes every answer the app is showing, so the host is
+        // reconnected rather than left reporting what was true a moment ago.
+        if (error is null && Selected is { } host) await SelectAsync(host.Id, ct).ConfigureAwait(false);
+
+        return error;
+    }
+
+    public async Task<string?> StopServiceAsync(CancellationToken ct = default)
+    {
+        if (_runtime is not IEngineService service) return "This engine has no service Dray can stop.";
+
+        var error = await service.StopServiceAsync(ct).ConfigureAwait(false);
+        Changed?.Invoke();
+
+        return error;
+    }
+
     public async Task<string?> PerformAsync(string containerId, ContainerAction action, CancellationToken ct = default)
     {
         if (_runtime is not { } runtime) return "Not connected to an engine.";
