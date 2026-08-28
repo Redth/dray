@@ -289,6 +289,14 @@ for long operations, and the menu-bar item.
 - Crash + opt-in telemetry, first-run onboarding, error taxonomy pass, full a11y audit,
   i18n plumbing (strings externalized; ship English)
 
+**Note on macOS verification.** The macOS head builds clean, launches, runs without a crash
+report, and shares every Razor component with the web head — one RCL, no per-head UI. What could
+not be done in this environment is *looking at the window*: screen-control access was declined, so
+no screenshot of the native app exists. `ChromeSignatureTests` covers the part that is genuinely
+native-only and invisible from the web head — whether the `NSToolbar` rebuilds when a page's action
+set changes shape, which is what makes a Pause button disappear when the selected engine cannot
+pause. Everything else on screen is the same markup the web screenshots show.
+
 **Demo:** a stranger installs Dray from a link and manages a container in under a minute.
 **Exit:** WCAG 2.2 AA verified in both themes · install → useful in under 60s on all three platforms.
 
