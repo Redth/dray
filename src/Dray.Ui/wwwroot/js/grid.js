@@ -22,6 +22,14 @@
 //     columns are still null, so that was necessary and not sufficient.
 //   - Deferring construction until the element has a width does not fix it either, nor does pinning
 //     an explicit pixel width across the build.
+//   - Not the flex structure: a control using this component's exact box model — `flex: 1 1 0`,
+//     `min-width: 0`, `height: 100%` inside a flex parent — produces widths.
+//   - Not the formatters, the object-valued cells, the custom sorters, the placeholder, or
+//     selectableRows/reactiveData/persistence. Each was added to the working control in turn and
+//     none of them breaks it.
+//   - Not Blazor owning the subtree. Tabulator is now mounted into a child element created in JS
+//     (which is correct regardless — Blazor must not diff a subtree a library replaces), and the
+//     widths are still null.
 //
 // The remaining difference between the working control and this is the Blazor-hosted lifecycle,
 // and that is where the next look should start.
@@ -168,10 +176,20 @@ export const grid = {
     //
     // Proven rather than guessed: the same columns, data and options built into an element that
     // already had a width produced [180, 110, 160, …] while the live one produced nulls.
+    // Tabulator gets a child of its own, never the element Blazor rendered.
+    //
+    // Blazor owns the children of every element in its render tree, and Tabulator replaces them
+    // wholesale. The two then fight over the same subtree on every re-render — and this page
+    // re-renders constantly, because containers change — which is how a grid ends up with rows
+    // that were built correctly and inline widths that have been diffed away.
+    state.mount = document.createElement('div');
+    state.mount.className = 'grid__mount';
+    el.appendChild(state.mount);
+
     const build = () => {
       if (state.table || el.clientWidth < 10) return false;
 
-      state.table = table(el, state, dotnet);
+      state.table = table(state.mount, state, dotnet);
       return true;
     };
 
@@ -227,7 +245,9 @@ export const grid = {
 
     state.el?.removeEventListener('click', state.onClick);
     state.el?.removeEventListener('dblclick', state.onDouble);
+
     state.table?.destroy();
+    state.mount?.remove();
   },
 };
 
