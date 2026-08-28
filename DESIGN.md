@@ -155,6 +155,12 @@ rows from looking like a bag of sweets, and it is why `--warn` never needs to ca
 Exit codes get plain-language expansion inline: `137` → "Exited 137 · killed (out of memory)",
 `143` → "Exited 143 · stopped", `139` → "Exited 139 · segmentation fault".
 
+**One exception, for width.** In a container too narrow to hold it, the word is taken out of the
+layout — never deleted. It stays in the pill's `title` and in its accessible name, and the tint and
+glyph stay on screen. The rule this exception has to keep is the reason the rule exists: every state
+still has a glyph of its own, so greyscale stays legible without the word. A pill that dropped the
+glyph instead, or that shrank to colour alone, is a bug.
+
 ### 2.5 Two documented exceptions
 
 Honest notes rather than fudged numbers:

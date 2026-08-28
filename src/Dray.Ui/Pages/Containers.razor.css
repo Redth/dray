@@ -1,15 +1,13 @@
-/* Actions are revealed on hover, on keyboard focus, and for the selected row, so a dense table
-   stays scannable without the controls being pointer-only. The selected row keeps them visible so
-   a keyboard user always has a stable target.
+/* Row actions are always visible. They used to appear on hover, which kept the table quiet but
+   meant the only way to find out what a row could do was to point at it — and on a touchpad or by
+   keyboard that is a discovery problem, not a tidiness win. The buttons are ghost-weight and
+   icon-only, so a column of them reads as a column of affordances rather than clutter.
 
-   This rule lives here rather than in ContainerActionBar's own stylesheet because it selects on
+   These rules live here rather than in ContainerActionBar's own stylesheet because they select on
    the <tr>, which belongs to this component — scoped CSS attributes would not match from there. */
-.table tbody tr:not(:hover):not([aria-selected="true"]) ::deep .btn:not(:focus-visible) {
-    opacity: 0;
-}
-
 .table ::deep .btn {
-    transition: opacity var(--motion-fast) var(--motion-ease);
+    transition: color var(--motion-fast) var(--motion-ease),
+                background-color var(--motion-fast) var(--motion-ease);
 }
 
 /* Appears above the table when more than one row is selected. Not for a single selection: that

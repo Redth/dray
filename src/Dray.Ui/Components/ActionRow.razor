@@ -1,0 +1,162 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@* A row of controls that gives way as the window narrows.
+
+   The first action is the most important one and is the last to go: the row is collapsed from its
+   end, and whatever no longer fits moves into a menu. So a stack card in a narrow window still
+   offers Up, and Down — the destructive one — is the first thing to be put away.
+
+   The browser measures and C# decides (OverflowFit), which keeps the interesting half testable.
+   The menu is a real popover so it can escape the card's own rounded clip, and light dismiss,
+   Escape and the top layer come with it rather than being hand-rolled. *@
+
+<div class="actions" @ref="_row">
+    @foreach (var action in Shown)
+    {
+        var captured = action;
+
+        <Button Label="@action.Label"
+                Icon="action.Icon"
+                IconOnly="true"
+                Tooltip="@action.Tooltip"
+                Variant="ButtonVariant.Secondary"
+                Danger="action.Danger"
+                Disabled="action.Disabled"
+                OnClick="() => PickAsync(captured)" />
+    }
+
+    @if (Hidden.Count > 0)
+    {
+        <button type="button" class="btn btn--secondary btn--icon actions__more"
+                popovertarget="@_id" aria-label="@MenuLabel" title="@MenuLabel" @ref="_trigger">
+            <Icon Name="IconRef.More" Size="IconSize.Md" />
+        </button>
+
+        <div class="menu" id="@_id" popover="auto" @ref="_panel">
+            @foreach (var action in Hidden)
+            {
+                var captured = action;
+
+                <button type="button" class="menu__item @(action.Danger ? "is-danger" : null)"
+                        disabled="@action.Disabled" title="@action.Tooltip"
+                        @onclick="() => PickAsync(captured)">
+                    <Icon Name="action.Icon" Size="IconSize.Md" />
+                    <span>@action.Label</span>
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// The actions, most important first. The order is the priority: the row keeps its head and
+    /// sheds its tail.
+    /// </summary>
+    [Parameter, EditorRequired] public IReadOnlyList<RowAction> Actions { get; set; } = [];
+
+    [Parameter] public EventCallback<string> OnAction { get; set; }
+
+    /// <summary>Names the overflow control. Says what it holds, since its contents change.</summary>
+    [Parameter] public string MenuLabel { get; set; } = "More actions";
+
+    readonly string _id = $"menu-{Guid.NewGuid():N}";
+
+    ElementReference _row;
+    ElementReference _trigger;
+    ElementReference _panel;
+
+    IJSObjectReference? _module;
+    IJSObjectReference? _observer;
+    IJSObjectReference? _menu;
+    DotNetObjectReference<ActionRow>? _self;
+
+    int _menuFor = -1;
+
+    double _available;
+    double _item;
+    double _gap;
+
+    int Fit => OverflowFit.Visible(_available, _item, _gap, Actions.Count);
+
+    IReadOnlyList<RowAction> Shown => [.. Actions.Take(Fit)];
+
+    IReadOnlyList<RowAction> Hidden => [.. Actions.Skip(Fit)];
+
+    /// <summary>
+    /// The row's width and the size of one control, straight from the browser.
+    /// </summary>
+    [JSInvokable]
+    public Task OnMeasured(double available, double item, double gap)
+    {
+        // Guard the re-render: a resize observer fires for every pixel of a window drag, and all
+        // but a handful of those land on the same answer.
+        if (Math.Abs(available - _available) < 0.5 && Math.Abs(item - _item) < 0.5) return Task.CompletedTask;
+
+        var before = Fit;
+
+        _available = available;
+        _item = item;
+        _gap = gap;
+
+        return before == Fit ? Task.CompletedTask : InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool first)
+    {
+        if (first)
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+            _self = DotNetObjectReference.Create(this);
+            _observer = await _module.InvokeAsync<IJSObjectReference>("overflow.attach", _row, _self);
+        }
+
+        if (_module is null) return;
+
+        // The panel is a different element every time the split changes, so its placement listener
+        // is re-attached whenever that happens rather than once.
+        if (Hidden.Count > 0 && _menuFor != Hidden.Count)
+        {
+            if (_menu is not null) await _module.InvokeVoidAsync("menu.detach", _menu);
+
+            _menu = await _module.InvokeAsync<IJSObjectReference>("menu.attach", _trigger, _panel);
+            _menuFor = Hidden.Count;
+        }
+        else if (Hidden.Count == 0 && _menu is not null)
+        {
+            await _module.InvokeVoidAsync("menu.detach", _menu);
+            _menu = null;
+            _menuFor = -1;
+        }
+    }
+
+    async Task PickAsync(RowAction action)
+    {
+        // Closing first: the action may navigate, and a popover left open across a navigation stays
+        // in the top layer over the next page.
+        if (_module is not null && _menu is not null) await _module.InvokeVoidAsync("menu.close", _panel);
+
+        await OnAction.InvokeAsync(action.Id);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_module is not null)
+            {
+                if (_observer is not null) await _module.InvokeVoidAsync("overflow.detach", _observer);
+                if (_menu is not null) await _module.InvokeVoidAsync("menu.detach", _menu);
+
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit went first — nothing to detach from.
+        }
+
+        _self?.Dispose();
+    }
+}

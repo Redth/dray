@@ -46,8 +46,20 @@
             <div class="stacks">
                 @foreach (var stack in Visible)
                 {
+                    var open = IsOpen(stack);
+                    var services = $"services-{stack.Name}";
+
                     <section class="stacks__card card" @key="stack.Name">
-                        <div class="panel__head">
+                        <div class="panel__head stacks__head">
+                            <button type="button" class="stacks__toggle" aria-expanded="@open"
+                                    aria-controls="@services"
+                                    aria-label="@($"{(open ? "Hide" : "Show")} the services in {stack.Name}")"
+                                    @onclick="() => Toggle(stack)">
+                                <Icon Name="IconRef.ChevronRight" Size="IconSize.Sm" />
+                            </button>
+
+                            <Icon Name="IconRef.Stack" Size="IconSize.Sm" Class="stacks__glyph" />
+
                             <h3 class="panel__title">
                                 <a href="@($"/stacks/{Uri.EscapeDataString(stack.Name)}")">@stack.Name</a>
                             </h3>
@@ -58,30 +70,35 @@
                                 @stack.RunningCount/@stack.ContainerCount running
                             </span>
 
-                            <span class="stacks__spacer"></span>
-
                             @if (_composeMissing)
                             {
                                 @* Compose is a separate CLI, and a stack can be running that Dray
                                    cannot drive. Saying so beats buttons that fail on click. *@
                                 <span class="muted stacks__note" title="Install Docker Compose to control stacks from Dray">
+                                    <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
                                     compose not installed
                                 </span>
                             }
                             else
                             {
-                                @foreach (var (id, label, danger) in StackCommands)
-                                {
-                                    var captured = (id, label, stack);
-                                    <Button Label="@label"
-                                            Variant="ButtonVariant.Ghost"
-                                            Danger="danger"
-                                            Disabled="@(_running is not null)"
-                                            OnClick="() => RunAsync(captured.stack, captured.id, captured.label)" />
-                                }
+                                @* Icon only, so four commands and the stack's name and state fit one
+                                   line on every card, and collapsing into a menu from the end as
+                                   the window narrows — so Down, the destructive one, is the first
+                                   put away and Up is the last. The name goes in the accessible
+                                   label rather than on screen: with a card per stack, four buttons
+                                   reading "Up" are only distinguishable by which card they are in. *@
+                                <ActionRow Actions="CommandsFor(stack)"
+                                           MenuLabel="@($"More commands for {stack.Name}")"
+                                           OnAction="id => RunAsync(stack, id, LabelFor(id))" />
                             }
                         </div>
 
+                        @* The wrapper is always here so the disclosure button always has something
+                           to point aria-controls at; the table itself is only built when it is
+                           being shown. *@
+                        <div id="@services" class="stacks__services">
+                            @if (open)
+                            {
                         <table class="table">
                             <thead>
                                 <tr><th>Service</th><th>State</th><th>Containers</th><th>Image</th><th></th></tr>
@@ -116,6 +133,8 @@
                                 }
                             </tbody>
                         </table>
+                            }
+                        </div>
                     </section>
                 }
             </div>
@@ -143,16 +162,29 @@
     /// <c>down</c> are what people do, and a wall of eight buttons makes the two that matter harder
     /// to find.
     /// </summary>
-    static readonly (string Id, string Label, bool Danger)[] StackCommands =
+    static readonly (string Id, string Label, IconRef Icon, bool Danger, string Hint)[] StackCommands =
     [
-        ("up", "Up", false),
-        ("restart", "Restart", false),
-        ("pull", "Pull", false),
-        ("down", "Down", true),
+        ("up", "Up", IconRef.Play, false, "Up — start the stack, creating anything that is missing"),
+        ("restart", "Restart", IconRef.Restart, false, "Restart every container in the stack"),
+        ("pull", "Pull", IconRef.Pull, false, "Pull newer images for the stack"),
+        ("down", "Down", IconRef.Stop, true, "Down — stop and remove the stack's containers"),
     ];
 
     string _search = "";
     string? _notice;
+
+    /// <summary>
+    /// Which stacks are showing their services.
+    /// <para>
+    /// Closed to begin with: on a machine with a dozen stacks the page was one long table and the
+    /// stack names — the thing being looked for — were the smallest part of it. A stack that is not
+    /// fully running opens itself, because then the services are the reason the page was opened.
+    /// </para>
+    /// <para>
+    /// Held per name rather than per stack, so a stack that restarts keeps its disclosure.
+    /// </para>
+    /// </summary>
+    readonly Dictionary<string, bool> _open = [];
     bool _noticeOk;
     bool _composeMissing;
 
@@ -190,6 +222,24 @@
             ];
         }
     }
+
+    IReadOnlyList<RowAction> CommandsFor(StackSummary stack) =>
+    [
+        .. StackCommands.Select(c => new RowAction(
+            c.Id,
+            $"{c.Label} {stack.Name}",
+            c.Icon,
+            c.Hint,
+            c.Danger,
+            Disabled: _running is not null)),
+    ];
+
+    static string LabelFor(string id) => StackCommands.First(c => c.Id == id).Label;
+
+    bool IsOpen(StackSummary stack)
+        => _open.TryGetValue(stack.Name, out var open) ? open : stack.Status.Tone is not StateTone.Ok;
+
+    void Toggle(StackSummary stack) => _open[stack.Name] = !IsOpen(stack);
 
     async Task RunAsync(StackSummary stack, string command, string label)
     {

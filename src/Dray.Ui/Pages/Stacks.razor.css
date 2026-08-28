@@ -14,6 +14,29 @@
     white-space: nowrap;
 }
 
+/* The card is the container the header measures itself against, not the window: a stack card is
+   the same width whether the window is narrow or the sidebar is open. */
+.stacks__card {
+    container-type: inline-size;
+}
+
+/* First to go, because it is the one thing on the header that the card repeats below it. Dropped
+   outright rather than ellipsised — "2 servi…" is not worth the space it costs the name. */
+@container (max-width: 26rem) {
+    .stacks__count {
+        display: none;
+    }
+}
+
+/* The name is what the row is for, so it shrinks last and never below something readable. */
+.stacks__head .panel__title {
+    flex: 0 1 auto;
+    min-width: 5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Compose's own output while a command runs. Fixed height so a long pull does not push the stack
    list off the page, and scrolled to keep the tail visible. */
 .stacks__output {
@@ -29,4 +52,86 @@
     line-height: var(--text-sm-lh);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+}
+
+/* The header is the whole card when the services are closed, so it carries the disclosure, the
+   name, the state and the four compose commands without any of them crowding the others. */
+.stacks__head {
+    gap: var(--s2);
+
+    /* The name sits next to its disclosure and its icon rather than being pushed apart from them:
+       the panel default spreads its children, which is right for a two-item header and wrong for
+       one that reads as a sentence. */
+    justify-content: flex-start;
+
+    /* Deliberately not wrapping. The commands are in an ActionRow, which needs to run out of
+       room in order to collapse into its menu — a header that wrapped would hand it a fresh line
+       instead, and the menu would never appear however narrow the window got. */
+    flex-wrap: nowrap;
+}
+
+.stacks__toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.stacks__toggle:hover {
+    background: var(--surface-2);
+    color: var(--ink);
+}
+
+.stacks__toggle:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+}
+
+/* One chevron, rotated, rather than two icons: the same shape turning is what says the section
+   opened, and swapping glyphs loses that. */
+.stacks__toggle ::deep .icon {
+    transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.stacks__toggle[aria-expanded="true"] ::deep .icon {
+    transform: rotate(90deg);
+}
+
+.stacks__glyph {
+    color: var(--muted);
+    flex: 0 0 auto;
+}
+
+.stacks__note {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .stacks__toggle ::deep .icon {
+        transition: none;
+    }
+}
+
+/* Below this width the header keeps the state's tint and glyph and drops its word — the same
+   information in less room, with the word still in the pill's tooltip and accessible name. The
+   declarations are `.visually-hidden` from app.css; a container query cannot add a class. */
+@container (max-width: 22rem) {
+    .stacks__head ::deep .pill__word {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
 }
