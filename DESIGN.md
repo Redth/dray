@@ -457,8 +457,9 @@ in light.
 | `--bg` | `windowBackgroundColor` | Still resolved, because `color-mix()` needs a real colour to blend against. |
 | `--line` | `separatorColor` | |
 | `--line-strong` | `tertiaryLabelColor` | The system's own next step up the same ramp, so the two stay in proportion. |
-| `--surface`, `--surface-2` | the ground, stepped | See below. |
-| `--selected` | `unemphasizedSelectedContentBackground` | What a native list paints behind a selected row when its view is not first responder — which is what a sidebar's selection is showing while you look at the content. |
+| `--surface` | dark: `underPageBackgroundColor`; light: the ground, stepped | In dark this is **exactly** what a native list's rows render at, confirmed by sampling a running app. In light that colour is a mid grey and every other candidate is plain white, so light keeps the stepped ramp. |
+| `--surface-2` | dark: `alternatingContentBackgroundColors[1]` over the panel | The overlay macOS itself paints on every other row of a list. |
+| `--selected` | `unemphasizedSelectedContentBackground`, halved into the panel in dark | The colour AppKit reports for selection is what an opaque list uses; a sidebar renders its selection over a material and lands about halfway between that and the panel. Both ends are system colours, so it tracks the OS — only the ratio is ours. |
 | `--muted` | Dray's own, neutralised | See below. |
 | `--text-base/sm/xs` | `NSFont` system sizes | The family was already right; the sizes were a scale Dray chose. |
 
@@ -477,7 +478,7 @@ chroma removed and its luminance preserved exactly.
   this moved the header off the platform's colour to fix it, which solved the wrong half. A column
   heading and a sidebar's selected item *are* the same kind of surface and should match. So the
   header keeps `--selected` and the text is strengthened instead: `--muted` on macOS clears AA on
-  the lightest thing it has to sit on (4.60:1 on the selection, 6–7:1 on the surfaces).
+  the lightest thing it has to sit on (5.81:1 on the selection, 6–7:1 on the surfaces).
 
 **`verify-contrast.mjs` cannot see any of this.** It checks the generated palette, and these are
 resolved from the OS at run time. Every pair above was computed by hand against the measured system

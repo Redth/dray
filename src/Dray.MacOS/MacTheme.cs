@@ -147,20 +147,44 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
             // proportion the way they do in a native list.
             Add(overrides, "line-strong", NSColor.TertiaryLabel);
 
-            // The panels above the ground. Measured rather than named: in dark,
-            // windowBackground, controlBackground and textBackground all resolve to the SAME
-            // value — a card built from any of them would vanish into the ground — and
-            // underPageBackground is a mid grey in light that would render every panel as a dark
-            // band. None of them is a card.
+            // The panels above the ground.
             //
-            // What is adopted instead is the ground's HUE. The system's is perfectly neutral;
-            // Dray's generated surfaces carry a warm tint (chroma 0.004–0.005 at hue 41), and next
-            // to neutral system chrome that tint is exactly what reads as slightly-off. Dray's own
-            // spacing is kept — these are the steps its palette already takes from its own ground —
-            // so the ramp is Dray's and the hue is the platform's.
-            foreach (var (token, step) in SurfaceSteps)
+            // In DARK the system has a real answer and it is exact: underPageBackgroundColor is
+            // the colour a native list's rows render at, confirmed by sampling a running app
+            // against it. The banding above it is alternatingContentBackgroundColors[1] — the
+            // overlay macOS itself paints on every other row — composited over that.
+            //
+            // In LIGHT it does not: underPageBackgroundColor is a mid grey there, and
+            // windowBackground, controlBackground and textBackground all resolve to plain white,
+            // so a card built from any of them would vanish. Light keeps the stepped ramp, which
+            // is Dray's own spacing applied to the system's neutral ground.
+            //
+            // Asymmetric because the platform is. Each half is measured rather than assumed.
+            if (IsDark)
             {
-                if (Shift(NSColor.WindowBackground, step) is { } surface) overrides[token] = surface;
+                var panel = Rgb(NSColor.UnderPageBackground);
+
+                Add(overrides, "surface", NSColor.UnderPageBackground);
+
+                if (panel is { } ground)
+                {
+                    overrides["surface-2"] = Css(Composite(Alternating(), ground), 1);
+
+                    // The sidebar's selected row. unemphasizedSelectedContentBackground is the
+                    // colour AppKit reports, but a sidebar renders its selection over a material
+                    // rather than opaque, and the result measures roughly halfway between that
+                    // colour and the panel. Both ends are system colours, so this tracks whatever
+                    // the OS does with them; only the ratio is ours.
+                    if (Rgb(NSColor.UnemphasizedSelectedContentBackground) is { } selection)
+                        overrides["selected"] = Css(Blend(selection, ground, 0.5), 1);
+                }
+            }
+            else
+            {
+                foreach (var (token, step) in SurfaceSteps)
+                {
+                    if (Shift(NSColor.WindowBackground, step) is { } surface) overrides[token] = surface;
+                }
             }
 
             // Selection follows the user's system accent, because that is what every native list
@@ -173,7 +197,8 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
             // the user is looking at the content beside it. Dray's tables and its table headers
             // use the same colour, so a selected row here and a selected row in Finder are the
             // same shade rather than two different opinions about selection.
-            Add(overrides, "selected", NSColor.UnemphasizedSelectedContentBackground);
+            // Light takes AppKit's selection colour directly; dark composites it, above.
+            if (!IsDark) Add(overrides, "selected", NSColor.UnemphasizedSelectedContentBackground);
 
             // Quiet text, neutralised to sit beside the system's own.
             //
@@ -187,11 +212,10 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
             // different kind of quiet next to neutral system text.
             //
             // Then one step further from Dray's luminance, which is the part worth explaining. A
-            // column heading sits on --selected here, and that band is lighter than any surface
-            // Dray has — quiet text at Dray's own luminance lands on it at 4.16:1. Rather than
-            // move the heading off the platform's colour, the text is strengthened until it clears
-            // AA on the lightest thing it has to sit on: 4.60:1 on the selection, and 6–7:1 on the
-            // surfaces, where it was 4.9–5.5:1 before. Quiet, and never below the bar.
+            // column heading sits on --selected here, and quiet text at Dray's own luminance lands
+            // on it at 4.44:1 — under the bar. Rather than move the heading off the platform's
+            // colour, the text is strengthened until it clears AA on the lightest thing it has to
+            // sit on: 5.81:1 on the selection and 6–7:1 on the surfaces. Quiet, never below AA.
             overrides["muted"] = IsDark ? Css(181, 181, 181, 1) : Css(95, 95, 95, 1);
         });
 
@@ -284,6 +308,64 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
     }
 
     static int Clamp(int value) => Math.Clamp(value, 0, 255);
+
+    /// <summary>A colour's sRGB components, or null when it cannot be resolved.</summary>
+    static (int R, int G, int B, double A)? Rgb(NSColor color)
+    {
+        try
+        {
+            var rgb = color.UsingColorSpace(NSColorSpace.SRGBColorSpace);
+            if (rgb is null) return null;
+
+            rgb.GetRgba(out var r, out var g, out var b, out var a);
+            return (To255(r), To255(g), To255(b), (double)a);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The overlay macOS paints on every other row of a native list, or nothing.
+    /// <para>
+    /// The second of <c>alternatingContentBackgroundColors</c>. The first is the plain row and is
+    /// the same as the panel, so it is the second that carries the banding.
+    /// </para>
+    /// </summary>
+    static (int R, int G, int B, double A)? Alternating()
+    {
+        try
+        {
+            var colors = NSColor.AlternatingContentBackgroundColors;
+            return colors.Length > 1 ? Rgb(colors[1]) : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Lay a translucent colour over an opaque one.</summary>
+    static (int R, int G, int B) Composite((int R, int G, int B, double A)? over, (int R, int G, int B, double A) under)
+    {
+        if (over is not { } top) return (under.R, under.G, under.B);
+
+        return (
+            Clamp((int)Math.Round(under.R + top.A * (top.R - under.R))),
+            Clamp((int)Math.Round(under.G + top.A * (top.G - under.G))),
+            Clamp((int)Math.Round(under.B + top.A * (top.B - under.B))));
+    }
+
+    /// <summary>Mix two opaque colours, <paramref name="weight"/> of the first.</summary>
+    static (int R, int G, int B) Blend(
+        (int R, int G, int B, double A) first, (int R, int G, int B, double A) second, double weight)
+        => (
+            Clamp((int)Math.Round(weight * first.R + (1 - weight) * second.R)),
+            Clamp((int)Math.Round(weight * first.G + (1 - weight) * second.G)),
+            Clamp((int)Math.Round(weight * first.B + (1 - weight) * second.B)));
+
+    static string Css((int R, int G, int B) c, double a) => Css(c.R, c.G, c.B, a);
 
     static void Add(Dictionary<string, string> map, string token, NSColor color)
     {
