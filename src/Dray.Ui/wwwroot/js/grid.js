@@ -5,6 +5,27 @@
 // as the window narrows, scroll four hundred rows at sixty frames a second — is a lot of table
 // behaviour to write twice, let alone once per page.
 //
+// NOT IN USE. This renders rows correctly but every column comes back with a null width, so cells
+// fall back to their own content and nothing lines up with its heading. What is known, so the next
+// attempt does not repeat it:
+//
+//   - The library is fine. The same column definitions, the same data and the same options, built
+//     into a plain div with an explicit width, produce real widths ([180, 110, 160, …]). The live
+//     one produces nulls. Cloned from the live table's own getColumnDefinitions(), so it is not the
+//     column spec either.
+//   - Not the options: fitColumns, responsiveLayout 'hide', layoutColumnsOnNewData false and a
+//     custom index were each tested in isolation against the control and all produce widths.
+//   - Not the stylesheet (200, 28KB, present in document.styleSheets), not box-sizing, not the
+//     element's height (627px), and not the redraw failing to run.
+//   - The element IS two pixels wide at construction, because `flex: 1 1 auto` resolves its basis
+//     from a table that sizes itself from the container. `flex: 1 1 0` fixes the width — and the
+//     columns are still null, so that was necessary and not sufficient.
+//   - Deferring construction until the element has a width does not fix it either, nor does pinning
+//     an explicit pixel width across the build.
+//
+// The remaining difference between the working control and this is the Blazor-hosted lifecycle,
+// and that is where the next look should start.
+//
 // The trade is that the grid renders its own cells, so a cell cannot be a Blazor component. That is
 // why GridCell is a closed set: every kind of cell in the app is nameable, C# resolves the *values*
 // (a container's state comes from ContainerStatusVocabulary, not from here), and this file only
@@ -133,97 +154,59 @@ export const grid = {
   create(el, spec, dotnet) {
     if (!el) return null;
 
-    const table = new TabulatorFull(el, {
-      data: spec.rows,
-      columns: spec.columns.map(column),
-      index: '__key',
+    const state = { el, dotnet, spec, selected: new Set(), rows: spec.rows || [] };
 
-      // Fill the width, let the user redistribute it, and keep what they did across a data update.
-      layout: 'fitColumns',
-      layoutColumnsOnNewData: false,
-      persistence: false,
+    // Built only once the element has a width.
+    //
+    // UNRESOLVED — see the note at the top of this file. Waiting for a width is necessary and not
+    // sufficient: the columns still come back with null widths.
+    //
+    // Tabulator measures its container when it builds and distributes that width across the
+    // columns. Blazor calls this during OnAfterRenderAsync — before the element has been laid out —
+    // so it measured nothing, every column came out with a null width, and every cell fell back to
+    // its own content. Redrawing afterwards does not recover: the columns are already null.
+    //
+    // Proven rather than guessed: the same columns, data and options built into an element that
+    // already had a width produced [180, 110, 160, …] while the live one produced nulls.
+    const build = () => {
+      if (state.table || el.clientWidth < 10) return false;
 
-      // Drop the least important columns first rather than growing a horizontal scrollbar — the
-      // priorities come from C#, where the judgement about which column matters lives.
-      responsiveLayout: 'hide',
-
-      // Four hundred rows at sixty frames a second is the exit criterion this replaces
-      // <Virtualize> to keep.
-      renderVertical: 'virtual',
-      height: '100%',
-
-      placeholder: spec.placeholder || 'Nothing here',
-      reactiveData: false,
-      selectableRows: false,
-    });
-
-    const state = { table, dotnet, el, selected: new Set() };
-
-    // Selection lives in C# — click, shift-range, Escape and select-all are the page's rules, not
-    // the grid's — so the grid only paints what it is told. rowFormatter runs for every row the
-    // grid renders, which is what keeps the class right as rows scroll in and out.
-    table.on('renderComplete', () => paint(state));
-
-    // One delegated listener rather than one per cell: rows come and go as the grid virtualizes,
-    // and a listener per row would leak every time it scrolled.
-    state.onClick = (e) => {
-      const chipEl = e.target.closest('.grid__chip');
-      if (chipEl) {
-        e.preventDefault();
-        dotnet.invokeMethodAsync('OnCopy', chipEl.dataset.copy);
-        return;
-      }
-
-      const more = e.target.closest('.grid__more');
-      if (more) {
-        e.preventDefault();
-        const box = more.getBoundingClientRect();
-        dotnet.invokeMethodAsync('OnMenu', more.dataset.row, box.left, box.bottom, box.right);
-        return;
-      }
-
-      // A link in a cell is a link: let it navigate rather than treating it as a click on the row.
-      if (e.target.closest('a')) return;
-
-      const row = e.target.closest('.tabulator-row');
-      if (!row) return;
-
-      const key = keyOf(state, row);
-      if (key !== null) dotnet.invokeMethodAsync('OnRow', key, e.metaKey || e.ctrlKey, e.shiftKey);
+      state.table = table(el, state, dotnet);
+      return true;
     };
 
-    state.onDouble = (e) => {
-      if (e.target.closest('a') || e.target.closest('button')) return;
+    if (!build() && typeof ResizeObserver !== 'undefined') {
+      state.waiting = new ResizeObserver(() => {
+        if (!build()) return;
 
-      const row = e.target.closest('.tabulator-row');
-      if (!row) return;
+        state.waiting.disconnect();
+        state.waiting = null;
 
-      const key = keyOf(state, row);
-      if (key !== null) dotnet.invokeMethodAsync('OnOpen', key);
-    };
-
-    el.addEventListener('click', state.onClick);
-    el.addEventListener('dblclick', state.onDouble);
-
-    // A virtualized grid works out how many rows fit from the height it had when it was built, and
-    // Blazor builds this one during the render that gives the page its height — so at construction
-    // it measures nothing and draws nothing. Redrawing when the element's size settles is what
-    // makes the first paint appear, and it is the same thing that keeps it right when the window
-    // is resized or the sidebar collapses.
-    if (typeof ResizeObserver !== 'undefined') {
-      state.observer = new ResizeObserver(() => {
-        if (state.frame) return;
-
-        state.frame = requestAnimationFrame(() => {
-          state.frame = 0;
-          if (el.clientHeight > 0) state.table.redraw(true);
-        });
+        watch(state);
       });
 
-      state.observer.observe(el);
+      state.waiting.observe(el);
+    } else {
+      watch(state);
     }
 
+    listen(state, dotnet);
     return state;
+  },
+
+  /** Replace the data without rebuilding the grid, so sort order and column widths survive. */
+  update(state, rows) {
+    if (!state) return;
+
+    state.rows = rows;
+
+    // Held rather than dropped when the table is still waiting for a width — the first load
+    // usually arrives before the element has one.
+    if (!state.table) return;
+
+    Promise.resolve(state.table.replaceData(rows))
+      .catch(() => {})
+      .then(() => state.table.redraw(true));
   },
 
   /** Paint the selection the page decided on. */
@@ -231,26 +214,15 @@ export const grid = {
     if (!state) return;
 
     state.selected = new Set(keys || []);
-    paint(state);
-  },
-
-  /** Replace the data without rebuilding the grid, so sort order and column widths survive. */
-  update(state, rows) {
-    if (!state?.table) return;
-
-    // redraw(true) rather than plain replaceData, and unconditionally: the row count changing is
-    // exactly when the virtual viewport and the column layout need recomputing, and the first load
-    // goes from nothing to everything. Swallowing the promise's rejection without redrawing left
-    // the grid showing rows whose cells had never been given a width.
-    Promise.resolve(state.table.replaceData(rows))
-      .catch(() => {})
-      .then(() => state.table.redraw(true));
+    if (state.table) paint(state);
   },
 
   destroy(state) {
     if (!state) return;
 
     if (state.frame) cancelAnimationFrame(state.frame);
+
+    state.waiting?.disconnect();
     state.observer?.disconnect();
 
     state.el?.removeEventListener('click', state.onClick);
@@ -259,12 +231,111 @@ export const grid = {
   },
 };
 
+function table(el, state, dotnet) {
+  const spec = state.spec;
+
+  const built = new TabulatorFull(el, {
+    data: state.rows,
+    columns: spec.columns.map(column),
+    index: '__key',
+
+    // Fill the width, let the user redistribute it, and keep what they did across a data update.
+    layout: 'fitColumns',
+    layoutColumnsOnNewData: false,
+    persistence: false,
+
+    // Drop the least important columns first rather than growing a horizontal scrollbar — the
+    // priorities come from C#, where the judgement about which column matters lives.
+    responsiveLayout: 'hide',
+
+    // Four hundred rows at sixty frames a second is the exit criterion this replaces
+    // <Virtualize> to keep.
+    renderVertical: 'virtual',
+    height: '100%',
+
+    placeholder: spec.placeholder || 'Nothing here',
+    reactiveData: false,
+    selectableRows: false,
+  });
+
+  // Selection lives in C# — click, shift-range, Escape and select-all are the page's rules, not
+  // the grid's — so the grid only paints what it is told.
+  built.on('renderComplete', () => paint(state));
+
+  return built;
+}
+
+/** Keep the layout right as the window resizes or the sidebar collapses. */
+function watch(state) {
+  if (typeof ResizeObserver === 'undefined') return;
+
+  state.observer = new ResizeObserver(() => {
+    if (state.frame) return;
+
+    state.frame = requestAnimationFrame(() => {
+      state.frame = 0;
+      if (state.table && state.el.clientWidth > 10) state.table.redraw(true);
+    });
+  });
+
+  state.observer.observe(state.el);
+}
+
+function listen(state, dotnet) {
+  const el = state.el;
+
+  // One delegated listener rather than one per cell: rows come and go as the grid virtualizes,
+  // and a listener per row would leak every time it scrolled.
+  state.onClick = (e) => {
+    const chipEl = e.target.closest('.grid__chip');
+    if (chipEl) {
+      e.preventDefault();
+      dotnet.invokeMethodAsync('OnCopy', chipEl.dataset.copy);
+      return;
+    }
+
+    const more = e.target.closest('.grid__more');
+    if (more) {
+      e.preventDefault();
+      const box = more.getBoundingClientRect();
+      dotnet.invokeMethodAsync('OnMenu', more.dataset.row, box.left, box.bottom, box.right);
+      return;
+    }
+
+    // A link in a cell is a link: let it navigate rather than treating it as a click on the row.
+    if (e.target.closest('a')) return;
+
+    const row = e.target.closest('.tabulator-row');
+    if (!row) return;
+
+    const key = keyOf(state, row);
+    if (key !== null) dotnet.invokeMethodAsync('OnRow', key, e.metaKey || e.ctrlKey, e.shiftKey);
+  };
+
+  state.onDouble = (e) => {
+    if (e.target.closest('a') || e.target.closest('button')) return;
+
+    const row = e.target.closest('.tabulator-row');
+    if (!row) return;
+
+    const key = keyOf(state, row);
+    if (key !== null) dotnet.invokeMethodAsync('OnOpen', key);
+  };
+
+  el.addEventListener('click', state.onClick);
+  el.addEventListener('dblclick', state.onDouble);
+}
+
 function keyOf(state, el) {
+  if (!state.table) return null;
+
   const row = state.table.getRows().find((r) => r.getElement() === el);
   return row ? row.getData().__key : null;
 }
 
 function paint(state) {
+  if (!state.table) return;
+
   for (const row of state.table.getRows()) {
     const el = row.getElement();
     if (el) el.classList.toggle('is-selected', state.selected.has(row.getData().__key));

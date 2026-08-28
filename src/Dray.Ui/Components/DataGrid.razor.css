@@ -8,8 +8,15 @@
    ::deep throughout: Tabulator builds its own DOM inside this element, so none of it carries the
    scope attribute. */
 
+/* flex-basis 0, not auto — and this is the whole reason the grid drew nothing for a while.
+   With `flex: 1 1 auto` the basis resolves from the content, and the content is a table Tabulator
+   sizes *from its container*: the two ask each other how wide they are and settle on two pixels.
+   fitColumns then has two pixels to share out, so no column gets a width, every cell falls back to
+   its own content, and nothing lines up with its heading. A basis of zero takes the width from the
+   space available instead, which is the only question with an answer. */
 .grid {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    min-width: 0;
     min-height: 0;
     height: 100%;
 }
