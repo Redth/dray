@@ -46,9 +46,24 @@
         }
         else
         {
-            @* One card per network rather than a table: the interesting thing about a network is
-               which containers share it, and that is a list inside a row — which a table cannot
-               show without a disclosure per line. *@
+            @* Two views of the same thing, because they answer different questions. The cards say
+               what each network is; the grid says which containers share which — a fact about the
+               pairing rather than either side, and one no list of networks can show. *@
+            <div class="nets__tabs" role="tablist" aria-label="View">
+                @foreach (var tab in Tabs)
+                {
+                    <button type="button" role="tab" class="tab @(_tab == tab ? "is-active" : null)"
+                            aria-selected="@((_tab == tab).ToString().ToLowerInvariant())"
+                            @onclick="() => _tab = tab">@tab</button>
+                }
+            </div>
+
+            @if (_tab == "Topology")
+            {
+                <TopologyGrid Topology="NetworkTopology.Build(Visible)" />
+            }
+            else
+            {
             <div class="nets">
                 @foreach (var network in Visible)
                 {
@@ -115,6 +130,7 @@
                     </section>
                 }
             </div>
+            }
         }
     </div>
 
@@ -125,6 +141,10 @@
 </EngineScope>
 
 @code {
+    static readonly string[] Tabs = ["Networks", "Topology"];
+
+    string _tab = "Networks";
+
     IReadOnlyList<NetworkSummary>? _networks;
     string? _error;
     string? _notice;

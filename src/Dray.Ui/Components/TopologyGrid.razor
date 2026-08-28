@@ -1,0 +1,105 @@
+@* Which containers share which network.
+
+   A grid rather than a node diagram. The question is a set of memberships, and a diagram of it is
+   mostly empty space, unreadable past a dozen containers, and hides the one thing worth seeing —
+   a row with two marks in it. Here every container is one line, each cell carries the address it
+   has on that network rather than an anonymous dot, and it stays legible at fifty rows.
+
+   A container on more than one network is how traffic crosses between them, so those rows are
+   marked and sorted to the top. It is the one fact about networking that never appears on a page
+   listing networks one at a time. *@
+
+@if (Topology.IsEmpty)
+{
+    <EmptyState Icon="IconRef.Network" Title="Nothing is attached"
+                Body="No container is on any of these networks, so there is nothing to lay out yet." />
+}
+else
+{
+    <div class="topo">
+        <p class="topo__legend muted">
+            A cell is the address that container has on that network.
+            @if (Topology.Bridges > 0)
+            {
+                <text>
+                    @Topology.Bridges container@(Topology.Bridges == 1 ? " reaches" : "s reach") more than one —
+                    marked, and listed first.
+                </text>
+            }
+        </p>
+
+        <div class="topo__scroll">
+            <table class="table topo__grid">
+                <thead>
+                    <tr>
+                        <th scope="col">Container</th>
+
+                        @foreach (var network in Topology.Networks)
+                        {
+                            <th scope="col" title="@Title(network)">
+                                @network.Name
+                                @if (network.IsInternal)
+                                {
+                                    <span class="topo__mark" title="No route out of this network">internal</span>
+                                }
+                            </th>
+                        }
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @foreach (var row in Topology.Rows)
+                    {
+                        <tr @key="row.ContainerId" class="@(row.Bridges ? "is-bridge" : null)">
+                            <th scope="row" class="topo__name">
+                                <a href="@($"/containers/{row.ShortId}")">@row.Name</a>
+
+                                @if (row.Bridges)
+                                {
+                                    <span class="topo__mark" title="@($"On {row.Count} networks")">@row.Count nets</span>
+                                }
+                            </th>
+
+                            @foreach (var address in row.Addresses)
+                            {
+                                <td class="topo__cell @(address is null ? null : "is-on")">
+                                    @if (address is null)
+                                    {
+                                        @* Not on this network. An em dash rather than an empty cell:
+                                           a blank reads as missing data, and this is an answer. *@
+                                        <span class="muted" aria-label="not attached">—</span>
+                                    }
+                                    else if (address.Length == 0)
+                                    {
+                                        @* Attached, and the engine did not report an address —
+                                           which is normal on a host network. Different from not
+                                           being attached, and drawn differently. *@
+                                        <span class="mono muted" title="Attached; the engine did not report an address">attached</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="mono">@address</span>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Topology Topology { get; set; } = Topology.Empty;
+
+    static string Title(NetworkSummary network)
+    {
+        var parts = new List<string> { network.Driver };
+
+        if (network.Subnets.Count > 0) parts.Add(string.Join(", ", network.Subnets));
+        if (network.Stack is { Length: > 0 } stack) parts.Add($"stack: {stack}");
+
+        return string.Join(" · ", parts);
+    }
+}

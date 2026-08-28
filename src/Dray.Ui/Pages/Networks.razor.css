@@ -35,3 +35,14 @@
     padding: var(--s3) var(--s4);
     font-size: var(--text-sm);
 }
+
+/* The view switch sits above the cards rather than in the toolbar: it changes what the page below
+   it is, not what the window is showing, and the toolbar is already carrying create, refresh and
+   prune. */
+.nets__tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: var(--s3);
+    border-bottom: 1px solid var(--line);
+}

@@ -1,0 +1,66 @@
+.topo {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+}
+
+.topo__legend {
+    margin: 0;
+    font-size: var(--text-sm);
+}
+
+/* The grid scrolls inside its own box: a host with a dozen networks is wider than the window, and
+   the page must not scroll sideways because of it. */
+.topo__scroll {
+    overflow: auto;
+    max-height: 65vh;
+}
+
+/* The container column stays put while the network columns scroll past it — without it, scrolling
+   right leaves a grid of addresses with nothing saying whose they are. */
+.topo__grid ::deep .topo__name,
+.topo__name {
+    position: sticky;
+    left: 0;
+    z-index: var(--z-sticky);
+    background: var(--surface);
+    text-align: left;
+    font-weight: var(--text-base-weight);
+    white-space: nowrap;
+}
+
+.topo__grid thead th {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+}
+
+.topo__cell {
+    font-size: var(--text-xs);
+}
+
+/* An occupied cell is tinted, so the shape of the grid reads before any of the addresses in it —
+   which is the point of laying it out as a grid at all. */
+.topo__cell.is-on {
+    background: color-mix(in oklab, var(--accent) 16%, transparent);
+}
+
+.topo__grid tbody tr.is-bridge .topo__name {
+    font-weight: 600;
+}
+
+.topo__mark {
+    margin-left: var(--s2);
+    padding: 1px 5px;
+    border-radius: var(--r-sm);
+    background: var(--neutral-tint);
+    color: var(--neutral-ink);
+    font-size: var(--text-xs);
+    font-weight: var(--text-xs-weight);
+    white-space: nowrap;
+}
+
+.topo__grid tbody tr.is-bridge .topo__mark {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+}
