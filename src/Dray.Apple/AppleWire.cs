@@ -243,3 +243,49 @@ internal sealed class AppleStats
     [JsonPropertyName("numProcesses")]
     public int NumProcesses { get; set; }
 }
+
+// ---------------------------------------------------------------- volumes
+
+internal sealed class AppleVolume
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("configuration")]
+    public AppleVolumeConfiguration? Configuration { get; set; }
+}
+
+internal sealed class AppleVolumeConfiguration
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("driver")]
+    public string? Driver { get; set; }
+
+    [JsonPropertyName("format")]
+    public string? Format { get; set; }
+
+    [JsonPropertyName("creationDate")]
+    public DateTimeOffset? CreationDate { get; set; }
+
+    /// <summary>
+    /// The disk image backing the volume, on the host.
+    /// <para>
+    /// Unusually for a container engine, this really is a path on the user's own machine rather
+    /// than one inside a VM — the volume is a file in Application Support.
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("source")]
+    public string? Source { get; set; }
+
+    /// <summary>
+    /// The image's allocated size, not the space it is using. Reported as unknown rather than as
+    /// a 512 GB volume, which is what the sparse file claims.
+    /// </summary>
+    [JsonPropertyName("sizeInBytes")]
+    public long SizeInBytes { get; set; }
+
+    [JsonPropertyName("labels")]
+    public Dictionary<string, string>? Labels { get; set; }
+}

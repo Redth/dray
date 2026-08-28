@@ -275,6 +275,14 @@ engine should not need a second way of being addressed. A composite factory disp
 scheme; `DockerContextReader` finds the CLI by walking `PATH` and offers the host last, so a machine
 with both opens on the Docker-compatible engine where the user's containers already are.
 
+**Four claims in the first version of this section were wrong**, and it is worth recording why:
+they were made by reading the subcommand list rather than by running anything. `container` has a
+`cp` and a full `volume` subcommand, and `exec -i` streams in both directions perfectly well — so
+shells, volume management and writing files into a container all work here, and an earlier
+`AppleRuntime` refused all three. The capability system exists precisely to stop a UI offering what
+an engine cannot do; it is no protection at all when the capability itself is a guess. Every flag
+below is now set from something that was executed.
+
 **Three absences are real, and are reported rather than filled in.**
 
 - **No event stream.** There is no `events` subcommand. `SupportsEvents` is false and
@@ -303,12 +311,25 @@ with both opens on the Docker-compatible engine where the user's containers alre
 - The image descriptor's `size` is the **manifest's** size — 9218 bytes for alpine. Reported as
   unreported rather than as a nine-kilobyte image.
 
-**Capabilities do the work.** `RuntimeCapabilities` gained `SupportsPause`, `SupportsShell`,
-`SupportsRename`, `SupportsVolumes`, `SupportsNetworks`, `SupportsStoppedFileAccess` and
-`SupportsLogMetadata`. Each is set from something measured, and the UI reads them to decide what to
-offer: `ContainerActions.For` filters pause, the Terminal tab is absent, Rename is absent, the log
-toolbar drops two toggles wired to nothing, and Volumes / Networks / Stacks explain that the concept
-does not exist here rather than showing an empty list that reads as "none yet".
+**What is genuinely missing here** is pause, rename, manageable networks, log metadata, and any
+access to a *stopped* container's filesystem — that last one measured: `cp` and `exec` both refuse a
+container that is not running. `RuntimeCapabilities` carries a flag for each and the UI reads them,
+so `ContainerActions.For` filters pause, Rename is absent, the log toolbar drops two toggles wired
+to nothing, and the Networks page explains itself rather than showing an empty list that reads as
+"none yet".
+
+**Two more things this engine does that Docker does not have to think about.**
+
+- **`container cp` into a mounted volume silently does nothing.** It returns exit code 0 and writes
+  no file — verified by copying one in, getting success, and finding the directory still empty.
+  `WriteFileAsync` therefore pipes bytes into `cat` inside the container instead, which works for
+  volumes and ordinary paths alike. A file editor that discards a save without saying so is the
+  worst failure this application could have, and this is the second silent-success bug this engine
+  has produced (see the version-prefix one in §2.7).
+- **A volume attaches to one virtual machine at a time.** A volume here is an ext4 disk image, so a
+  volume a running container holds cannot also be opened for browsing — which Docker allows. The
+  engine reports it as "The storage device attachment is invalid", a sentence about nothing the user
+  did, so Dray says which container is holding it instead.
 
 The principle is the one `ContainerAction.cs` already states for state filtering: *an action offered
 in the wrong state is either a no-op the user does not understand or an error the engine has to

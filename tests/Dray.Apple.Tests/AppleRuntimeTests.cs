@@ -51,12 +51,20 @@ public class AppleRuntimeTests
         // Each of these hides a control that would otherwise render and fail. Asserted together
         // because they are one decision: report what the engine cannot do, do not catch it later.
         Assert.False(runtime.Capabilities.SupportsPause);
-        Assert.False(runtime.Capabilities.SupportsShell);
         Assert.False(runtime.Capabilities.SupportsRename);
-        Assert.False(runtime.Capabilities.SupportsVolumes);
         Assert.False(runtime.Capabilities.SupportsNetworks);
-        Assert.False(runtime.Capabilities.SupportsStoppedFileAccess);
         Assert.False(runtime.Capabilities.SupportsLogMetadata);
+
+        // These two were reported unsupported on the strength of a glance at the subcommand list,
+        // and testing them showed otherwise: `exec -i` streams in both directions and
+        // `container volume` manages volumes properly. Asserted so the claim cannot regress to the
+        // guess it started as.
+        Assert.True(runtime.Capabilities.SupportsShell);
+        Assert.True(runtime.Capabilities.SupportsVolumes);
+
+        // This one was checked rather than assumed: `cp` and `exec` both refuse a container that
+        // is not running.
+        Assert.False(runtime.Capabilities.SupportsStoppedFileAccess);
 
         // Stats do work here, at a slower cadence. Reporting them absent would empty two columns
         // that have real numbers behind them.
@@ -71,7 +79,99 @@ public class AppleRuntimeTests
         // Containers do report the network they joined, so a "default" row could be derived. It
         // would be a row the user cannot inspect, connect to, disconnect from or remove.
         Assert.Empty(await runtime.ListNetworksAsync(Ct));
-        Assert.Empty(await runtime.ListVolumesAsync(Ct));
+    }
+
+    // ---------------------------------------------------------------- volumes
+
+    [Fact]
+    public async Task VolumesAreListedWithTheirRealMountPoint()
+    {
+        var (runtime, _) = await ConnectAsync(Connected()
+            .Returns("volume ls", AppleFixtures.VolumesJson)
+            .Returns("ls --all", AppleFixtures.ListJson));
+
+        var volume = Assert.Single(await runtime.ListVolumesAsync(Ct));
+
+        Assert.Equal("dray-vol-check", volume.Name);
+        Assert.Equal("local", volume.Driver);
+
+        // Unusually for a container engine this is a path on the user's own machine, not one
+        // inside a VM they cannot reach.
+        Assert.Contains("Application Support", volume.Mountpoint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AVolumesSizeIsUnknownRatherThanTheHalfTerabyteTheImageClaims()
+    {
+        var (runtime, _) = await ConnectAsync(Connected()
+            .Returns("volume ls", AppleFixtures.VolumesJson)
+            .Returns("ls --all", AppleFixtures.ListJson));
+
+        // sizeInBytes is the disk image's allocated size — 549755813888 for an empty volume,
+        // because the file is sparse. Reporting it would say every volume is 512 GB.
+        Assert.Null(Assert.Single(await runtime.ListVolumesAsync(Ct)).SizeBytes);
+    }
+
+    [Fact]
+    public async Task AVolumeKnowsWhichContainersHoldIt()
+    {
+        var (runtime, _) = await ConnectAsync(Connected()
+            .Returns("volume ls", AppleFixtures.VolumesJson)
+            .Returns("ls --all", AppleFixtures.ContainerWithVolumeJson));
+
+        // The engine does not report users, so this is derived from the containers' own mounts —
+        // and "nothing is holding this" is the question worth answering before a delete.
+        Assert.Equal(["shop-db-1"], Assert.Single(await runtime.ListVolumesAsync(Ct)).UsedBy);
+    }
+
+    [Fact]
+    public async Task AHostPathMountIsNotMistakenForAVolume()
+    {
+        var (runtime, _) = await ConnectAsync(Connected()
+            .Returns("volume ls", AppleFixtures.VolumesJson)
+            .Returns("ls --all", AppleFixtures.ComposeContainerJson));
+
+        // The compose fixture binds /Users/redth/site. A leading slash means a host path, and
+        // counting it as a volume would attribute someone's folder to a named volume.
+        Assert.Empty(Assert.Single(await runtime.ListVolumesAsync(Ct)).UsedBy);
+    }
+
+    // ---------------------------------------------------------------- writing
+
+    [Fact]
+    public async Task WritingAFileGoesThroughTheContainerRatherThanThroughCopy()
+    {
+        var runner = Connected().Returns("exec", "");
+        var (runtime, _) = await ConnectAsync(runner);
+
+        byte[] content = [0x61, 0x00, 0x62];
+        await runtime.WriteFileAsync("web", "/etc/nginx/nginx.conf", content, Ct);
+
+        // `container cp` into a path inside a mounted volume returns exit code 0 and writes
+        // nothing — verified on 1.3.0. A file editor that silently discards a save is the worst
+        // failure in this app, so the write goes through the container's own filesystem view.
+        var invocation = Assert.Single(runner.Invocations, i => i.StartsWith("exec", StringComparison.Ordinal));
+        Assert.Contains("cat > '/etc/nginx/nginx.conf'", invocation, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Invocations, i => i.StartsWith("cp ", StringComparison.Ordinal));
+
+        // Raw bytes: a file being edited here may be a certificate, and encoding it through a
+        // string would corrupt anything that is not valid UTF-16.
+        Assert.Equal(content, Assert.Single(runner.Written));
+    }
+
+    [Fact]
+    public async Task APathWithAnApostropheIsQuotedRatherThanSplit()
+    {
+        var runner = Connected().Returns("exec", "");
+        var (runtime, _) = await ConnectAsync(runner);
+
+        await runtime.WriteFileAsync("web", "/tmp/it's here.txt", [1], Ct);
+
+        var invocation = Assert.Single(runner.Invocations, i => i.StartsWith("exec", StringComparison.Ordinal));
+
+        // The shell must see one argument, not three. A single-quoted string cannot contain a
+        // single quote, so the apostrophe closes it, escapes one, and reopens: '…it'\''s here…'
+        Assert.Contains("""'/tmp/it'\''s here.txt'""", invocation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -375,14 +475,27 @@ public class AppleRuntimeTests
     }
 
     [Fact]
-    public async Task OpeningAShellSaysWhyItCannotAndWhatToRunInstead()
+    public async Task OpeningAShellInAStoppedContainerSaysToStartItFirst()
     {
-        var (runtime, _) = await ConnectAsync();
+        var (runtime, _) = await ConnectAsync(Connected().Returns("ls", AppleFixtures.ListJson));
+
+        // Checked up front rather than inferred from an exit code: "that container is not running"
+        // is a sentence, and a non-zero status is not.
+        var error = await Assert.ThrowsAsync<NoShellException>(
+            () => runtime.StartExecAsync("dray-apple-exit", new ExecOptions(), Ct));
+
+        Assert.Contains("not running", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpeningAShellInAContainerThatIsGoneSaysSo()
+    {
+        var (runtime, _) = await ConnectAsync(Connected().Returns("ls", AppleFixtures.ListJson));
 
         var error = await Assert.ThrowsAsync<NoShellException>(
-            () => runtime.StartExecAsync("dray-apple-test", new ExecOptions(), Ct));
+            () => runtime.StartExecAsync("ghost", new ExecOptions(), Ct));
 
-        Assert.Contains("container exec -it dray-apple-test sh", error.Message, StringComparison.Ordinal);
+        Assert.Contains("no longer exists", error.Message, StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------- images and totals

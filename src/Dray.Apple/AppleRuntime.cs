@@ -83,12 +83,19 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
             SupportsCompose = false,
             SupportsBuildKit = false,
             SupportsPause = false,
-            SupportsShell = false,
             SupportsRename = false,
-            SupportsVolumes = false,
             SupportsNetworks = false,
-            SupportsStoppedFileAccess = false,
             SupportsLogMetadata = false,
+
+            // `container exec -i` streams in both directions, and `container volume` manages
+            // volumes properly. Both were reported unsupported here on the strength of a glance at
+            // the subcommand list; testing them showed otherwise.
+            SupportsShell = true,
+            SupportsVolumes = true,
+
+            // This one is real and was checked: `cp` and `exec` both refuse a container that is not
+            // running, so a stopped container's filesystem is genuinely unreachable.
+            SupportsStoppedFileAccess = false,
 
             // Every container is its own lightweight VM, so nothing here runs as root on the host.
             IsRootless = true,
@@ -600,17 +607,33 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
 
     // ---------------------------------------------------------------- exec and files
 
+    /// <summary>
+    /// Open a shell through <c>container exec -i</c>.
+    /// <para>
+    /// An earlier version of this class refused, on the grounds that the CLI's exec was "a terminal
+    /// command rather than a stream". That was asserted rather than tested, and it was wrong:
+    /// <c>-i</c> keeps stdin open and the process streams in both directions perfectly well.
+    /// </para>
+    /// </summary>
     public async Task<IExecSession> StartExecAsync(
         string containerId, ExecOptions options, CancellationToken ct = default)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
+        // Checked up front rather than inferred from a failure, the same way the Docker runtime
+        // does it: "that container is not running" is a sentence, and an exit code is not.
+        var containers = await ListContainersAsync(true, ct).ConfigureAwait(false);
 
-        // The CLI's exec is interactive against a terminal, not a bidirectional stream Dray can
-        // attach to. Rather than half-implement a shell that cannot take input, this says so — the
-        // Files tab still works, which is the useful half.
-        throw new NoShellException(
-            "Dray cannot open a shell in Apple's runtime yet: its exec is a terminal command rather "
-            + "than a stream. Use `container exec -it " + containerId + " sh` in a terminal.");
+        if (containers.FirstOrDefault(c => c.Id == containerId) is not { } container)
+            throw new NoShellException("That container no longer exists.");
+
+        if (container.State != DockerState.Running)
+        {
+            throw new NoShellException(
+                "This container is not running, so there is nothing to run a shell in. "
+                + "Start it first.");
+        }
+
+        return await AppleExecSession.StartAsync(_runner, Executable, containerId, options, ct)
+            .ConfigureAwait(false);
     }
 
     public async Task<DirectoryListing> ListDirectoryAsync(
@@ -642,24 +665,133 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
         return System.Text.Encoding.UTF8.GetBytes(result.StandardOutput);
     }
 
-    public Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default)
-        => throw new RuntimeConnectionException(
-            "Dray cannot write into a container on Apple's runtime yet: its copy command works on "
-            + "paths rather than on a stream.");
+    /// <summary>
+    /// Write a file back, by piping the bytes into <c>cat</c> inside the container.
+    /// <para>
+    /// <b>Not <c>container cp</c>, and that is not a style preference.</b> Copying into a path that
+    /// lies inside a <i>mounted volume</i> returns exit code 0 and writes nothing — verified on
+    /// 1.3.0 by copying a file in, getting success, and finding the directory still empty. A file
+    /// editor that silently discards what the user saved is the worst failure in this application,
+    /// so the write goes through the container's own filesystem view instead, where it works for
+    /// volumes and ordinary paths alike.
+    /// </para>
+    /// <para>
+    /// Raw bytes, not text: a file being edited here may be a certificate or an image, and
+    /// encoding it through a string would corrupt anything that is not valid UTF-16. Verified
+    /// byte-exact with a NUL and a multi-byte character in the payload.
+    /// </para>
+    /// </summary>
+    public async Task WriteFileAsync(
+        string containerId, string path, byte[] content, CancellationToken ct = default)
+    {
+        // Single-quoted with any embedded quote escaped, so a path with a space or an apostrophe
+        // reaches the shell as one argument rather than several.
+        var quoted = "'" + path.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+
+        var result = await _runner.RunWithBytesAsync(
+            Executable,
+            ["exec", "--interactive", containerId, "sh", "-c", $"cat > {quoted}"],
+            content,
+            ct).ConfigureAwait(false);
+
+        if (result.ExitCode != 0) throw Failure("write that file", result);
+    }
 
     // ---------------------------------------------------------------- not this engine's shape
 
-    public Task<IReadOnlyList<VolumeSummary>> ListVolumesAsync(CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<VolumeSummary>>([]);
+    // ---------------------------------------------------------------- volumes
 
-    public Task<IVolumeSession> OpenVolumeAsync(string volumeName, CancellationToken ct = default)
-        => throw new RuntimeConnectionException("Apple's runtime has no managed volumes.");
+    /// <summary>
+    /// <c>container volume ls</c>.
+    /// <para>
+    /// This engine does manage volumes, and an earlier version of this class wrongly said it did
+    /// not — the claim was made from the subcommand list and never tested. It is worth naming
+    /// because it is the exact failure the capability system exists to prevent, made by the code
+    /// that implements it.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<VolumeSummary>> ListVolumesAsync(CancellationToken ct = default)
+    {
+        var result = await RunAsync(["volume", "ls", "--format", "json"], ct).ConfigureAwait(false);
 
-    public Task CreateVolumeAsync(string name, CancellationToken ct = default)
-        => throw new RuntimeConnectionException("Apple's runtime has no managed volumes.");
+        if (result.ExitCode != 0) throw Failure("list volumes", result);
 
-    public Task RemoveVolumeAsync(string name, bool force = false, CancellationToken ct = default)
-        => throw new RuntimeConnectionException("Apple's runtime has no managed volumes.");
+        // Who uses what comes from the containers' own mount lists, which only `ls` carries — the
+        // volume record does not say. One call for the whole page rather than one per volume.
+        var users = await VolumeUsersAsync(ct).ConfigureAwait(false);
+
+        return
+        [
+            .. Deserialize<List<AppleVolume>>(result.StandardOutput)
+                .Select(v => MapVolume(v, users))
+                .OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase),
+        ];
+    }
+
+    /// <summary>
+    /// Volume name to the containers mounting it.
+    /// <para>
+    /// Derived from the containers rather than asked of the volume: the engine does not report
+    /// users, and "nothing is holding this" is the question worth answering before a delete.
+    /// </para>
+    /// </summary>
+    async Task<ILookup<string, string>> VolumeUsersAsync(CancellationToken ct)
+    {
+        var result = await RunAsync(["ls", "--all", "--format", "json"], ct).ConfigureAwait(false);
+
+        if (result.ExitCode != 0) return Array.Empty<(string, string)>().ToLookup(p => p.Item1, p => p.Item2);
+
+        return Deserialize<List<AppleContainer>>(result.StandardOutput)
+            .SelectMany(c => (c.Configuration?.Mounts ?? [])
+                .Where(m => m.Source is { Length: > 0 } && !m.Source.StartsWith('/'))
+                .Select(m => (Volume: m.Source!, Container: c.Id)))
+            .ToLookup(p => p.Volume, p => p.Container, StringComparer.Ordinal);
+    }
+
+    internal static VolumeSummary MapVolume(AppleVolume volume, ILookup<string, string> users)
+    {
+        var name = volume.Configuration?.Name ?? volume.Id;
+
+        return new VolumeSummary
+        {
+            Name = name,
+            Driver = volume.Configuration?.Driver ?? "local",
+            Created = volume.Configuration?.CreationDate,
+
+            // Genuinely a path on the user's own machine here — the volume is a disk image in
+            // Application Support, not a directory inside a VM the user cannot reach.
+            Mountpoint = volume.Configuration?.Source,
+
+            // sizeInBytes is the image's allocated size — half a terabyte for an empty volume,
+            // because the file is sparse. Reporting it would say every volume is enormous.
+            SizeBytes = null,
+
+            Labels = volume.Configuration?.Labels is { Count: > 0 } labels
+                ? new Dictionary<string, string>(labels, StringComparer.Ordinal)
+                : new Dictionary<string, string>(StringComparer.Ordinal),
+
+            UsedBy = [.. users[name].OrderBy(c => c, StringComparer.OrdinalIgnoreCase)],
+        };
+    }
+
+    public async Task CreateVolumeAsync(string name, CancellationToken ct = default)
+    {
+        var result = await RunAsync(["volume", "create", name], ct).ConfigureAwait(false);
+        if (result.ExitCode != 0) throw Failure("create the volume", result);
+    }
+
+    public async Task RemoveVolumeAsync(string name, bool force = false, CancellationToken ct = default)
+    {
+        var result = await RunAsync(["volume", "delete", name], ct).ConfigureAwait(false);
+        if (result.ExitCode != 0) throw Failure("remove the volume", result);
+    }
+
+    /// <summary>
+    /// Browse a volume by mounting it into a throwaway container, the same trick
+    /// <c>DockerVolumeSession</c> uses: a volume has no filesystem API of its own on any engine.
+    /// </summary>
+    public async Task<IVolumeSession> OpenVolumeAsync(string volumeName, CancellationToken ct = default)
+        => await AppleVolumeSession.OpenAsync(this, _runner, Executable, volumeName, ct).ConfigureAwait(false);
 
     public Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<ImageLayer>>([]);

@@ -70,3 +70,14 @@
 .term__find:focus {
     width: 20ch;
 }
+
+/* Says the shell has no pseudo-terminal. Muted rather than a warning: it is a property of the
+   engine, not something the user did or can fix. */
+.term__note {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    padding: 1px var(--s2);
+    cursor: help;
+}

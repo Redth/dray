@@ -353,9 +353,19 @@ themselves, and a container stopped from a terminal reaching the list through po
 refresh. A layout sweep over every screen in dark mode found no overflow, no clipping, no
 horizontal scroll and no invisible text.
 
-Still outstanding: writing files into a container (the CLI copies paths, not streams) and an
-attachable shell (its `exec` is a terminal command). Both are reported as unsupported rather than
-half-implemented.
+**Both "outstanding" items turned out not to be outstanding, and that is the lesson of this
+phase.** Writing files and an attachable shell were both reported unsupported on the strength of
+reading the subcommand list — never tested. `container` has `cp`, has a full `volume` subcommand,
+and `exec -i` streams in both directions. Volumes, shells and file writing all work here, and are
+now implemented and verified live.
+
+The capability system exists to stop the UI offering what an engine cannot do. It is no protection
+at all when the capability itself is a guess, and three of seven flags were guesses.
+
+What is genuinely absent, having been run rather than read: pause, rename, manageable networks, log
+timestamps and stream separation, exit codes, and any access to a *stopped* container's filesystem.
+One engine bug found on the way: `container cp` into a mounted volume returns success and writes
+nothing, so writes go through `exec` instead.
 
 ## Phase 8.5 — Composing a container is the hard part
 

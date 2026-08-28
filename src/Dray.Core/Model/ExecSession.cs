@@ -34,6 +34,21 @@ public interface IExecSession : IAsyncDisposable
     /// <summary>What actually started, e.g. <c>/bin/bash</c>. Shown so the user knows where they are.</summary>
     string Command { get; }
 
+    /// <summary>
+    /// Whether a pseudo-terminal is attached.
+    /// <para>
+    /// False changes what the shell does in a way the user will notice immediately: a shell with no
+    /// PTY prints no prompt and <b>does not echo what is typed</b>, so the terminal looks dead
+    /// while it is in fact working. The view echoes locally in that case rather than leaving
+    /// someone typing into an apparently broken box.
+    /// </para>
+    /// <para>
+    /// Apple's <c>container exec</c> is the case: it has a <c>-t</c> flag, but it wants a real
+    /// terminal on the other end and hangs indefinitely when given a pipe — verified.
+    /// </para>
+    /// </summary>
+    bool HasPseudoTerminal => true;
+
     /// <summary>Output as it arrives, already decoded. Ends when the process exits or the session is disposed.</summary>
     IAsyncEnumerable<string> ReadAsync(CancellationToken ct = default);
 

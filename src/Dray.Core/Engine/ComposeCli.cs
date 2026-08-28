@@ -152,6 +152,18 @@ public interface IProcessRunner
     Task<ProcessResult> RunWithInputAsync(
         string executable, IReadOnlyList<string> arguments, string input, CancellationToken ct);
 
+    /// <summary>
+    /// Run a program, writing raw bytes to its stdin.
+    /// <para>
+    /// Separate from the string overload because a file's contents are not text. Encoding them
+    /// through a string would corrupt anything that is not valid UTF-16 — an image, a binary, a
+    /// certificate — and a file editor that silently mangles what it writes is worse than one that
+    /// cannot write at all.
+    /// </para>
+    /// </summary>
+    Task<ProcessResult> RunWithBytesAsync(
+        string executable, IReadOnlyList<string> arguments, byte[] input, CancellationToken ct);
+
     IAsyncEnumerable<ComposeOutput> StreamAsync(
         string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct);
 }
@@ -178,6 +190,40 @@ public sealed class SystemProcessRunner : IProcessRunner
 
         var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
         var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
+
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            throw;
+        }
+
+        return new ProcessResult(
+            process.ExitCode,
+            await stdout.ConfigureAwait(false),
+            await stderr.ConfigureAwait(false));
+    }
+
+    public async Task<ProcessResult> RunWithBytesAsync(
+        string executable, IReadOnlyList<string> arguments, byte[] input, CancellationToken ct)
+    {
+        using var process = Start(executable, arguments, null, redirectInput: true);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(ProbeTimeout);
+
+        var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
+
+        // The base stream, not the writer: StandardInput is a StreamWriter and would encode these
+        // bytes as text on the way out, which is the whole thing this overload exists to avoid.
+        await process.StandardInput.BaseStream.WriteAsync(input, timeout.Token).ConfigureAwait(false);
+        await process.StandardInput.BaseStream.FlushAsync(timeout.Token).ConfigureAwait(false);
+
+        process.StandardInput.Close();
 
         try
         {

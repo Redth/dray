@@ -44,6 +44,16 @@ public sealed class ScriptedProcessRunner : IProcessRunner
         string executable, IReadOnlyList<string> arguments, string input, CancellationToken ct)
         => RunAsync(executable, arguments, null, ct);
 
+    /// <summary>Bytes written to stdin, so a test can assert what was actually sent.</summary>
+    public List<byte[]> Written { get; } = [];
+
+    public Task<ProcessResult> RunWithBytesAsync(
+        string executable, IReadOnlyList<string> arguments, byte[] input, CancellationToken ct)
+    {
+        Written.Add(input);
+        return RunAsync(executable, arguments, null, ct);
+    }
+
     public async IAsyncEnumerable<ComposeOutput> StreamAsync(
         string executable,
         IReadOnlyList<string> arguments,

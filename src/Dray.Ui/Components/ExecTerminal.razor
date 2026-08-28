@@ -13,6 +13,17 @@
         @if (_session is { } session)
         {
             <span class="term__shell mono">@session.Command</span>
+
+            @if (!session.HasPseudoTerminal)
+            {
+                @* Worth saying, because the difference is visible and would otherwise read as a
+                   fault: no prompt appears, and anything that draws a full-screen interface has
+                   nothing to draw on. What is typed is echoed by Dray, not by the shell. *@
+                <span class="term__note"
+                      title="This engine cannot attach a terminal to an exec, so the shell prints no prompt and does not echo. Dray echoes what you type. Full-screen programs like top and vim will not draw correctly.">
+                    no terminal
+                </span>
+            }
         }
 
         @if (_exitCode is { } code)
@@ -158,6 +169,11 @@
 
         try
         {
+            // A shell with no pseudo-terminal does not echo, so without this the user types and
+            // the screen stays blank — the terminal looks broken while it is in fact working.
+            // The shell still receives the same bytes; only the display is local.
+            if (!session.HasPseudoTerminal) await EchoAsync(data);
+
             await session.WriteAsync(data);
         }
         catch (Exception ex)
@@ -165,6 +181,48 @@
             _error = ex.Message;
             StateHasChanged();
         }
+    }
+
+    /// <summary>
+    /// Draw what was typed, the way a terminal driver would.
+    /// <para>
+    /// Only the three cases that matter for a line of input. Anything more — arrow keys, history,
+    /// line editing — belongs to a real terminal driver, and pretending to be one would produce a
+    /// display that disagreed with the shell about what the line contains.
+    /// </para>
+    /// </summary>
+    async Task EchoAsync(string data)
+    {
+        if (_module is null || _terminal is null) return;
+
+        var echoed = new System.Text.StringBuilder(data.Length);
+
+        foreach (var c in data)
+        {
+            switch (c)
+            {
+                // Enter arrives as a carriage return; a terminal needs both to start a new line.
+                case '\r':
+                case '\n':
+                    echoed.Append("\r\n");
+                    break;
+
+                // Backspace and delete: move left, paint a space over the character, move back.
+                case '\b':
+                case '\u007f':
+                    echoed.Append("\b \b");
+                    break;
+
+                default:
+                    // Control characters are not printable and echoing them would draw rubbish.
+                    // The shell still gets them.
+                    if (!char.IsControl(c)) echoed.Append(c);
+                    break;
+            }
+        }
+
+        if (echoed.Length > 0)
+            await _module.InvokeVoidAsync("terminal.write", _terminal, echoed.ToString());
     }
 
     /// <summary>

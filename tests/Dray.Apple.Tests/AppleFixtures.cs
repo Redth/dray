@@ -38,6 +38,16 @@ public static class AppleFixtures
         [{"configuration":{"creationDate":"2026-06-16T12:00:00Z","descriptor":{"digest":"sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b","mediaType":"application/vnd.oci.image.index.v1+json","size":9218},"name":"docker.io/library/alpine:latest"},"id":"28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"}]
         """;
 
+    /// <summary>Captured from <c>container volume ls --format json</c> after creating one volume.</summary>
+    public const string VolumesJson = """
+        [{"configuration":{"creationDate":"2026-08-28T00:27:48Z","driver":"local","format":"ext4","labels":{},"name":"dray-vol-check","options":{},"sizeInBytes":549755813888,"source":"/Users/redth/Library/Application Support/com.apple.container/volumes/dray-vol-check/volume.img"},"id":"dray-vol-check"}]
+        """;
+
+    /// <summary>A container mounting a named volume, for the "who is holding this" lookup.</summary>
+    public const string ContainerWithVolumeJson = """
+        [{"configuration":{"creationDate":"2026-08-28T00:30:00Z","id":"shop-db-1","image":{"reference":"docker.io/library/postgres:16"},"initProcess":{"arguments":[],"environment":[],"executable":"postgres","user":{"id":{"gid":0,"uid":0}},"workingDirectory":"/"},"labels":{},"mounts":[{"source":"dray-vol-check","destination":"/var/lib/postgresql/data"}],"networks":[{"network":"default"}],"publishedPorts":[],"resources":{"cpus":4,"memoryInBytes":1073741824}},"id":"shop-db-1","status":{"startedDate":"2026-08-28T00:30:01Z","state":"running"}}]
+        """;
+
     public const string StatsJson = """
         [{"blockReadBytes":1679360,"blockWriteBytes":0,"cpuUsageUsec":16577908,"id":"dray-apple-load","memoryLimitBytes":1073741824,"memoryUsageBytes":17707008,"networkRxBytes":2396,"networkTxBytes":602,"numProcesses":2}]
         """;
