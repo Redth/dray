@@ -1,0 +1,98 @@
+/* The table owns the scrolling so its header can stay put while the body moves. */
+.dt {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    position: relative;
+}
+
+.dt__table {
+    /* Fixed, so a dragged column keeps the width it was given rather than being renegotiated by
+       whatever the longest cell happens to be. Columns with no explicit width still share what is
+       left, which is the auto-fit behaviour. */
+    table-layout: fixed;
+    width: 100%;
+}
+
+.dt__head {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    background: var(--selected, var(--surface-2));
+}
+
+/* The heading is the sort control. A separate button beside it would be a second thing to aim at
+   for the same job. */
+.dt__sort {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+}
+
+.dt__sort:hover {
+    color: var(--ink);
+}
+
+.dt__sort:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.dt__arrow {
+    color: var(--ink);
+}
+
+/* The drag target sits on the column's trailing edge, invisible until pointed at — a row of
+   visible grips is a lot of furniture for something used occasionally. */
+.dt__grip {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 7px;
+    height: 100%;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.dt__grip:hover {
+    background: var(--line-strong);
+}
+
+.dt__head {
+    position: relative;
+}
+
+/* Short on screen, whole on the clipboard. Reads as the value it is until pointed at. */
+.dt__chip {
+    padding: 1px var(--s2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    cursor: pointer;
+}
+
+.dt__chip:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
+}
+
+.dt__chip:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}
+
+.dt__empty {
+    padding: var(--s7) var(--s5);
+    text-align: center;
+    font-size: var(--text-base);
+}

@@ -1,0 +1,266 @@
+@typeparam TRow
+@inject IShellBridge Shell
+
+@* Every list in Dray: sortable, resizable, and rendered by Blazor.
+
+   Takes the same GridColumn definitions as everything else, so what a column means and what order
+   columns give way in stay in Core where they are tested. What is different from a JS grid is that
+   a cell is a component — StatePill draws a state here, the same one that draws it everywhere —
+   which is what keeps "one component renders container state" true (DESIGN.md 2.4).
+
+   Sorting is C#, because the data is already here and comparing two values is not the sort of thing
+   worth a round trip. Resizing is a pointer drag on the header, which is all a resize is: the
+   browser already lays a table out, and asking it to do that with one column pinned is one style
+   attribute. *@
+
+<div class="dt" @onpointermove="OnDragAsync" @onpointerup="EndDrag" @onpointerleave="EndDrag">
+    <table class="table dt__table">
+        <thead>
+            <tr>
+                @foreach (var column in Columns)
+                {
+                    var captured = column;
+
+                    <th class="@HeadClass(column)" style="@Width(column)"
+                        aria-sort="@AriaSort(column)">
+                        @if (column.Sortable && column.Cell != GridCell.Actions)
+                        {
+                            <button type="button" class="dt__sort" title="@(column.Tooltip ?? $"Sort by {column.Title}")"
+                                    @onclick="() => SortBy(captured)">
+                                <span>@column.Title</span>
+
+                                @* The arrow is only on the column doing the sorting. A row of
+                                   permanent grey chevrons reads as decoration and stops saying
+                                   anything about which column is in charge. *@
+                                @if (_sort == column.Field)
+                                {
+                                    <Icon Name="@(_descending ? IconRef.ChevronDown : IconRef.ChevronRight)"
+                                          Size="IconSize.Sm" Class="dt__arrow" />
+                                }
+                            </button>
+                        }
+                        else
+                        {
+                            <span>@column.Title</span>
+                        }
+
+                        @if (column.Cell != GridCell.Actions && column != Columns[^1])
+                        {
+                            <span class="dt__grip" title="Drag to resize"
+                                  @onpointerdown="e => StartDrag(captured, e)"
+                                  @onpointerdown:stopPropagation></span>
+                        }
+                    </th>
+                }
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var row in Sorted)
+            {
+                var key = Key(row);
+
+                <tr @key="key"
+                    class="@(Selected.Contains(key) ? "is-selected" : null)"
+                    aria-selected="@(Selected.Contains(key) ? "true" : "false")"
+                    @onclick="e => OnRowClick.InvokeAsync((key, e.CtrlKey || e.MetaKey, e.ShiftKey))"
+                    @ondblclick="() => OnRowOpen.InvokeAsync(key)">
+
+                    @foreach (var column in Columns)
+                    {
+                        <td class="@CellClass(column)">
+                            @Cell(column, row)
+                        </td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    @if (Sorted.Count == 0)
+    {
+        <div class="dt__empty muted">@Placeholder</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<GridColumn> Columns { get; set; } = [];
+
+    [Parameter, EditorRequired] public IReadOnlyList<TRow> Rows { get; set; } = [];
+
+    /// <summary>The cell values for one row, keyed by column field.</summary>
+    [Parameter, EditorRequired] public Func<TRow, IReadOnlyDictionary<string, object?>> Values { get; set; } = default!;
+
+    /// <summary>What identifies a row — for selection, and for the actions menu.</summary>
+    [Parameter, EditorRequired] public Func<TRow, string> Key { get; set; } = default!;
+
+    [Parameter] public Func<TRow, IReadOnlyList<RowAction>>? ActionsFor { get; set; }
+
+    [Parameter] public EventCallback<(string Row, string Action)> OnAction { get; set; }
+
+    [Parameter] public IReadOnlyCollection<string> Selected { get; set; } = [];
+
+    [Parameter] public EventCallback<(string Row, bool Toggle, bool Range)> OnRowClick { get; set; }
+
+    [Parameter] public EventCallback<string> OnRowOpen { get; set; }
+
+    [Parameter] public string Placeholder { get; set; } = "Nothing here";
+
+    string? _sort;
+    bool _descending;
+
+    readonly Dictionary<string, double> _widths = new(StringComparer.Ordinal);
+
+    GridColumn? _dragging;
+    double _dragFrom;
+    double _dragWidth;
+
+    IReadOnlyList<TRow> Sorted
+    {
+        get
+        {
+            // Not named `field`: in C# 14 that binds to a synthesized backing field.
+            if (_sort is not { } sortBy) return Rows;
+
+            var sorted = Rows
+                .OrderBy(r => Values(r).GetValueOrDefault(sortBy), Comparer<object?>.Create(GridSort.Compare))
+                .ToList();
+
+            if (_descending) sorted.Reverse();
+            return sorted;
+        }
+    }
+
+    /// <summary>
+    /// Clicking the sorted column reverses it; clicking another sorts by that one, ascending.
+    /// A third click does not clear the sort — an order the user chose is not something to take
+    /// away from them by accident.
+    /// </summary>
+    void SortBy(GridColumn column)
+    {
+        if (_sort == column.Field) _descending = !_descending;
+        else (_sort, _descending) = (column.Field, false);
+    }
+
+    string AriaSort(GridColumn column) =>
+        _sort != column.Field ? "none" : _descending ? "descending" : "ascending";
+
+    // ---------------------------------------------------------------- resizing
+
+    void StartDrag(GridColumn column, PointerEventArgs e)
+    {
+        _dragging = column;
+        _dragFrom = e.ClientX;
+        _dragWidth = _widths.GetValueOrDefault(column.Field, column.MinWidth ?? 140);
+    }
+
+    Task OnDragAsync(PointerEventArgs e)
+    {
+        if (_dragging is not { } column) return Task.CompletedTask;
+
+        // Never below what the column needs to say anything, and never past the point where the
+        // columns after it have nowhere to go.
+        var width = Math.Clamp(_dragWidth + (e.ClientX - _dragFrom), column.MinWidth ?? 64, 720);
+
+        _widths[column.Field] = width;
+        return Task.CompletedTask;
+    }
+
+    void EndDrag() => _dragging = null;
+
+    /// <summary>
+    /// A dragged width wins; otherwise the actions column is pinned and everything else states a
+    /// floor and shares what is left. Pinned, because a column of controls has one right width and
+    /// giving it an equal share of the table is how the buttons end up on top of the column before
+    /// them.
+    /// </summary>
+    string? Width(GridColumn column)
+    {
+        if (_widths.TryGetValue(column.Field, out var width))
+            return $"width: {width.ToString("0", System.Globalization.CultureInfo.InvariantCulture)}px";
+
+        if (column.Cell == GridCell.Actions)
+            return column.MinWidth is { } fixedWidth ? $"width: {fixedWidth}px" : null;
+
+        return column.MinWidth is { } min ? $"min-width: {min}px" : null;
+    }
+
+    // ---------------------------------------------------------------- cells
+
+    string HeadClass(GridColumn column) =>
+        string.Join(' ', new[]
+        {
+            "dt__head",
+            column.Numeric ? "num" : null,
+            column.Cell == GridCell.Actions ? "cell-actions" : null,
+            Priority(column),
+        }.Where(c => c is not null));
+
+    string CellClass(GridColumn column) =>
+        string.Join(' ', new[]
+        {
+            column.Numeric ? "num" : null,
+            column.Cell is GridCell.Mono ? "mono" : null,
+            column.Cell is GridCell.Muted or GridCell.Since ? "muted" : null,
+            column.Cell == GridCell.Actions ? "cell-actions" : null,
+            Priority(column),
+        }.Where(c => c is not null));
+
+    /// <summary>
+    /// The order columns give way in, as the classes app.css already knows. The judgement is
+    /// ContainerGrid's; this only translates it.
+    /// </summary>
+    static string? Priority(GridColumn column) => column.Priority switch
+    {
+        <= 2 => null,
+        3 or 4 => "col-mid",
+        _ => "col-low",
+    };
+
+    RenderFragment Cell(GridColumn column, TRow row)
+    {
+        var value = Values(row).GetValueOrDefault(column.Field);
+        var key = Key(row);
+
+        return column.Cell switch
+        {
+            GridCell.State => value is GridState state
+                ? @<StatePill Status="new ContainerStatus(Tone(state), state.Glyph, state.Word, state.Detail)" />
+                : @<span></span>,
+
+            GridCell.Link => value is GridLink link
+                ? @<span class="cell-name">
+                      <a href="@link.Href" @onclick:stopPropagation>@link.Text</a>
+                      @if (link.Sub is { Length: > 0 } sub)
+                      {
+                          <span class="mono muted">@sub</span>
+                      }
+                  </span>
+                : @<span></span>,
+
+            GridCell.Chip => value is GridChip chip
+                ? @<button type="button" class="dt__chip mono" title="@(chip.Tooltip ?? chip.Copy)"
+                           @onclick:stopPropagation
+                           @onclick="() => Shell.WriteClipboardAsync(chip.Copy)">@chip.Text</button>
+                : @<span class="muted">—</span>,
+
+            @* The row's controls: the two its state invites, then a ⋯ for the rest. Same component
+               as everywhere else, because a row is a row. *@
+            GridCell.Actions => ActionsFor is null
+                ? @<span></span>
+                : @<RowActions Actions="ActionsFor(row)" Visible="2"
+                               MenuLabel="@($"More actions")"
+                               OnAction="id => OnAction.InvokeAsync((key, id))" />,
+
+            _ => @<span>@value</span>,
+        };
+    }
+
+    static StateTone Tone(GridState state) => state.Tone switch
+    {
+        "ok" => StateTone.Ok,
+        "warn" => StateTone.Warn,
+        "danger" => StateTone.Danger,
+        _ => StateTone.Neutral,
+    };
+}

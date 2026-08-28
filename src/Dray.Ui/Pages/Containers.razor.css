@@ -64,3 +64,24 @@
 .usage ::deep .spark {
     height: 14px;
 }
+
+/* The table fills what the page has left and scrolls inside itself, so its header stays put and
+   the bulk bar above it does not move as rows come and go. */
+.containers__grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+}
+
+.containers__grid:focus-visible {
+    outline: none;
+}
+
+/* The page no longer pads its sides, so the things that are read rather than scanned take that
+   margin themselves. The table does not: a list runs to the edges. */
+.containers__page > .banner,
+.containers__page > .bulkbar,
+.containers__page ::deep .empty {
+    margin-left: var(--chrome-inset);
+    margin-right: var(--chrome-inset);
+}

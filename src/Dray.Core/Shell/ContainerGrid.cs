@@ -69,7 +69,9 @@ public static class ContainerGrid
             ]
             : Array.Empty<GridColumn>(),
 
-        new("actions", "", GridCell.Actions, Priority: 0, Sortable: false),
+        // A width of its own: under a fixed layout a column with none takes an equal share of what
+        // is left, and the row's controls ended up overlapping the column before them.
+        new("actions", "", GridCell.Actions, Priority: 0, Sortable: false, MinWidth: 104),
     ];
 
     /// <summary>One row's values, keyed by column field.</summary>

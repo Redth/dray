@@ -23,7 +23,10 @@
         var visible = Visible;
     }
 
-    <div class="page page--flush">
+    @* page--fill, not page--flush: the table owns its own scrolling so its header can stay put,
+       and a scrolling page gives its children no height to scroll inside. The banner and the bulk
+       bar take the side margin the page is no longer applying. *@
+    <div class="page page--fill containers__page">
         @if (_error is { } error)
         {
             <div class="banner" role="alert">
@@ -100,117 +103,24 @@
                 </div>
             }
 
-            <div class="table-wrap" @onkeydown="OnTableKeyDown" tabindex="-1">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            @* Name, state and the row's controls survive every width; the rest
-                               give way in priority order. See "column priority" in app.css. *@
-                            <th>Name</th>
-                            <th>State</th>
-                            <th class="col-mid">Image</th>
-                            <th class="col-low">Ports</th>
-                            <th class="col-low">Stack</th>
-                            @if (_showUsage)
-                            {
-                                <th class="num col-low">CPU</th>
-                                <th class="num col-low">Memory</th>
-                            }
-                            <th class="num col-mid">Uptime</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @* Virtualized: the exit criterion is 400 containers scrolling at 60fps, and
-                           a row carries a pill, an action bar and a live "recently changed" pulse —
-                           rendering four hundred of those is what makes the list stutter, not the
-                           data.
+            @* One table component for every list in the app. Which columns exist, what they say
+               and the order they give way in come from ContainerGrid, in Core, where the
+               judgement about which fact matters more than which other is testable.
 
-                           ItemSize is 45 rather than --row-h's 36 because the name cell is usually
-                           two lines — the name over its short id — and that is what sets the row's
-                           real height. It is one line on an engine whose id is its name, so this
-                           is an estimate either way: Virtualize measures and corrects after the
-                           first paint, and this only has to be close enough that the scrollbar
-                           does not jump.
-
-                           SpacerElement is not optional here: Virtualize keeps the scroll height
-                           honest with two spacer elements, and they default to <div>. A div inside
-                           a tbody is invalid, so the browser reparents it and every row inherits a
-                           broken box — rows rendered at nearly twice their height. *@
-                        <Virtualize Items="visible" Context="c" ItemSize="45" OverscanCount="6"
-                                    SpacerElement="tr">
-                            <tr @key="c.Id"
-                                class="@RowClass(c)"
-                                aria-selected="@(_selected.Contains(c.Id) ? "true" : "false")"
-                                @onclick="e => OnRowClick(c, e)"
-                                @ondblclick="() => Open(c)">
-                                <td>
-                                    <div class="cell-name">
-                                        <a href="@($"/containers/{c.ShortId}")" @onclick:stopPropagation>@c.Name</a>
-                                        @if (c.HasDistinctId)
-                                        {
-                                            <span class="mono muted">@c.ShortId</span>
-                                        }
-                                    </div>
-                                </td>
-                                <td><StatePill Status="c.Status" /></td>
-                                <td class="col-mid">
-                                    <span>@Humanize.ImageName(c.Image)</span>
-                                    <span class="muted">:@Humanize.ImageTag(c.Image)</span>
-                                </td>
-                                <td class="mono col-low">
-                                    @if (c.Ports.Count == 0)
-                                    {
-                                        <span class="muted">—</span>
-                                    }
-                                    else
-                                    {
-                                        @string.Join("  ", c.Ports.Select(p => p.Display))
-                                    }
-                                </td>
-                                <td class="col-low">@(c.Stack ?? "—")</td>
-
-                                @if (_showUsage)
-                                {
-                                    <td class="num usage col-low">
-                                        @if (Stats.For(c.Id) is { Latest: { } latest } history)
-                                        {
-                                            <span class="usage__value">@(latest.CpuPercent is { } cpu ? $"{cpu:0.0}%" : "—")</span>
-                                            <Sparkline Points="history.Normalized(s => s.CpuPercent)" Label="@($"CPU for {c.Name}")" />
-                                        }
-                                        else
-                                        {
-                                            @* Running containers are being sampled and have simply
-                                               not reported yet; a stopped one never will. *@
-                                            <span class="muted">@(c.State == DockerState.Running ? "…" : "—")</span>
-                                        }
-                                    </td>
-                                    <td class="num usage col-low">
-                                        @if (Stats.For(c.Id) is { Latest: { } mem } memHistory)
-                                        {
-                                            <span class="usage__value">@Humanize.Bytes(mem.MemoryBytes)</span>
-                                            <Sparkline Points="memHistory.Normalized(s => (double?)s.MemoryBytes)" Label="@($"Memory for {c.Name}")" />
-                                        }
-                                        else
-                                        {
-                                            <span class="muted">@(c.State == DockerState.Running ? "…" : "—")</span>
-                                        }
-                                    </td>
-                                }
-
-                                <td class="num muted col-mid">@Humanize.Since(c.Since)</td>
-                                <td class="cell-actions">
-                                    @* Rename and copy go into the same menu as the uncommon
-                                       lifecycle actions rather than sitting beside it: they are
-                                       about the container rather than what it is doing, and a row
-                                       should have one place its controls live. *@
-                                    <ContainerActionBar Container="c" OnError="ShowError"
-                                                        Extra="ExtraFor(c)" OnExtra="id => RunExtraAsync(id, c)" />
-                                </td>
-                            </tr>
-                        </Virtualize>
-                    </tbody>
-                </table>
+               Selection stays here: click, shift-range, Escape and select-all are this page's
+               rules, and the table paints the answer rather than deciding it. *@
+            <div class="containers__grid" @onkeydown="OnTableKeyDown" tabindex="-1">
+                <DataTable TRow="ContainerSummary"
+                           Columns="ContainerGrid.Columns(_showUsage, visible.Any(c => c.Stack is not null))"
+                           Rows="visible"
+                           Values="c => ContainerGrid.Row(c)"
+                           Key="c => c.Id"
+                           Selected="_selected"
+                           ActionsFor="RowActionsFor"
+                           OnAction="RunRowActionAsync"
+                           OnRowClick="OnGridClick"
+                           OnRowOpen="OpenById"
+                           Placeholder="Nothing here" />
             </div>
         }
     </div>
@@ -453,6 +363,68 @@
         {
             _working = false;
         }
+    }
+
+    ContainerSummary? ById(string id) => Visible.FirstOrDefault(c => c.Id == id);
+
+    /// <summary>
+    /// What one row offers: the lifecycle actions its state allows, most common first, then rename
+    /// and copy. The first two stay on the row and the rest go in its ⋯.
+    /// </summary>
+    IReadOnlyList<RowAction> RowActionsFor(ContainerSummary c) =>
+    [
+        .. ContainerActions
+            .For(c.State, Engine.Selected?.Capabilities.SupportsPause ?? true)
+            .OrderBy(Rank)
+            .Select(a => new RowAction(
+                a.ToString(),
+                ContainerActions.Label(a),
+                ContainerCommands.IconFor(a),
+                Danger: ContainerActions.IsDestructive(a))),
+
+        .. ExtraFor(c),
+    ];
+
+    /// <summary>
+    /// Start and stop are what a list is for; restart is next. Everything else is something done
+    /// after looking at the container, not while scanning past it.
+    /// </summary>
+    static int Rank(ContainerAction action) => action switch
+    {
+        ContainerAction.Start or ContainerAction.Stop => 0,
+        ContainerAction.Restart => 1,
+        ContainerAction.Unpause => 2,
+        ContainerAction.Pause => 3,
+        ContainerAction.Kill => 4,
+        _ => 5,
+    };
+
+    async Task RunRowActionAsync((string Row, string Action) chosen)
+    {
+        if (ById(chosen.Row) is not { } c) return;
+
+        if (Enum.TryParse<ContainerAction>(chosen.Action, out var action))
+        {
+            if (await ContainerCommands.RunAsync(Engine, Shell, c, action) is { } error) ShowError(error);
+            return;
+        }
+
+        await RunExtraAsync(chosen.Action, c);
+    }
+
+    /// <summary>
+    /// A click on a row means what it has always meant here — the table reports the modifiers and
+    /// this decides. Plain click selects one, ⌘/Ctrl toggles, Shift extends from the last.
+    /// </summary>
+    void OnGridClick((string Row, bool Toggle, bool Range) click)
+    {
+        if (ById(click.Row) is { } c)
+            OnRowClick(c, new MouseEventArgs { CtrlKey = click.Toggle, ShiftKey = click.Range });
+    }
+
+    void OpenById(string id)
+    {
+        if (ById(id) is { } c) Open(c);
     }
 
     /// <summary>

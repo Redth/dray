@@ -99,3 +99,44 @@ public sealed record GridLink(string Text, string Href, string? Sub = null);
 /// </para>
 /// </summary>
 public sealed record GridChip(string Text, string Copy, string? Tooltip = null);
+
+/// <summary>
+/// How a grid sorts a column whose value is not a plain string.
+/// <para>
+/// Every rich cell carries an object, so each has to say what "less than" means. Sorting a column
+/// of state pills by their rendered text is the kind of thing that looks like it works until
+/// someone sorts by state and finds Dead between Created and Exited.
+/// </para>
+/// </summary>
+public static class GridSort
+{
+    /// <summary>What a cell's value compares as.</summary>
+    public static IComparable? Key(object? value) => value switch
+    {
+        null => null,
+
+        // Worst first, so sorting by state brings the broken ones up — which is the only reason
+        // anyone sorts by it.
+        GridState state => state.Rank,
+
+        GridLink link => link.Text,
+        GridChip chip => chip.Copy,
+        IComparable comparable => comparable,
+        _ => value.ToString(),
+    };
+
+    /// <summary>
+    /// Compare two cells of one column. Empty sorts last in both directions: a row with no value
+    /// has nothing to say about the question being asked, and burying it is more useful than
+    /// alternating it between the top and the bottom.
+    /// </summary>
+    public static int Compare(object? a, object? b)
+    {
+        var (x, y) = (Key(a), Key(b));
+
+        if (x is null) return y is null ? 0 : 1;
+        if (y is null) return -1;
+
+        return x.GetType() == y.GetType() ? x.CompareTo(y) : string.CompareOrdinal(x.ToString(), y.ToString());
+    }
+}
