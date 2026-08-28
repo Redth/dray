@@ -1,8 +1,12 @@
+@* aria-label is set even when the label is visible: a narrow toolbar hides the text and keeps the
+   button, and a control whose only name was the text it just dropped is unreachable to anything
+   that is not looking at it. The two always say the same thing. *@
+
 <button type="button"
         class="btn btn--@Variant.ToString().ToLowerInvariant() @(Danger ? "btn--danger" : null) @(IconOnly ? "btn--icon" : null) @Class"
         disabled="@(Disabled || Busy)"
-        title="@(Tooltip ?? (IconOnly ? Label : null))"
-        aria-label="@(IconOnly ? Label : null)"
+        title="@(Tooltip ?? Label)"
+        aria-label="@Label"
         @onclick="OnClick">
     @if (Icon is { } icon)
     {

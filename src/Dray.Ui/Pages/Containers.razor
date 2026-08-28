@@ -104,17 +104,19 @@
                 <table class="table">
                     <thead>
                         <tr>
+                            @* Name, state and the row's controls survive every width; the rest
+                               give way in priority order. See "column priority" in app.css. *@
                             <th>Name</th>
                             <th>State</th>
-                            <th>Image</th>
-                            <th>Ports</th>
-                            <th>Stack</th>
+                            <th class="col-mid">Image</th>
+                            <th class="col-low">Ports</th>
+                            <th class="col-low">Stack</th>
                             @if (_showUsage)
                             {
-                                <th class="num">CPU</th>
-                                <th class="num">Memory</th>
+                                <th class="num col-low">CPU</th>
+                                <th class="num col-low">Memory</th>
                             }
-                            <th class="num">Uptime</th>
+                            <th class="num col-mid">Uptime</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -152,11 +154,11 @@
                                     </div>
                                 </td>
                                 <td><StatePill Status="c.Status" /></td>
-                                <td>
+                                <td class="col-mid">
                                     <span>@Humanize.ImageName(c.Image)</span>
                                     <span class="muted">:@Humanize.ImageTag(c.Image)</span>
                                 </td>
-                                <td class="mono">
+                                <td class="mono col-low">
                                     @if (c.Ports.Count == 0)
                                     {
                                         <span class="muted">—</span>
@@ -166,11 +168,11 @@
                                         @string.Join("  ", c.Ports.Select(p => p.Display))
                                     }
                                 </td>
-                                <td>@(c.Stack ?? "—")</td>
+                                <td class="col-low">@(c.Stack ?? "—")</td>
 
                                 @if (_showUsage)
                                 {
-                                    <td class="num usage">
+                                    <td class="num usage col-low">
                                         @if (Stats.For(c.Id) is { Latest: { } latest } history)
                                         {
                                             <span class="usage__value">@(latest.CpuPercent is { } cpu ? $"{cpu:0.0}%" : "—")</span>
@@ -183,7 +185,7 @@
                                             <span class="muted">@(c.State == DockerState.Running ? "…" : "—")</span>
                                         }
                                     </td>
-                                    <td class="num usage">
+                                    <td class="num usage col-low">
                                         @if (Stats.For(c.Id) is { Latest: { } mem } memHistory)
                                         {
                                             <span class="usage__value">@Humanize.Bytes(mem.MemoryBytes)</span>
@@ -196,7 +198,7 @@
                                     </td>
                                 }
 
-                                <td class="num muted">@Humanize.Since(c.Since)</td>
+                                <td class="num muted col-mid">@Humanize.Since(c.Since)</td>
                                 <td class="cell-actions">
                                     @* One flex row. ContainerActionBar renders its own block-level
                                        container, so buttons placed beside it as siblings wrap onto

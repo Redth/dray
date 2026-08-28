@@ -83,11 +83,14 @@
     min-height: 0;
 }
 
+/* No padding. The listing is a table, and a table brings its own — an inset around it put the
+   file names a step in from the path bar above them and left a margin of card colour between the
+   rows and the card's own edge, which reads as the grid having been dropped into the panel rather
+   than being the panel's content. The empty and refusal states pad themselves. */
 .fb__list {
     flex: 1 1 auto;
     min-width: 0;
     overflow: auto;
-    padding: var(--s3);
 }
 
 /* With a file open the listing narrows to a sidebar and the editor takes the room. The listing
@@ -109,7 +112,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--s2);
-    padding: var(--s2);
+    padding: var(--s3);
 }
 
 /* ------------------------------------------------------------------ listing */

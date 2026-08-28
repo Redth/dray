@@ -297,3 +297,73 @@ integration are known-good; the work is re-expressing them around `NavigationMan
 Budget the real unknowns instead — they are Docker-side, not shell-side: multiplexed exec streams
 over a hijacked connection, `ssh://` context transport, and keeping a virtualized 400-row table at
 60fps under a live event stream.
+
+---
+
+## 4. Dialogs — binding
+
+**Rule: every pop-up that is not an inline menu is a native frame around web content.**
+
+An inline menu — an overflow `⋯`, a combobox list, a context menu attached to a row — stays in the
+page. It belongs to the control it came from, it moves when that control moves, and pulling it into
+a native window would make it a window that happens to be shaped like a menu. Everything else — a
+confirmation, a form, a viewer, anything modal — is a dialog and follows this rule.
+
+### 4.1 The three parts
+
+A dialog is three regions and the middle one is the only web:
+
+| Region | Owned by | Default | Overridable |
+|---|---|---|---|
+| **Title row** | native | the title as a native label | yes — a template, for a dialog whose header needs controls (a segmented switch, a path, a state pill) |
+| **Body** | Blazor | the `ChildContent` | it is the content; there is no default |
+| **Button row** | native | Cancel + one confirm, in the platform's order and with the platform's default-button and destructive semantics | yes — a template, for a dialog that needs a third button or a left-aligned one |
+
+The defaults exist so the common case is one line. The templates exist so the uncommon case does
+not need a second dialog system. **A dialog that does not use them — that draws its own title bar
+and its own buttons in HTML — is a bug**, on every head that has a native dialog.
+
+### 4.2 Why, specifically
+
+This is the lesson Sherpa paid for. Sherpa has both halves and neither is this pattern:
+
+- `DialogService` uses `NSAlert` on macOS and `UIAlertController` on Mac Catalyst. Native, correct,
+  keyboard-perfect — and unable to hold anything richer than a text field. Every dialog that needed
+  a form went elsewhere.
+- `CreateProfileDialog.razor`, `EditProfileDialog.razor` and `ReleaseNotesDialog.razor` are the
+  elsewhere: a `.dialog-overlay` div, a `.dialog-header` with an `<h2>` and a close button, a
+  `.dialog-body`, and a footer of HTML buttons. Rich, and wrong in the ways a web overlay is always
+  wrong in a native window — Escape, focus trapping, focus restore, the top layer and Tab order are
+  all hand-rolled, which is how Sherpa ended up intercepting every Tab keypress in the app.
+
+The buttons are the part people notice. A native window's dialog has its confirm button where the
+platform puts it, with the platform's keyboard defaults — Return commits, Escape cancels, the
+destructive one is marked the platform's way — and it looks like every other dialog on the machine.
+An HTML button row gets all three wrong at once, and gets them wrong differently on each platform.
+
+The title row is the part people notice second: on macOS a dialog attached to a document is a
+**sheet**, and a sheet with a web-drawn title is a rectangle that slid out of the toolbar.
+
+### 4.3 What each head does
+
+| Head | Frame | Notes |
+|---|---|---|
+| macOS | `NSAlert` with an accessory view for the body, or an `NSPanel` sheet with a hosted WebView for a body that is more than a form | `BeginSheet` on the key window, never `RunModal`, unless there is no key window |
+| Windows | `ContentDialog` — `Title`, `Content`, `PrimaryButtonText` / `CloseButtonText` | its three regions are this pattern already |
+| Linux | `AdwMessageDialog`, or `AdwWindow` with `modal` for a hosted body | |
+| Web | `<dialog>` + `showModal()` | the only head that draws its own frame, because there is no other frame to use. `showModal()` is what buys focus trapping, focus restore, Escape and the top layer — see `Dialog.razor`. Hand-rolling any of those is the Sherpa bug. |
+
+`ConfirmDestructiveAsync` in `IShellBridge` is this pattern for the case that needs no body at all,
+and `MacShellBridge` shows the shape: a sheet on the key window, an accessory view when the decision
+needs one (type-to-confirm), the confirm button disabled until it is safe to press.
+
+### 4.4 Consequences for how a feature is written
+
+- Anything that would be a modal in a web app is asked for through the shell, not built in the page.
+- A dialog's body is written once, in Blazor, and hosted by whichever frame the head provides.
+- A dialog that only shows something — raw JSON, a manifest, a certificate — still follows this
+  rule. "Read-only" is not a reason to draw a web title bar; it is a reason the button row is one
+  button.
+- Nothing about the frame is in the shared code. The page says what it wants — a title, a body, a
+  set of choices — and the head decides what that is made of, exactly as `PageChrome` does for the
+  toolbar.

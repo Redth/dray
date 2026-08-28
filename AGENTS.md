@@ -30,6 +30,13 @@ control. Do not add a third without one.
 **Never colour alone.** Container state is tint + glyph + word. A greyscale screenshot must stay
 legible. See DESIGN.md §2.4 for the full vocabulary.
 
+**A dialog is a native frame around web content.** Everything modal — a confirmation, a form, a
+viewer — is a native title row, a Blazor body and a native button row. Only an inline menu (an
+overflow `⋯`, a combobox list, a row's context menu) stays entirely in the page. A dialog that draws
+its own title bar or button row in HTML is a bug on every head that has a native dialog; the web
+head uses `<dialog>` and `showModal()`, never a hand-rolled overlay. DESIGN.md §2.4b, and
+`docs/NATIVE-SHELL.md` §4 for each platform's frame.
+
 **Never poll a list.** State comes from the Docker event stream into the entity store. A whole-list
 re-fetch on a timer is a bug, not a fallback.
 

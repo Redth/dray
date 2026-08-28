@@ -161,6 +161,17 @@ glyph stay on screen. The rule this exception has to keep is the reason the rule
 still has a glyph of its own, so greyscale stays legible without the word. A pill that dropped the
 glyph instead, or that shrank to colour alone, is a bug.
 
+### 2.4b Dialogs are a native frame around web content — binding
+
+Every pop-up that is not an inline menu (an overflow menu, a combobox list, a row's context menu) is
+a dialog, and a dialog is three regions: a **native title row**, a **Blazor body**, and a **native
+button row**. The title and buttons have defaults that cover the common case and templates for the
+ones that do not; a dialog that draws its own title bar or its own button row in HTML is a bug on
+every head that has a native dialog. The web head is the exception, because it has no other frame —
+there it is `<dialog>` and `showModal()`, never a hand-rolled overlay.
+
+The full rule, the reasoning, and what each platform's frame is: `docs/NATIVE-SHELL.md` section 4.
+
 ### 2.5 Two documented exceptions
 
 Honest notes rather than fudged numbers:

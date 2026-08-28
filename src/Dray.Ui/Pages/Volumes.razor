@@ -66,11 +66,11 @@
                     <thead>
                         <tr>
                             <th>Name</th>
-                            <th>Driver</th>
-                            <th>Used by</th>
-                            <th>Stack</th>
+                            <th class="col-low">Driver</th>
+                            <th class="col-mid">Used by</th>
+                            <th class="col-low">Stack</th>
                             <th class="num">Size</th>
-                            <th class="num">Created</th>
+                            <th class="num col-low">Created</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -91,8 +91,8 @@
                                         }
                                     </div>
                                 </td>
-                                <td class="muted">@volume.Driver</td>
-                                <td>
+                                <td class="muted col-low">@volume.Driver</td>
+                                <td class="col-mid">
                                     @if (volume.UsedBy.Count == 0)
                                     {
                                         @* The fact that matters before deleting one. *@
@@ -103,13 +103,13 @@
                                         @string.Join(", ", volume.UsedBy)
                                     }
                                 </td>
-                                <td>@(volume.Stack ?? "—")</td>
+                                <td class="col-low">@(volume.Stack ?? "—")</td>
                                 <td class="num mono muted">
                                     @* Null means the engine did not measure it, which is not the
                                        same as empty and must not read as zero. *@
                                     @(volume.SizeBytes is { } size ? Humanize.Bytes(size) : "—")
                                 </td>
-                                <td class="num muted">@(volume.Created is { } c ? Humanize.Since(c) : "—")</td>
+                                <td class="num muted col-low">@(volume.Created is { } c ? Humanize.Since(c) : "—")</td>
                                 <td class="cell-actions">
                                     <Button Label="@($"Remove {volume.DisplayName}")" Icon="IconRef.Trash"
                                             IconOnly="true" Variant="ButtonVariant.Ghost" Danger="true"

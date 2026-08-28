@@ -27,7 +27,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 0 1 auto;
-    min-width: 4ch;
+    min-width: 8ch;
 }
 
 .toolbar__subtitle {
@@ -54,9 +54,79 @@
     min-width: 80px;
 }
 
-/* Below this the subtitle is the least useful thing on screen, so it goes first. */
-@media (max-width: 900px) {
+/* The toolbar gives things up in order, rather than shrinking everything at once until nothing
+   is readable. Web only — the native heads draw an NSToolbar and never reach this file.
+
+   1. the subtitle, which repeats what the page below already says
+   2. the words on the buttons, which have icons and keep their names in the tooltip
+   3. the search box, down to something a search term still fits in
+
+   The title is never given up. It is the one thing that says where you are. */
+@media (max-width: 56rem) {
     .toolbar__subtitle {
         display: none;
+    }
+}
+
+@media (max-width: 44rem) {
+    .toolbar {
+        padding-left: var(--s3);
+        padding-right: var(--s3);
+        gap: var(--s2);
+    }
+
+    /* The declarations are `.visually-hidden` from app.css, inlined because a media query cannot
+       add a class. The button keeps its aria-label, which is why dropping the text is safe. */
+    .toolbar__items ::deep .btn > span {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    /* Square again, now that there is nothing beside the icon. */
+    .toolbar__items ::deep .btn {
+        padding-left: var(--s2);
+        padding-right: var(--s2);
+    }
+
+    .toolbar__search {
+        flex: 1 1 60px;
+        min-width: 60px;
+        max-width: 140px;
+    }
+
+    /* A filter's selected value is short — "All", "Running" — and the control was sized for the
+       longest option in the list rather than the one being shown. Capped, it still reads. */
+    .toolbar__items select.input {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 6rem;
+    }
+}
+
+/* Narrower than this there is no order left to shed things in — the title, a search box and a
+   filter cannot share a line and still be usable. The toolbar takes a second line rather than
+   clipping a control, because a control half off the edge is as unreachable as one that is not
+   drawn at all. */
+@media (max-width: 30rem) {
+    .toolbar {
+        flex-wrap: wrap;
+        align-items: stretch;
+    }
+
+    .toolbar__titles {
+        flex: 1 0 100%;
+    }
+
+    .toolbar__items {
+        flex: 1 1 100%;
+    }
+
+    .toolbar__search {
+        max-width: none;
     }
 }

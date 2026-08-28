@@ -59,10 +59,10 @@
                         <tr>
                             <th>Image</th>
                             <th>Tag</th>
-                            <th>ID</th>
+                            <th class="col-low">ID</th>
                             <th class="num">Size</th>
-                            <th>Used by</th>
-                            <th class="num">Created</th>
+                            <th class="col-mid">Used by</th>
+                            <th class="num col-low">Created</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -85,13 +85,13 @@
                                     </div>
                                 </td>
                                 <td class="mono">@(image.Tags.Count > 0 ? image.Tags[0].Tag : "—")</td>
-                                <td class="mono muted">@image.ShortId</td>
+                                <td class="mono muted col-low">@image.ShortId</td>
                                 @* An engine that does not measure image size gets an em dash, not
                                    "0 B" — a measured zero and an unknown are different answers. *@
                                 <td class="num mono">
                                     @(image.SizeReported ? Humanize.Bytes(image.SizeBytes) : "—")
                                 </td>
-                                <td>
+                                <td class="col-mid">
                                     @if (image.IsInUse is true)
                                     {
                                         <span>@image.ContainerCount container@(image.ContainerCount == 1 ? "" : "s")</span>
@@ -111,7 +111,7 @@
                                         <span class="muted">—</span>
                                     }
                                 </td>
-                                <td class="num muted">@(image.Created is { } c ? Humanize.Since(c) : "—")</td>
+                                <td class="num muted col-low">@(image.Created is { } c ? Humanize.Since(c) : "—")</td>
                                 <td class="cell-actions">
                                     <div class="row-actions">
                                         @* The whole point of having an image. Offered only on a

@@ -53,3 +53,47 @@
     background: var(--brand);
     color: var(--on-brand);
 }
+
+/* Below this the sidebar is a rail: icons, no words. Two hundred and twenty pixels of navigation
+   beside a four-hundred-pixel page is the navigation winning an argument it should not be having,
+   and every item here has an icon that already carries it — the words move to the tooltip and stay
+   in the accessible name.
+
+   Web only. The native heads draw their own sidebar and never reach this file. */
+@media (max-width: 52rem) {
+    .sidebar {
+        flex-basis: 3.25rem;
+    }
+
+    .sidebar__brand {
+        justify-content: center;
+        padding: var(--s4) 0 var(--s3);
+    }
+
+    .sidebar__brand span,
+    ::deep .nav-item span {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    ::deep .nav-item {
+        justify-content: center;
+    }
+
+    /* The group headings become the rule they were already acting as. The words stay in the DOM
+       for anything reading the page rather than looking at it. */
+    .sidebar__group {
+        height: 1px;
+        padding: 0;
+        margin: var(--s3) var(--s2);
+        background: var(--line);
+        color: transparent;
+        overflow: hidden;
+        text-indent: -100em;
+    }
+}

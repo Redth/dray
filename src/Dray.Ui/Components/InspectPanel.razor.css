@@ -1,8 +1,13 @@
+/* The rule under these tabs runs the full width of the panel, like the tab bar above it, rather
+   than stopping short at the content inset — a divider that ends before the edge reads as a border
+   round a box that is not there. The buttons keep the inset: the tabs above line up with the same
+   edge, and this is the same control one level down. */
 .inspect__modes {
     display: flex;
     align-items: center;
     gap: 2px;
-    margin-bottom: var(--s3);
+    margin: 0 0 var(--s3);
+    padding: 0 var(--s3);
     border-bottom: 1px solid var(--line);
 }
 

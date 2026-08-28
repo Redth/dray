@@ -406,6 +406,28 @@ input, textarea, select {
   white-space: nowrap;
 }
 
+/* ---------------------------------------------------------------- column priority
+
+   A table in a narrow window drops columns rather than growing a horizontal scrollbar. Scrolling
+   sideways to read a row is the worst of both: the columns are still there, and none of them can
+   be seen at once.
+
+   Two levels, applied per cell. `.col-low` is reference material — something looked up rather than
+   scanned; `.col-mid` is useful and not identifying. Everything unmarked stays at every width, so
+   a row always says what it is and what state it is in, and always keeps its controls. Nothing is
+   lost: the detail page behind the row has all of it. */
+@media (max-width: 64rem) {
+  .table :is(th, td).col-low {
+    display: none;
+  }
+}
+
+@media (max-width: 50rem) {
+  .table :is(th, td).col-mid {
+    display: none;
+  }
+}
+
 /* ------------------------------------------------------------------ framework overlays
 
    Blazor ships two pieces of UI of its own: a bar that appears when an unhandled exception reaches
@@ -702,6 +724,14 @@ input, textarea, select {
 .card .page--flush,
 .card .page--fill {
   padding-top: var(--s3);
+
+  /* And no side padding at all. The card's own edge is the margin — an inset here put a strip of
+     card colour down both sides of every table, so a grid of data read as a box dropped into the
+     panel rather than as the panel's content. Anything that does need room asks for it below, at
+     the same --s3 the table's own cells use, so headings, rows and the tab bar above them all line
+     up on one edge. */
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* Inside a card the tab bar is the card's own header, so it takes the card's padding rather than
@@ -722,12 +752,14 @@ input, textarea, select {
   border-radius: 0;
 }
 
-.card .panel > .panel__head {
-  padding-left: 0;
-  padding-right: 0;
+/* Prose and label/value pairs are read, so they keep their margin. A table is scanned, and its
+   header and row bands want the full width — its cells carry the same --s3, so the two align. */
+.card .panel > .panel__head,
+.card .panel > .kv {
+  padding-left: var(--s3);
+  padding-right: var(--s3);
 }
 
-.card .panel > .kv,
 .card .panel > .table {
   padding-left: 0;
   padding-right: 0;

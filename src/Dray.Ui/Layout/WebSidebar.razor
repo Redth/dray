@@ -28,7 +28,8 @@
 </nav>
 
 @code {
-    RenderFragment NavItem(NavNode node) => @<NavLink class="nav-item" href="@node.Route"
+    @* The title is what the rail has instead of a label once the window is too narrow for one. *@
+    RenderFragment NavItem(NavNode node) => @<NavLink class="nav-item" href="@node.Route" title="@node.Title"
                                                       Match="@(node.Route == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
         @if (node.Icon is { } icon)
         {
