@@ -200,29 +200,12 @@
 
                                 <td class="num muted col-mid">@Humanize.Since(c.Since)</td>
                                 <td class="cell-actions">
-                                    @* One flex row. ContainerActionBar renders its own block-level
-                                       container, so buttons placed beside it as siblings wrap onto
-                                       a second line and double the row height. *@
-                                    <div class="row-actions">
-                                        <ContainerActionBar Container="c" OnError="ShowError" />
-
-                                        @* Apple's runtime identifies a container by its name, so
-                                           there is nothing to rename. Hidden rather than offered
-                                           and refused. *@
-                                        @if (Engine.Selected?.Capabilities.SupportsRename ?? true)
-                                        {
-                                            <Button Label="@($"Rename {c.Name}")" Icon="IconRef.Inspect" IconOnly="true"
-                                                    Class="act-low"
-                                                    Variant="ButtonVariant.Ghost" OnClick="() => BeginRename(c)" />
-                                        }
-
-                                        @* Both of these are about the container rather than what it
-                                           is doing, and both are on its own page. They are the two
-                                           the row gives up first when the window is narrow. *@
-                                        <Button Label="@($"Copy full ID of {c.Name}")" Icon="IconRef.Copy" IconOnly="true"
-                                                Class="act-low"
-                                                Variant="ButtonVariant.Ghost" OnClick="() => CopyIdAsync(c)" />
-                                    </div>
+                                    @* Rename and copy go into the same menu as the uncommon
+                                       lifecycle actions rather than sitting beside it: they are
+                                       about the container rather than what it is doing, and a row
+                                       should have one place its controls live. *@
+                                    <ContainerActionBar Container="c" OnError="ShowError"
+                                                        Extra="ExtraFor(c)" OnExtra="id => RunExtraAsync(id, c)" />
                                 </td>
                             </tr>
                         </Virtualize>
@@ -470,6 +453,34 @@
         {
             _working = false;
         }
+    }
+
+    /// <summary>
+    /// The two row actions that are not lifecycle. Rename is offered only where the engine has it:
+    /// Apple's runtime identifies a container by its name, so there is nothing to rename.
+    /// </summary>
+    IReadOnlyList<RowAction> ExtraFor(ContainerSummary c) =>
+    [
+        .. (Engine.Selected?.Capabilities.SupportsRename ?? true)
+            ? new[] { new RowAction("rename", "Rename…", IconRef.Inspect, $"Rename {c.Name}") }
+            : [],
+
+        new RowAction("copy-id", "Copy full ID", IconRef.Copy, $"Copy the full ID of {c.Name}"),
+    ];
+
+    Task RunExtraAsync(string id, ContainerSummary c)
+    {
+        switch (id)
+        {
+            case "rename":
+                BeginRename(c);
+                return Task.CompletedTask;
+
+            case "copy-id":
+                return CopyIdAsync(c);
+        }
+
+        return Task.CompletedTask;
     }
 
     void BeginRename(ContainerSummary container) => _renaming = container;

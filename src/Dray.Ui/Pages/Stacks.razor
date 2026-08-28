@@ -81,15 +81,14 @@
                             }
                             else
                             {
-                                @* Icon only, so four commands and the stack's name and state fit one
-                                   line on every card, and collapsing into a menu from the end as
-                                   the window narrows — so Down, the destructive one, is the first
-                                   put away and Up is the last. The name goes in the accessible
-                                   label rather than on screen: with a card per stack, four buttons
-                                   reading "Up" are only distinguishable by which card they are in. *@
-                                <ActionRow Actions="CommandsFor(stack)"
-                                           MenuLabel="@($"More commands for {stack.Name}")"
-                                           OnAction="id => RunAsync(stack, id, LabelFor(id))" />
+                                @* Up on the card, the rest behind a ⋯. Up is what a stack card is
+                                   for; restarting, pulling and bringing one down are deliberate.
+                                   The stack's name goes in each accessible label rather than on
+                                   screen: with a card per stack, four controls reading "Up" are
+                                   only distinguishable by which card they are in. *@
+                                <RowActions Actions="CommandsFor(stack)" Visible="1"
+                                            MenuLabel="@($"More commands for {stack.Name}")"
+                                            OnAction="id => RunAsync(stack, id, LabelFor(id))" />
                             }
                         </div>
 

@@ -64,9 +64,8 @@
        one that reads as a sentence. */
     justify-content: flex-start;
 
-    /* Deliberately not wrapping. The commands are in an ActionRow, which needs to run out of
-       room in order to collapse into its menu — a header that wrapped would hand it a fresh line
-       instead, and the menu would never appear however narrow the window got. */
+    /* Deliberately not wrapping: the header is one line, and what does not fit on it is already
+       in the card's ⋯ menu rather than waiting for a second row to appear. */
     flex-wrap: nowrap;
 }
 

@@ -41,12 +41,35 @@ const symbols = names
   .map((n) => `  <symbol id="i-${n}" viewBox="${geometry.viewBox}">${icons[n].svg}</symbol>`)
   .join('\n');
 
-const sprite = `<!-- ${BANNER} -->
-<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"
+const spriteBody = `<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"
      fill="none" stroke="currentColor" stroke-width="${geometry.strokeWidth}"
      stroke-linecap="${geometry.linecap}" stroke-linejoin="${geometry.linejoin}">
 ${symbols}
-</svg>
+</svg>`;
+
+const sprite = `<!-- ${BANNER} -->
+${spriteBody}
+`;
+
+// ------------------------------------------------------------------ IconSprite.razor
+//
+// The same symbols as a component, mounted once per document.
+//
+// WebKit does not resolve <use href="file.svg#id"> — an external reference renders a 0x0 box and
+// no error, which is every icon in the macOS app silently disappearing. Chrome and Firefox do
+// resolve it, so the web head looked fine and the bug lived only where nobody could see it.
+// Inlining the symbols makes every <use> a same-document reference, which every engine supports.
+//
+// A component rather than markup pasted into each host page: there are three of those (the dev
+// host, the macOS window, the macOS dialog) and a fourth is one head away.
+
+const spriteRazor = `@* ${BANNER} *@
+
+@* Mounted once per document — see build/gen-icons.mjs for why these are inline rather than
+   referenced from icons/sprite.svg. The file is still generated: the native heads and anything
+   outside the app read it. *@
+
+${spriteBody}
 `;
 
 // ------------------------------------------------------------------ Icons.g.cs
@@ -104,6 +127,7 @@ ${names.map((n) => `        [IconRef.${pascal(n)}] = ${JSON.stringify(n)},`).joi
 
 const outputs = [
   [join(repoRoot, 'src/Dray.Ui/wwwroot/icons/sprite.svg'), sprite],
+  [join(repoRoot, 'src/Dray.Ui/Components/IconSprite.razor'), spriteRazor],
   [join(repoRoot, 'src/Dray.Core/Shell/Icons.g.cs'), cs],
 ];
 

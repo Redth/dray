@@ -1,0 +1,55 @@
+@* The controls on one row of a list: the common ones, then a ⋯ for the rest.
+
+   A row is scanned, not read. Six icons on every row of a table is six times as much to look past
+   as one, and five of them are things nobody does from a list — renaming a container, copying its
+   id, pushing an image. Those are not removed, they are put where they cost nothing until wanted.
+
+   Deliberately not ActionRow's measuring: there is one of these per row, and a resize observer per
+   row is four hundred of them on the containers page. How many fit is also the wrong question here
+   — the answer is a fixed small number regardless of how wide the window gets. *@
+
+<div class="rowacts">
+    @foreach (var action in Inline)
+    {
+        var captured = action;
+
+        <Button Label="@action.Label"
+                Icon="action.Icon"
+                IconOnly="true"
+                Tooltip="@action.Tooltip"
+                Variant="ButtonVariant.Ghost"
+                Danger="action.Danger"
+                Disabled="action.Disabled"
+                OnClick="() => OnAction.InvokeAsync(captured.Id)" />
+    }
+
+    <OverflowMenu Actions="Rest" Label="@MenuLabel" TriggerClass="btn--ghost" OnAction="OnAction" />
+</div>
+
+@code {
+    /// <summary>The actions, most common first. The order decides what stays on the row.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<RowAction> Actions { get; set; } = [];
+
+    [Parameter] public EventCallback<string> OnAction { get; set; }
+
+    /// <summary>
+    /// How many stay on the row. Two is the usual answer — the thing this row's state invites you
+    /// to do, and the one next to it.
+    /// </summary>
+    [Parameter] public int Visible { get; set; } = 2;
+
+    [Parameter] public string MenuLabel { get; set; } = "More actions";
+
+    /// <summary>
+    /// How many actually stay on the row.
+    /// <para>
+    /// One more than asked for when that would empty the menu: a ⋯ holding a single item is worse
+    /// than the button it replaced — same width, one more click.
+    /// </para>
+    /// </summary>
+    int Shown => Actions.Count == Visible + 1 ? Actions.Count : Visible;
+
+    IReadOnlyList<RowAction> Inline => [.. Actions.Take(Shown)];
+
+    IReadOnlyList<RowAction> Rest => [.. Actions.Skip(Shown)];
+}

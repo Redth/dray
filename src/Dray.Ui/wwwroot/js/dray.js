@@ -101,53 +101,6 @@ export const clipboard = {
   },
 };
 
-export const overflow = {
-  /**
-   * Report how much room a row of controls has, and how wide one of them is.
-   *
-   * The decision — how many to keep — is made in C# where it can be tested. This only measures,
-   * because measuring is the part the platform will not tell C# any other way.
-   *
-   * Reported on attach and on every resize of the row, coalesced to an animation frame: a window
-   * drag fires the observer far faster than Blazor can usefully re-render.
-   */
-  attach(el, dotnet) {
-    if (!el || typeof ResizeObserver === 'undefined') return null;
-
-    const state = { el, dotnet, frame: 0 };
-
-    const report = () => {
-      state.frame = 0;
-
-      // Any control in the row will do: these rows are icon buttons, all the same size. The
-      // trigger for the menu is one of them, so a fully collapsed row can still be measured.
-      const item = el.querySelector('.btn');
-      const gap = parseFloat(getComputedStyle(el).columnGap);
-
-      dotnet.invokeMethodAsync(
-        'OnMeasured',
-        el.clientWidth,
-        item ? item.getBoundingClientRect().width : 0,
-        Number.isFinite(gap) ? gap : 0);
-    };
-
-    state.observer = new ResizeObserver(() => {
-      if (state.frame) return;
-      state.frame = requestAnimationFrame(report);
-    });
-
-    state.observer.observe(el);
-    report();
-
-    return state;
-  },
-
-  detach(state) {
-    if (state?.frame) cancelAnimationFrame(state.frame);
-    state?.observer?.disconnect();
-  },
-};
-
 export const menu = {
   /**
    * Keep a popover under the control that opens it.

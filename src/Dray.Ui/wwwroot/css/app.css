@@ -88,6 +88,45 @@ input, textarea, select {
 
 /* ---------------------------------------------------------------- a11y utilities */
 
+/* ---------------------------------------------------------------- text selection
+
+   Dray does not let you drag a selection across its chrome, because native apps do not. Dragging
+   over a window and watching the labels, the state pills and half a table turn blue is the single
+   most reliable tell that something is a web page in a window — a Mac app's toolbar, sidebar and
+   list rows are not selectable text, and neither are Dray's.
+
+   The trade is that a value cannot be swiped and copied, so anything worth copying has a control
+   that copies it: the container id, the summary, an env value, an image digest. A copy button puts
+   the whole value on the clipboard, which is what someone dragging across a truncated cell was
+   trying to do anyway.
+
+   Selection comes back where the content is a document rather than an interface — see .selectable
+   below, and DESIGN.md section 2.6. */
+.app,
+.menu,
+.dialog {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Where a range genuinely is the unit of interest: log output, a terminal's scrollback, a file
+   being edited, a raw engine response. These are read, quoted and pasted a line at a time, and a
+   copy button for "the whole thing" is not the same affordance.
+
+   Form controls are here because a text field that cannot be selected cannot be edited — on some
+   engines the inherited rule breaks double-click-to-select-a-word inside the input itself. */
+.selectable,
+.log__body,
+.term,
+.editor,
+.stacks__log,
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Present to assistive technology, absent from the page. Used for the per-page <h1>, which is
    real content but would duplicate the title already visible in the chrome. */
 .visually-hidden {
@@ -416,6 +455,16 @@ input, textarea, select {
    scanned; `.col-mid` is useful and not identifying. Everything unmarked stays at every width, so
    a row always says what it is and what state it is in, and always keeps its controls. Nothing is
    lost: the detail page behind the row has all of it. */
+/* In a table a state is a column value: "Exited 137". The plain-language half — "killed (out of
+   memory)" — is an explanation, and an explanation inside a cell sets that column's width for every
+   row, pushes the ones beside it out, and ends up the longest thing on a page of short ones.
+
+   Not lost: the pill's tooltip carries the whole label, and the container's own page shows it in
+   full, where there is room for a sentence. */
+.table .pill__detail {
+  display: none;
+}
+
 @media (max-width: 64rem) {
   .table :is(th, td).col-low {
     display: none;
@@ -432,12 +481,6 @@ input, textarea, select {
      offers anyway. Marked per button rather than measured: there is one of these per row and a
      resize observer per row is four hundred of them. */
   .row-actions .act-low {
-    display: none;
-  }
-
-  /* And the long half of a state. "Exited 137" stays; "· killed (out of memory)" moves to the
-     tooltip, where the pill's title already had it. */
-  .table .pill__detail {
     display: none;
   }
 

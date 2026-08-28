@@ -7,6 +7,10 @@
 
 <PlatformThemeSync />
 
+@* Once per document, before anything that draws an icon — on every head, not just the ones
+   without native dialogs. The icons are web content wherever the chrome comes from. *@
+<IconSprite />
+
 @if (!Caps.HasNativeDialogs)
 {
     <ConfirmHost />

@@ -14,18 +14,10 @@
 }
 else
 {
-    <div class="actions">
-        @foreach (var action in ContainerActions.For(Container.State, Engine.Selected?.Capabilities.SupportsPause ?? true))
-        {
-            var captured = action;
-            <Button Label="@ContainerActions.Label(captured)"
-                    Icon="@ContainerCommands.IconFor(captured)"
-                    IconOnly="true"
-                    Variant="ButtonVariant.Ghost"
-                    Danger="@ContainerActions.IsDestructive(captured)"
-                    OnClick="() => RunAsync(captured)" />
-        }
-    </div>
+    @* The state's own verb first — that is what a row of a list is for — then the rest behind a ⋯.
+       Nobody force-stops or removes a container from a list without having looked at it first. *@
+    <RowActions Actions="Available" Visible="2" OnAction="RunIdAsync"
+                MenuLabel="@($"More for {Container.Name}")" />
 }
 
 @code {
@@ -33,6 +25,59 @@ else
 
     /// <summary>Raised with a sentence when the engine refuses. Null is never raised.</summary>
     [Parameter] public EventCallback<string> OnError { get; set; }
+
+    /// <summary>
+    /// Actions the page adds — rename, copy id. They join the same menu rather than sitting beside
+    /// it, so a row has one place its controls live rather than two.
+    /// </summary>
+    [Parameter] public IReadOnlyList<RowAction> Extra { get; set; } = [];
+
+    /// <summary>Raised with the id of an <see cref="Extra"/> action.</summary>
+    [Parameter] public EventCallback<string> OnExtra { get; set; }
+
+    /// <summary>
+    /// Everything this container can be told to do right now, most common first — the state's own
+    /// verb, then restart, then the rest. Extras from the page follow, because they are about the
+    /// container rather than about what it is doing.
+    /// </summary>
+    IReadOnlyList<RowAction> Available =>
+    [
+        .. ContainerActions
+            .For(Container.State, Engine.Selected?.Capabilities.SupportsPause ?? true)
+            .OrderBy(Rank)
+            .Select(a => new RowAction(
+                a.ToString(),
+                ContainerActions.Label(a),
+                ContainerCommands.IconFor(a),
+                Danger: ContainerActions.IsDestructive(a))),
+
+        .. Extra,
+    ];
+
+    /// <summary>
+    /// Start and stop are what a list is for; restart is next. Everything else is something you do
+    /// after looking at the container, not while scanning past it.
+    /// </summary>
+    static int Rank(ContainerAction action) => action switch
+    {
+        ContainerAction.Start or ContainerAction.Stop => 0,
+        ContainerAction.Restart => 1,
+        ContainerAction.Unpause => 2,
+        ContainerAction.Pause => 3,
+        ContainerAction.Kill => 4,
+        _ => 5,
+    };
+
+    async Task RunIdAsync(string id)
+    {
+        if (Enum.TryParse<ContainerAction>(id, out var action))
+        {
+            await RunAsync(action);
+            return;
+        }
+
+        await OnExtra.InvokeAsync(id);
+    }
 
     async Task RunAsync(ContainerAction action)
     {

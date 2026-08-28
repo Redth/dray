@@ -20,7 +20,12 @@
 
 /* JSON has long lines and reflowing them destroys the indentation that makes it readable, so it
    scrolls in both directions inside its own box rather than wrapping. */
+/* A document, not an interface: this is read and quoted a line at a time, so a range is the unit
+   of interest and selection stays on. DESIGN.md 2.6. */
 .jv__body {
+    -webkit-user-select: text;
+    user-select: text;
+
     flex: 1 1 auto;
     min-height: 0;
     margin: 0;

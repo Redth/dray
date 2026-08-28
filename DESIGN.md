@@ -172,6 +172,28 @@ there it is `<dialog>` and `showModal()`, never a hand-rolled overlay.
 
 The full rule, the reasoning, and what each platform's frame is: `docs/NATIVE-SHELL.md` section 4.
 
+### 2.6 Text is not selectable by default — binding
+
+Dragging across a window and watching labels, state pills and half a table turn blue is the single
+most reliable tell that something is a web page in a window. A Mac app's toolbar, sidebar and list
+rows are not selectable text, and neither are Dray's: `user-select: none` is set on the app, on
+menus and on dialogs.
+
+**The trade is explicit.** A value that cannot be swiped must be copyable another way, so anything
+worth copying gets a control that copies it — the container id, the inspect summary, an env value,
+an image digest. That is the better affordance regardless: a copy button puts the *whole* value on
+the clipboard, including the part a truncated cell was not showing, which is what the person
+dragging across it was trying to get.
+
+**Selection stays on where the content is a document rather than an interface.** Log output, a
+terminal's scrollback, a file open in the editor, a raw engine response, and compose's own output:
+these are read, quoted and pasted a line at a time, and "copy all of it" is not the same thing.
+Opt in with `.selectable`, or add the container to the list in `app.css`. Form controls are always
+selectable — a text field that cannot be selected cannot be edited.
+
+When adding a surface, the question to ask is not "might someone want to copy this?" but "is a
+*range* of it the unit of interest?" If the answer is the whole value, that is a copy button.
+
 ### 2.5 Two documented exceptions
 
 Honest notes rather than fudged numbers:

@@ -1,0 +1,8 @@
+/* Right-aligned and tight: these sit in the last column of a table, where the eye arrives only
+   when it is looking for them. */
+.rowacts {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+}

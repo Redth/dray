@@ -116,51 +116,12 @@
                                 </td>
                                 <td class="num muted col-low">@(image.Created is { } c ? Humanize.Since(c) : "—")</td>
                                 <td class="cell-actions">
-                                    <div class="row-actions">
-                                        @* The whole point of having an image. Offered only on a
-                                           tagged one: run takes a reference, and a dangling image
-                                           has none to give. *@
-                                        @if (!image.IsDangling)
-                                        {
-                                            <Button Label="@($"Run {image.DisplayName}")" Icon="IconRef.Play"
-                                                    IconOnly="true" Variant="ButtonVariant.Ghost"
-                                                    OnClick="() => _runFrom = image.Tags[0].Display" />
-                                        }
-
-                                        @if (!image.IsDangling)
-                                        {
-                                            <Button Label="@($"Tag {image.DisplayName}")" Icon="IconRef.Inspect"
-                                                    IconOnly="true" Variant="ButtonVariant.Ghost" Class="act-low"
-                                                    OnClick="() => _tagging = image" />
-
-                                            <Button Label="@($"Push {image.DisplayName}")" Icon="IconRef.Push"
-                                                    IconOnly="true" Variant="ButtonVariant.Ghost" Class="act-low"
-                                                    OnClick="() => _pushing = image.Tags[0].Display" />
-                                        }
-
-                                        @* Saving an untagged image works — the archive just has
-                                           nothing to name it by, which is why the file is named
-                                           after its id. *@
-                                        @if (Archives)
-                                        {
-                                            <Button Label="@($"Save {image.DisplayName} to a file")" Icon="IconRef.Save"
-                                                    IconOnly="true" Variant="ButtonVariant.Ghost" Class="act-low"
-                                                    Disabled="@(_saving is not null)"
-                                                    OnClick="() => SaveAsync(image)" />
-                                        }
-
-                                        @* Run and Remove survive every width; the rest give way. An
-                                           image row carries six controls, and on macOS the native
-                                           sidebar leaves the content 410px in a small window —
-                                           measured there, where all six ran off the edge. *@
-                                        <Button Label="@($"Copy ID of {image.DisplayName}")" Icon="IconRef.Copy"
-                                                IconOnly="true" Variant="ButtonVariant.Ghost" Class="act-low"
-                                                OnClick="() => Shell.WriteClipboardAsync(image.Id)" />
-
-                                        <Button Label="@($"Remove {image.DisplayName}")" Icon="IconRef.Trash"
-                                                IconOnly="true" Variant="ButtonVariant.Ghost" Danger="true"
-                                                OnClick="() => RemoveAsync(image)" />
-                                    </div>
+                                    @* Run is what an image is for; everything else — tagging,
+                                       pushing, saving, removing — is something done deliberately
+                                       after looking, not while scanning a list. *@
+                                    <RowActions Actions="ActionsFor(image)" Visible="1"
+                                                MenuLabel="@($"More for {image.DisplayName}")"
+                                                OnAction="id => RunRowAsync(id, image)" />
                                 </td>
                             </tr>
                         </Virtualize>
@@ -215,6 +176,62 @@
     bool _pulling;
 
     /// <summary>The image reference the run dialog was opened for, or null when it is closed.</summary>
+    /// <summary>
+    /// What can be done with one image, most common first. Run leads because it is the point of
+    /// having an image; a dangling one has no reference to run or push, so it gets neither.
+    /// </summary>
+    IReadOnlyList<RowAction> ActionsFor(ImageSummary image) =>
+    [
+        .. image.IsDangling ? [] : new[]
+        {
+            new RowAction("run", "Run…", IconRef.Play, $"Run a container from {image.DisplayName}"),
+            new RowAction("tag", "Tag…", IconRef.Inspect, $"Add a tag to {image.DisplayName}"),
+            new RowAction("push", "Push…", IconRef.Push, $"Push {image.DisplayName} to a registry"),
+        },
+
+        // Saving an untagged image works — the archive just has nothing to name it by, which is
+        // why the file is named after its id.
+        .. Archives
+            ? new[]
+            {
+                new RowAction("save", "Save to a file…", IconRef.Save,
+                    "Write this image to a tar archive", Disabled: _saving is not null),
+            }
+            : [],
+
+        new RowAction("copy-id", "Copy ID", IconRef.Copy, $"Copy the ID of {image.DisplayName}"),
+        new RowAction("remove", "Remove", IconRef.Trash, $"Remove {image.DisplayName}", Danger: true),
+    ];
+
+    Task RunRowAsync(string id, ImageSummary image)
+    {
+        switch (id)
+        {
+            case "run":
+                _runFrom = image.Tags[0].Display;
+                break;
+
+            case "tag":
+                _tagging = image;
+                break;
+
+            case "push":
+                _pushing = image.Tags[0].Display;
+                break;
+
+            case "save":
+                return SaveAsync(image);
+
+            case "copy-id":
+                return Shell.WriteClipboardAsync(image.Id);
+
+            case "remove":
+                return RemoveAsync(image);
+        }
+
+        return Task.CompletedTask;
+    }
+
     string? _runFrom;
 
     ImageSummary? _tagging;

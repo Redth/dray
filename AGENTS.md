@@ -37,6 +37,11 @@ its own title bar or button row in HTML is a bug on every head that has a native
 head uses `<dialog>` and `showModal()`, never a hand-rolled overlay. DESIGN.md §2.4b, and
 `docs/NATIVE-SHELL.md` §4 for each platform's frame.
 
+**Text is not selectable by default.** `user-select: none` on the app, menus and dialogs — drag-
+selecting chrome is the clearest tell that a window is a web page. Anything worth copying gets a
+copy control instead; selection stays on only where a *range* is the unit of interest (logs,
+terminal, editor, raw responses) and on form controls. DESIGN.md §2.6.
+
 **Never poll a list.** State comes from the Docker event stream into the entity store. A whole-list
 re-fetch on a timer is a bug, not a fallback.
 

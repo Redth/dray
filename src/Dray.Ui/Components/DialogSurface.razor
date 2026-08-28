@@ -6,6 +6,10 @@
 @implements IDisposable
 @inject NativeDialogState State
 
+@* Its own document — a native dialog's body is a separate WebView, so it needs its own copy of
+   the symbols. *@
+<IconSprite />
+
 <div class="surface">
     @if (State.Current is { } request)
     {

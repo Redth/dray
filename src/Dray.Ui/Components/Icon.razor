@@ -6,7 +6,10 @@
     {
         <title>@Label</title>
     }
-    <use href="@($"_content/Dray.Ui/icons/sprite.svg#{Icons.SpriteId(Name)}")" />
+    @* Same-document, not "sprite.svg#id": WebKit does not resolve an external <use>, and renders
+       a 0x0 box with no error — so every icon in the macOS app disappeared while the web head
+       looked correct. IconSprite puts the symbols in the document; see build/gen-icons.mjs. *@
+    <use href="@($"#{Icons.SpriteId(Name)}")" />
 </svg>
 
 @code {
