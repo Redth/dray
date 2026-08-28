@@ -101,12 +101,13 @@ public static class ContainerGrid
 
             ["ports"] = c.Ports.Count == 0 ? "—" : string.Join("  ", c.Ports.Select(p => p.Display)),
 
-            ["uptime"] = Humanize.Since(c.Since, now),
+            // Humanized for reading, numeric for sorting — see GridValue. Sorting by uptime is
+            // the reason anyone sorts this page, and "18h" against "2mo" as text is nonsense.
+            ["uptime"] = GridValue.When(c.Since, Humanize.Since(c.Since, now)),
 
-            ["cpu"] = Humanize.Percent(c.CpuPercent),
-            ["memory"] = c.MemoryBytes is { } bytes ? Humanize.Bytes(bytes) : "—",
-
-            ["net"] = c.NetworkBytes is { } net ? Humanize.Bytes(net) : "—",
+            ["cpu"] = GridValue.Number(c.CpuPercent, Humanize.Percent(c.CpuPercent)),
+            ["memory"] = GridValue.Bytes(c.MemoryBytes, c.MemoryBytes is { } bytes ? Humanize.Bytes(bytes) : "—"),
+            ["net"] = GridValue.Bytes(c.NetworkBytes, c.NetworkBytes is { } net ? Humanize.Bytes(net) : "—"),
         };
 
     /// <summary>

@@ -49,7 +49,9 @@ public static class ImageGrid
 
             // An engine that does not measure size gets an em dash, not "0 B": a measured zero and
             // an unknown are different answers.
-            ["size"] = image.SizeReported ? Humanize.Bytes(image.SizeBytes) : "—",
+            ["size"] = GridValue.Bytes(
+                image.SizeReported ? image.SizeBytes : null,
+                image.SizeReported ? Humanize.Bytes(image.SizeBytes) : "—"),
 
             ["used"] = image.IsInUse switch
             {
@@ -62,7 +64,9 @@ public static class ImageGrid
             },
 
             ["id"] = new GridChip(image.ShortId, image.Id, "Click to copy the full image ID"),
-            ["created"] = image.Created is { } created ? Humanize.Since(created, now) : "—",
+            ["created"] = GridValue.When(
+                image.Created,
+                image.Created is { } created ? Humanize.Since(created, now) : "—"),
         };
 }
 
@@ -101,11 +105,15 @@ public static class VolumeGrid
 
             // Null means the engine did not measure it, which is not the same as empty and must not
             // read as zero.
-            ["size"] = volume.SizeBytes is { } size ? Humanize.Bytes(size) : "—",
+            ["size"] = GridValue.Bytes(
+                volume.SizeBytes,
+                volume.SizeBytes is { } size ? Humanize.Bytes(size) : "—"),
 
             ["stack"] = volume.Stack ?? "—",
             ["driver"] = volume.Driver,
-            ["created"] = volume.Created is { } created ? Humanize.Since(created, now) : "—",
+            ["created"] = GridValue.When(
+                volume.Created,
+                volume.Created is { } created ? Humanize.Since(created, now) : "—"),
         };
 }
 

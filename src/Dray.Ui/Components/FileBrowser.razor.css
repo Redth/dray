@@ -172,3 +172,10 @@
         display: none;
     }
 }
+
+/* Takes the room the breadcrumbs had, so the bar does not change shape when it appears. */
+.fb__path {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: var(--text-sm);
+}

@@ -30,6 +30,9 @@ public enum GridCell
     /// <summary>A <see cref="GridChip"/>: a short value that copies its long form when clicked.</summary>
     Chip,
 
+    /// <summary>A <see cref="GridEntry"/>: an icon and a name. What a file listing's first column is.</summary>
+    Entry,
+
     /// <summary>A byte count, humanized. Sorts by the number, not the text.</summary>
     Bytes,
 
@@ -92,6 +95,34 @@ public sealed record GridState(string Tone, string Glyph, string Word, string? D
 public sealed record GridLink(string Text, string Href, string? Sub = null);
 
 /// <summary>
+/// A cell that displays one way and sorts another.
+/// <para>
+/// Everything humanized needs this. "702 B", "746 B" and "89 B" sort in that order as text, which
+/// is the wrong order and looks like a broken sort rather than a formatting decision — and the same
+/// goes for "18h" against "2mo", and "1.4%" against "12.0%". The number is kept beside the words so
+/// the column can be read by a person and ordered by a machine.
+/// </para>
+/// </summary>
+public sealed record GridValue(IComparable? Sort, string Display)
+{
+    public static GridValue Bytes(long? value, string display) => new(value, display);
+
+    public static GridValue When(DateTimeOffset? value, string display) => new(value, display);
+
+    public static GridValue Number(double? value, string display) => new(value, display);
+}
+
+/// <summary>
+/// An icon and a name, on one line.
+/// <para>
+/// A file listing's first column, where the icon is doing real work — it is the fastest way to tell
+/// a directory from a file, faster than reading either the name or the mode. <paramref name="Note"/>
+/// is for what a name alone does not say: a symlink's target.
+/// </para>
+/// </summary>
+public sealed record GridEntry(string Text, IconRef Icon, string? Note = null);
+
+/// <summary>
 /// A short form of a long value, which puts the long form on the clipboard when clicked.
 /// <para>
 /// For digests and ids: the first characters are what people recognise, and the whole thing is
@@ -119,7 +150,12 @@ public static class GridSort
         // anyone sorts by it.
         GridState state => state.Rank,
 
+        // The sort value the cell was given, which is the whole point of GridValue. Null sorts
+        // last, and "not measured" is exactly the case that should not lead the column.
+        GridValue shown => shown.Sort,
+
         GridLink link => link.Text,
+        GridEntry entry => entry.Text,
         GridChip chip => chip.Copy,
         IComparable comparable => comparable,
         _ => value.ToString(),

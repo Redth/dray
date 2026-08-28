@@ -12,18 +12,34 @@
         <Button Label="Up" Icon="IconRef.FolderUp" Variant="ButtonVariant.Ghost" IconOnly="true"
                 Disabled="@(FileEntry.ParentOf(_path) is null)" OnClick="GoUpAsync" />
 
-        <nav class="fb__crumbs" aria-label="Path">
-            @foreach (var (label, target) in Crumbs)
-            {
-                <button type="button" class="fb__crumb @(target == _path ? "is-current" : null)"
-                        @onclick="() => NavigateAsync(target)">@label</button>
-
-                @if (target != _path)
+        @* Two ways to move: click a crumb, or type the path. Clicking is faster for going up and
+           useless for going somewhere deep — /var/lib/postgresql/data is four clicks and a lot of
+           guessing if it is not on screen, and one paste if it is a path you already have. *@
+        @if (_typing)
+        {
+            <input class="input fb__path mono" @ref="_pathBox" placeholder="/path/to/somewhere"
+                   @bind="_typed" @bind:event="oninput"
+                   @onkeydown="OnPathKeyAsync" @onblur="() => _typing = false" />
+        }
+        else
+        {
+            <nav class="fb__crumbs" aria-label="Path">
+                @foreach (var (label, target) in Crumbs)
                 {
-                    <span class="fb__sep" aria-hidden="true">/</span>
+                    <button type="button" class="fb__crumb @(target == _path ? "is-current" : null)"
+                            @onclick="() => NavigateAsync(target)">@label</button>
+
+                    @if (target != _path)
+                    {
+                        <span class="fb__sep" aria-hidden="true">/</span>
+                    }
                 }
-            }
-        </nav>
+            </nav>
+
+            <Button Label="Type a path" Icon="IconRef.Search" IconOnly="true"
+                    Tooltip="Go straight to a path" Variant="ButtonVariant.Ghost"
+                    OnClick="BeginTyping" />
+        }
 
         <span class="fb__spacer"></span>
 
@@ -105,39 +121,20 @@
             }
             else if (_listing is { } current)
             {
-                <table class="table fb__table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th class="num">Size</th>
-                            <th>Mode</th>
-                            <th class="num">Modified</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var entry in current.Sorted)
-                        {
-                            <tr @key="entry.Path"
-                                class="@(entry.Path == _open?.Path ? "is-selected" : null)"
-                                @onclick="() => ActivateAsync(entry)">
-                                <td>
-                                    <div class="fb__name">
-                                        <Icon Name="@IconFor(entry)" Size="IconSize.Sm" />
-                                        <span>@entry.Name</span>
-
-                                        @if (entry.LinkTarget is { } target)
-                                        {
-                                            <span class="muted mono fb__link">→ @target</span>
-                                        }
-                                    </div>
-                                </td>
-                                <td class="num mono muted">@(entry.IsDirectory ? "—" : Humanize.Bytes(entry.Size))</td>
-                                <td class="mono muted fb__mode">@(entry.Mode ?? "—")</td>
-                                <td class="num muted">@(entry.Modified is { } m ? Humanize.Since(m) : "—")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                @* The same table as every other list in the app, which is what buys sorting and
+                   column resizing here. Directories stay first whatever column is sorted — a
+                   folder has no size to compare, and scattering folders through a size sort is not
+                   what anyone means by it. *@
+                <DataTable TRow="FileEntry"
+                           Flush="true"
+                           Columns="FileGrid.Columns()"
+                           Rows="current.Sorted"
+                           Values="e => FileGrid.Row(e)"
+                           Key="e => e.Path"
+                           GroupField="@FileGrid.GroupField"
+                           Selected="Chosen"
+                           OnRowClick="c => ActivateByPathAsync(c.Row)"
+                           Placeholder="Nothing here" />
 
                 @if (current.Note is { } note)
                 {
@@ -266,9 +263,62 @@
         }
     }
 
+    // ---------------------------------------------------------------- typing a path
+
+    bool _typing;
+    string _typed = "";
+    ElementReference _pathBox;
+
+    bool _focusPath;
+
+    void BeginTyping()
+    {
+        _typing = true;
+        _typed = _path;
+
+        // Focused after the render that creates the box, not here. InvokeAsync(StateHasChanged)
+        // queues a render rather than waiting for one, so focusing on the next line reaches an
+        // ElementReference that has never been assigned — which throws and takes the circuit with
+        // it.
+        _focusPath = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool first)
+    {
+        if (!_focusPath) return;
+
+        _focusPath = false;
+        await _pathBox.FocusAsync();
+    }
+
+    async Task OnPathKeyAsync(KeyboardEventArgs e)
+    {
+        // Escape puts the crumbs back rather than navigating somewhere half-typed.
+        if (e.Key == "Escape")
+        {
+            _typing = false;
+            return;
+        }
+
+        if (e.Key != "Enter") return;
+
+        _typing = false;
+
+        var target = _typed.Trim();
+        if (target.Length > 0) await NavigateAsync(target);
+    }
+
     Task NavigateAsync(string path) => Guarded(() => LoadAsync(path));
 
     Task GoUpAsync() => FileEntry.ParentOf(_path) is { } parent ? Guarded(() => LoadAsync(parent)) : Task.CompletedTask;
+
+    /// <summary>The open file, as the table's selection — one row, or none.</summary>
+    IReadOnlyCollection<string> Chosen => _open is { } open ? [open.Path] : [];
+
+    Task ActivateByPathAsync(string path)
+        => _listing?.Entries.FirstOrDefault(e => e.Path == path) is { } entry
+            ? ActivateAsync(entry)
+            : Task.CompletedTask;
 
     async Task ActivateAsync(FileEntry entry)
     {

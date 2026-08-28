@@ -112,6 +112,17 @@
     [Parameter] public string Placeholder { get; set; } = "Nothing here";
 
     /// <summary>
+    /// A field every sort is grouped by first, or null for none.
+    /// <para>
+    /// Directories before files in a file listing, whatever column the user sorted. Sorting by size
+    /// with folders scattered through the result is not what anyone means by sorting by size, and a
+    /// folder has no size to compare — so the grouping is not a sort the user chose, it is one that
+    /// survives the one they did.
+    /// </para>
+    /// </summary>
+    [Parameter] public string? GroupField { get; set; }
+
+    /// <summary>
     /// Drops the border, radius and surface, for a table that is already inside a card. A card
     /// inside a card is always wrong — it reads as a bug, and the inner border fights the outer one
     /// for the eye (DESIGN.md, and the same rule .card .panel already follows).
@@ -134,12 +145,16 @@
             // Not named `field`: in C# 14 that binds to a synthesized backing field.
             if (_sort is not { } sortBy) return Rows;
 
-            var sorted = Rows
-                .OrderBy(r => Values(r).GetValueOrDefault(sortBy), Comparer<object?>.Create(GridSort.Compare))
-                .ToList();
+            var comparer = Comparer<object?>.Create(GridSort.Compare);
 
-            if (_descending) sorted.Reverse();
-            return sorted;
+            var ordered = Rows.OrderBy(r => Values(r).GetValueOrDefault(sortBy), comparer).ToList();
+            if (_descending) ordered.Reverse();
+
+            // After the reverse, so the group order is not flipped with it: directories stay first
+            // whether the sort is ascending or descending.
+            return GroupField is { } group
+                ? [.. ordered.OrderBy(r => Values(r).GetValueOrDefault(group), comparer)]
+                : ordered;
         }
     }
 
@@ -250,6 +265,20 @@
                   </span>
                 : @<span></span>,
 
+            @* An icon and a name. The icon is the fastest way to tell a directory from a file —
+               faster than reading the name or the mode. *@
+            GridCell.Entry => value is GridEntry entry
+                ? @<span class="dt__entry">
+                      <Icon Name="entry.Icon" Size="IconSize.Sm" />
+                      <span class="dt__entryname">@entry.Text</span>
+
+                      @if (entry.Note is { Length: > 0 } note)
+                      {
+                          <span class="mono muted dt__note">@note</span>
+                      }
+                  </span>
+                : @<span></span>,
+
             GridCell.Chip => value is GridChip chip
                 ? @<button type="button" class="dt__chip mono" title="@(chip.Tooltip ?? chip.Copy)"
                            @onclick:stopPropagation
@@ -264,7 +293,10 @@
                                MenuLabel="@($"More actions")"
                                OnAction="id => OnAction.InvokeAsync((key, id))" />,
 
-            _ => @<span>@value</span>,
+            @* A humanized value renders its words and sorts by its number — see GridValue. *@
+            _ => value is GridValue shown
+                ? @<span>@shown.Display</span>
+                : @<span>@value</span>,
         };
     }
 

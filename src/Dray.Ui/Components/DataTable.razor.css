@@ -138,3 +138,23 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* An icon and a name on one line. The name is what gives way when the column is narrow; the icon
+   and a symlink's target do not, because both are short and both say something the name cannot. */
+.dt__entry {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+}
+
+.dt__entryname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dt__note {
+    flex: 0 0 auto;
+    font-size: var(--text-xs);
+}
