@@ -206,7 +206,19 @@ because images dwarf everything else and against the total the other three are i
 exactly when someone is checking whether volumes have grown. An engine that cannot answer says so
 instead of showing `0 B`.
 
-**Still open:** push, tag, save/load, and the network topology view.
+**Push, tag, save and load** are done. An archive is streamed in both directions and written
+beside its destination before being moved into place, so an interrupted save cannot leave a
+half-written file where a whole one is expected. The controls are gated on the head as well as the
+engine: an archive is a file on this machine, so the web head — which has no file dialog — offers
+neither.
+
+**The topology view** answers which containers share which network, as a grid rather than a node
+diagram. The answer is a set of memberships; a diagram of it is mostly empty space, unreadable past
+a dozen containers, and hides the thing worth seeing, which is a row with two marks in it. Each
+cell carries the address that container has on that network, and a container reaching more than one
+is marked and sorted to the top — that container is how traffic crosses between them.
+
+**Phase 4 is complete.**
 
 **Demo:** reclaim 20GB and know precisely what was deleted before confirming.
 **Exit:** no destructive operation is one unconfirmed click · prune preview matches reality.
@@ -241,7 +253,19 @@ The service key colours are generated tokens (`--key-1`…`--key-8`), contrast-v
 themes like every other colour, and deliberately *not* the semantic palette — reusing danger red
 for a service called `api` would make every one of its lines look like an error.
 
-**Still open:** scale, the service dependency graph, and watch mode.
+**Scale** is a stepper per service, running `up -d --no-recreate --scale`, so adding a replica does
+not restart the containers already up.
+
+**The dependency graph** is read from the compose file, because the engine keeps no record of
+`depends_on` — compose uses it to decide start order and then forgets it. Layered left to right,
+with a barycentre pass so edges do not cross for no reason, and a cycle drawn rather than dropped:
+compose refuses to run one, and hiding the services involved would hide the reason.
+
+**Watch mode** is offered only where it would do something — compose new enough to have the
+subcommand, and a `develop.watch` block in the file. It is the one command here that never
+finishes, so it has its own token and stops when the page goes away.
+
+**Phase 5 is complete.**
 
 **Demo:** open a project's stack, bring it up, watch one service fail its healthcheck, read that
 service's logs in the aggregated view, fix the compose file, recreate just that service.
@@ -273,8 +297,23 @@ service's logs in the aggregated view, fix the compose file, recreate just that 
   verbatim. Step counting handles both engines' formats — Docker's `Step 3/12 :` and podman's
   `STEP 3/12:`.
 
-**Still open:** Docker Hub / GHCR search and browse, push, buildx builder selection, notifications
-for long operations, and the menu-bar item.
+- **Registry search** lives in the pull dialog rather than in a browser of its own, because finding
+  an image and pulling it is one thought. The engine does the searching — it already holds the
+  registry configuration and the credentials — and the reader handles both engines' response
+  shapes, which differ in field names and not merely in case.
+- **Notifications** for pull, push, build and every compose command, and only when the window is
+  not in front: a notification about something the user is watching is noise. The web head posts
+  through the Notification API; the macOS half waits on phase 7's signing, because
+  `UNUserNotificationCenter` needs an entitled bundle and raises without one.
+- **The menu-bar item** shows how many containers are running and lists them, each with Open, Stop
+  and Restart. It reads the same store the UI does, so it follows the event stream rather than
+  polling.
+
+**Still open: buildx builder selection.** Deliberately not written blind. Dray's build goes through
+the Engine API rather than the buildx CLI, so selecting a builder means shelling out to
+`docker buildx build` — and there is no `docker` CLI on the development machine to check any of it
+against. Every engine claim in this project that was written from documentation rather than
+measurement turned out wrong; this one waits for a machine with buildx on it.
 
 **Demo:** ⌘K → "restart api" → Enter, without the window ever being focused on a list.
 **Exit:** credentials never touch `config.json` in plaintext · palette covers 100% of commands.
@@ -290,9 +329,17 @@ for long operations, and the menu-bar item.
   i18n plumbing (strings externalized; ship English)
 
 **Note on macOS verification.** The macOS head builds clean, launches, runs without a crash
-report, and shares every Razor component with the web head — one RCL, no per-head UI. What could
-not be done in this environment is *looking at the window*: screen-control access was declined, so
-no screenshot of the native app exists. `ChromeSignatureTests` covers the part that is genuinely
+report, and shares every Razor component with the web head — one RCL, no per-head UI. It is driven
+through MAUI DevFlow, which reaches both halves: `ui screenshot` captures the native window and
+CDP reaches the Blazor DOM inside it. That is enough to verify behaviour on macOS rather than
+assume it — the stack cards, their disclosure, the overflow menu collapsing when the window is
+narrowed to 640px, the network topology grid, and the AppKit colours arriving as CSS custom
+properties on `<html>` have all been checked there.
+
+What DevFlow cannot show is the WebView's *pixels*. The WKWebView is transparent so the native
+window colour shows through, and its layer does not composite into the window capture — so the
+screenshot shows the real native sidebar over an empty content area. Everything inside that area is
+verified through the DOM and through the web head, which renders the same markup. `ChromeSignatureTests` covers the part that is genuinely
 native-only and invisible from the web head — whether the `NSToolbar` rebuilds when a page's action
 set changes shape, which is what makes a Pause button disappear when the selected engine cannot
 pause. Everything else on screen is the same markup the web screenshots show.

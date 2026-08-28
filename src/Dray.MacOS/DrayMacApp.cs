@@ -23,6 +23,7 @@ public sealed class DrayMacApp : Application
 
     FlyoutPage? _flyout;
     BlazorContentPage? _content;
+    MacStatusItem? _status;
 
     // Native menu targets are plain NSObjects; without a strong reference the runtime collects
     // them and the menu items silently stop working (docs/NATIVE-SHELL.md section 1.5).
@@ -50,6 +51,11 @@ public sealed class DrayMacApp : Application
         };
 
         NSApplication.SharedApplication.BeginInvokeOnMainThread(AddAppMenuItems);
+
+        // The menu bar item answers "is anything running?" without the window, which is the
+        // question this app gets asked most often and the one it should not need a window for.
+        NSApplication.SharedApplication.BeginInvokeOnMainThread(() =>
+            _status = new MacStatusItem(_services.GetRequiredService<EngineManager>(), _shell));
 
         // Discover and connect in the background; the UI shows its connecting state until this
         // lands rather than blocking the window from appearing.
