@@ -426,6 +426,20 @@ input, textarea, select {
   .table :is(th, td).col-mid {
     display: none;
   }
+
+  /* The same idea for the controls in a row. A row keeps the actions that act on what the row is
+     showing — start it, stop it — and gives up the ones that are about it, which its own page
+     offers anyway. Marked per button rather than measured: there is one of these per row and a
+     resize observer per row is four hundred of them. */
+  .row-actions .act-low {
+    display: none;
+  }
+
+  /* And the long half of a state. "Exited 137" stays; "· killed (out of memory)" moves to the
+     tooltip, where the pill's title already had it. */
+  .table .pill__detail {
+    display: none;
+  }
 }
 
 /* ------------------------------------------------------------------ framework overlays

@@ -7,7 +7,16 @@
 
 <span class="pill pill--@Tone" title="@Status.Label">
     <span class="pill__glyph" aria-hidden="true">@Status.Glyph</span>
-    <span class="pill__word">@Status.Label</span>
+    <span class="pill__word">@Status.Word</span>
+
+    @if (Status.Detail is { } detail)
+    {
+        @* The plain-language half of an exit code — "killed (out of memory)". It is the reason the
+           row is worth reading, so it is inline where there is room, and in the tooltip where
+           there is not: a pill three hundred pixels wide is what pushes a narrow table into a
+           horizontal scroll. *@
+        <span class="pill__detail">· @detail</span>
+    }
 </span>
 
 @code {

@@ -212,10 +212,15 @@
                                         @if (Engine.Selected?.Capabilities.SupportsRename ?? true)
                                         {
                                             <Button Label="@($"Rename {c.Name}")" Icon="IconRef.Inspect" IconOnly="true"
+                                                    Class="act-low"
                                                     Variant="ButtonVariant.Ghost" OnClick="() => BeginRename(c)" />
                                         }
 
+                                        @* Both of these are about the container rather than what it
+                                           is doing, and both are on its own page. They are the two
+                                           the row gives up first when the window is narrow. *@
                                         <Button Label="@($"Copy full ID of {c.Name}")" Icon="IconRef.Copy" IconOnly="true"
+                                                Class="act-low"
                                                 Variant="ButtonVariant.Ghost" OnClick="() => CopyIdAsync(c)" />
                                     </div>
                                 </td>
