@@ -37,6 +37,9 @@ jobs:
       - name: Token lint
         run: node build/lint-tokens.mjs
 
+      - name: Vendored Tabulator is current
+        run: node build/vendor-tabulator.mjs --check
+
   build:
     name: Build (${{ matrix.name }})
     needs: design
