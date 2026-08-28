@@ -30,6 +30,12 @@
     font-weight: var(--text-xs-weight);
 }
 
+.grid ::deep .tabulator .tabulator-tableholder,
+.grid ::deep .tabulator .tabulator-table {
+    background: transparent;
+    color: inherit;
+}
+
 .grid ::deep .tabulator .tabulator-col {
     background: transparent;
     border-right: 0;
@@ -43,12 +49,16 @@
 }
 
 /* The drag target for resizing. Invisible until pointed at, because a column of visible grab
-   handles is a lot of furniture for something used occasionally. */
-.grid ::deep .tabulator .tabulator-col-resize-handle {
+   handles is a lot of furniture for something used occasionally.
+
+   Scoped to the header: Tabulator puts a handle in every *cell* as well, and widening those pushed
+   every column out of line with its own heading — the body drifted left of the header by six
+   pixels per column. */
+.grid ::deep .tabulator .tabulator-col .tabulator-col-resize-handle {
     width: 6px;
 }
 
-.grid ::deep .tabulator .tabulator-col-resize-handle:hover {
+.grid ::deep .tabulator .tabulator-col .tabulator-col-resize-handle:hover {
     background: var(--line-strong);
 }
 
@@ -62,6 +72,12 @@
     background: var(--surface-2);
 }
 
+/* The selection the page decided on — see grid.js. Same treatment as the old table's, so a row
+   looks selected in the same way it always did. */
+.grid ::deep .tabulator .tabulator-row.is-selected {
+    background: var(--selected, var(--surface-2));
+}
+
 .grid ::deep .tabulator .tabulator-cell {
     border-right: 0;
     padding: var(--row-pad-y) var(--s3);
@@ -73,6 +89,12 @@
 .grid ::deep .tabulator .tabulator-placeholder {
     color: var(--muted);
     font-size: var(--text-base);
+}
+
+/* A state in a grid cell is a column value, same as in a table: "Exited 137", with the
+   explanation in the tooltip. See the note in app.css. */
+.grid ::deep .pill__detail {
+    display: none;
 }
 
 /* ---------------------------------------------------------------- cells */

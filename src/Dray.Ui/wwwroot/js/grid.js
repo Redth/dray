@@ -157,7 +157,12 @@ export const grid = {
       selectableRows: false,
     });
 
-    const state = { table, dotnet, el };
+    const state = { table, dotnet, el, selected: new Set() };
+
+    // Selection lives in C# — click, shift-range, Escape and select-all are the page's rules, not
+    // the grid's — so the grid only paints what it is told. rowFormatter runs for every row the
+    // grid renders, which is what keeps the class right as rows scroll in and out.
+    table.on('renderComplete', () => paint(state));
 
     // One delegated listener rather than one per cell: rows come and go as the grid virtualizes,
     // and a listener per row would leak every time it scrolled.
@@ -174,23 +179,94 @@ export const grid = {
         e.preventDefault();
         const box = more.getBoundingClientRect();
         dotnet.invokeMethodAsync('OnMenu', more.dataset.row, box.left, box.bottom, box.right);
+        return;
       }
+
+      // A link in a cell is a link: let it navigate rather than treating it as a click on the row.
+      if (e.target.closest('a')) return;
+
+      const row = e.target.closest('.tabulator-row');
+      if (!row) return;
+
+      const key = keyOf(state, row);
+      if (key !== null) dotnet.invokeMethodAsync('OnRow', key, e.metaKey || e.ctrlKey, e.shiftKey);
+    };
+
+    state.onDouble = (e) => {
+      if (e.target.closest('a') || e.target.closest('button')) return;
+
+      const row = e.target.closest('.tabulator-row');
+      if (!row) return;
+
+      const key = keyOf(state, row);
+      if (key !== null) dotnet.invokeMethodAsync('OnOpen', key);
     };
 
     el.addEventListener('click', state.onClick);
+    el.addEventListener('dblclick', state.onDouble);
+
+    // A virtualized grid works out how many rows fit from the height it had when it was built, and
+    // Blazor builds this one during the render that gives the page its height — so at construction
+    // it measures nothing and draws nothing. Redrawing when the element's size settles is what
+    // makes the first paint appear, and it is the same thing that keeps it right when the window
+    // is resized or the sidebar collapses.
+    if (typeof ResizeObserver !== 'undefined') {
+      state.observer = new ResizeObserver(() => {
+        if (state.frame) return;
+
+        state.frame = requestAnimationFrame(() => {
+          state.frame = 0;
+          if (el.clientHeight > 0) state.table.redraw(true);
+        });
+      });
+
+      state.observer.observe(el);
+    }
+
     return state;
+  },
+
+  /** Paint the selection the page decided on. */
+  select(state, keys) {
+    if (!state) return;
+
+    state.selected = new Set(keys || []);
+    paint(state);
   },
 
   /** Replace the data without rebuilding the grid, so sort order and column widths survive. */
   update(state, rows) {
     if (!state?.table) return;
-    state.table.replaceData(rows);
+
+    // redraw(true) rather than plain replaceData, and unconditionally: the row count changing is
+    // exactly when the virtual viewport and the column layout need recomputing, and the first load
+    // goes from nothing to everything. Swallowing the promise's rejection without redrawing left
+    // the grid showing rows whose cells had never been given a width.
+    Promise.resolve(state.table.replaceData(rows))
+      .catch(() => {})
+      .then(() => state.table.redraw(true));
   },
 
   destroy(state) {
     if (!state) return;
 
+    if (state.frame) cancelAnimationFrame(state.frame);
+    state.observer?.disconnect();
+
     state.el?.removeEventListener('click', state.onClick);
+    state.el?.removeEventListener('dblclick', state.onDouble);
     state.table?.destroy();
   },
 };
+
+function keyOf(state, el) {
+  const row = state.table.getRows().find((r) => r.getElement() === el);
+  return row ? row.getData().__key : null;
+}
+
+function paint(state) {
+  for (const row of state.table.getRows()) {
+    const el = row.getElement();
+    if (el) el.classList.toggle('is-selected', state.selected.has(row.getData().__key));
+  }
+}

@@ -31,6 +31,18 @@
     /// <summary>Raised with the row key and the chosen action id.</summary>
     [Parameter] public EventCallback<(string Row, string Action)> OnAction { get; set; }
 
+    /// <summary>
+    /// Which rows are selected. The page decides — click, shift-range, Escape and select-all are
+    /// its rules — and the grid only paints the answer.
+    /// </summary>
+    [Parameter] public IReadOnlyCollection<string> Selected { get; set; } = [];
+
+    /// <summary>A row was clicked, with whether the modifier keys were down.</summary>
+    [Parameter] public EventCallback<(string Row, bool Toggle, bool Range)> OnRowClick { get; set; }
+
+    /// <summary>A row was double-clicked.</summary>
+    [Parameter] public EventCallback<string> OnRowOpen { get; set; }
+
     /// <summary>Shown in place of the grid when there are no rows.</summary>
     [Parameter] public string Placeholder { get; set; } = "Nothing here";
 
@@ -58,13 +70,33 @@
             return;
         }
 
-        if (_module is null || _grid is null || _built == Signature) return;
+        if (_module is null || _grid is null) return;
 
-        // Data only — the grid is never rebuilt for new rows, so a sort the user chose and a column
-        // they dragged both survive a container starting somewhere else.
-        _built = Signature;
-        await _module.InvokeVoidAsync("grid.update", _grid, Payload());
+        if (_built != Signature)
+        {
+            // Data only — the grid is never rebuilt for new rows, so a sort the user chose and a
+            // column they dragged both survive a container starting somewhere else.
+            _built = Signature;
+            await _module.InvokeVoidAsync("grid.update", _grid, Payload());
+        }
+
+        if (_painted != SelectionSignature)
+        {
+            _painted = SelectionSignature;
+            await _module.InvokeVoidAsync("grid.select", _grid, Selected);
+        }
     }
+
+    string SelectionSignature => string.Join('|', Selected.Order(StringComparer.Ordinal));
+
+    string _painted = "";
+
+    /// <summary>A row was clicked. What that means is the page's decision, not the grid's.</summary>
+    [JSInvokable]
+    public Task OnRow(string key, bool toggle, bool range) => OnRowClick.InvokeAsync((key, toggle, range));
+
+    [JSInvokable]
+    public Task OnOpen(string key) => OnRowOpen.InvokeAsync(key);
 
     /// <summary>Cheap stand-in for "the data changed", so a render with the same rows does nothing.</summary>
     string Signature => string.Join('|', Rows.Select(r => string.Concat(r.Values.Select(v => v?.ToString()))));
