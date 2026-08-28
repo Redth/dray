@@ -1,14 +1,31 @@
-/* The rule under these tabs runs the full width of the panel, like the tab bar above it, rather
-   than stopping short at the content inset — a divider that ends before the edge reads as a border
-   round a box that is not there. The buttons keep the inset: the tabs above line up with the same
-   edge, and this is the same control one level down. */
-.inspect__modes {
+/* The rule under this row runs the full width of the panel, like the tab bar above it, rather than
+   stopping short at the content inset — a divider that ends before the edge reads as a border
+   round a box that is not there. The controls keep the inset, so they line up with the tabs above
+   and with the panels below. */
+/* The bar and the grid measure themselves against this, not against the window: the panel is a
+   column inside a card and its width has little to do with the window's. */
+.inspect__root {
+    container-type: inline-size;
+}
+
+.inspect__bar {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: var(--s2);
     margin: 0 0 var(--s3);
-    padding: 0 var(--s3);
+    padding: 0 var(--s3) var(--s2);
     border-bottom: 1px solid var(--line);
+}
+
+.inspect__note {
+    font-size: var(--text-sm);
+}
+
+/* The sentence goes before the buttons do: they are what the row is for. */
+@container (max-width: 34rem) {
+    .inspect__note {
+        display: none;
+    }
 }
 
 .inspect__spacer {
@@ -26,19 +43,6 @@
 
 .inspect .panel {
     overflow: hidden;
-}
-
-.inspect__raw {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: var(--r-md);
-    padding: var(--s3);
-    font-size: var(--text-xs);
-    line-height: var(--text-sm-lh);
-
-    /* JSON has long lines and reflowing them destroys the indentation that makes it readable. */
-    overflow-x: auto;
-    white-space: pre;
 }
 
 /* A fact that explains a failure, rather than one that merely describes state. */

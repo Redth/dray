@@ -10,8 +10,17 @@ namespace Dray.MacOS;
 /// which is what keeps it from growing into Sherpa's 780-line, seven-dependency title-bar manager
 /// (docs/NATIVE-SHELL.md section 2.5).
 /// </summary>
-public sealed class MacShellBridge : IShellBridge
+public sealed class MacShellBridge(IServiceProvider services) : IShellBridge
 {
+    /// <summary>
+    /// Dialogs are an NSAlert sheet with a Blazor body — docs/NATIVE-SHELL.md section 4. The one
+    /// service this takes, and it is the app's own provider rather than a feature.
+    /// </summary>
+    readonly MacDialogSheet _dialogs = new(services);
+
+    public Task<string?> ShowDialogAsync(DialogRequest request, CancellationToken ct = default)
+        => _dialogs.ShowAsync(request, ct);
+
     public Task<ConfirmResult> ConfirmDestructiveAsync(DestructiveConfirm request, CancellationToken ct = default)
     {
         var tcs = new TaskCompletionSource<ConfirmResult>();

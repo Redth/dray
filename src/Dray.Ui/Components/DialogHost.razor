@@ -1,0 +1,85 @@
+@* Renders a DialogRequest for hosts with no native dialog. Mounted once by the layout.
+
+   This is the one head that draws its own title row and button row, because a browser has no other
+   frame to put them in — and it draws them with <dialog> and showModal(), which is where focus
+   trapping, focus restore, Escape and the top layer come from. The native heads present an NSAlert
+   sheet, a ContentDialog or an AdwMessageDialog and never render this. See docs/NATIVE-SHELL.md
+   section 4. *@
+@implements IDisposable
+@inject WebDialogService Dialogs
+
+@if (Dialogs.Request is { } request)
+{
+    <Dialog Title="@request.Title" Open="true" OpenChanged="OnOpenChanged" Class="@SizeClass(request.Size)">
+        <ChildContent>
+            @if (request.Subtitle is { Length: > 0 } subtitle)
+            {
+                <p class="dialog__subtitle muted">@subtitle</p>
+            }
+
+            @* The body is the same component every head hosts. Rendered by type rather than as a
+               fragment because a fragment cannot cross into a native head's own WebView. *@
+            <DynamicComponent Type="request.Body" Parameters="Writable(request.ParameterMap)" />
+        </ChildContent>
+
+        <Footer>
+            @foreach (var button in request.Ordered(DialogButtonOrder.CommitLast))
+            {
+                var captured = button;
+
+                <Button Label="@button.Label"
+                        Variant="@Variant(button.Role)"
+                        Danger="@(button.Role == DialogButtonRole.Destructive)"
+                        OnClick="() => Dialogs.Close(captured.Id)" />
+            }
+        </Footer>
+    </Dialog>
+}
+
+@code {
+    protected override void OnInitialized() => Dialogs.Changed += OnChanged;
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Escape and the backdrop are a dismissal, not a choice.</summary>
+    void OnOpenChanged(bool open)
+    {
+        if (!open) Dialogs.Close(null);
+    }
+
+    static ButtonVariant Variant(DialogButtonRole role) => role switch
+    {
+        DialogButtonRole.Confirm => ButtonVariant.Primary,
+
+        // The committing button in a dialog is the one place a filled destructive button is right:
+        // it is the decision itself, not a control sitting beside other controls. DESIGN.md 2.5.
+        DialogButtonRole.Destructive => ButtonVariant.Primary,
+        DialogButtonRole.Cancel => ButtonVariant.Ghost,
+        _ => ButtonVariant.Secondary,
+    };
+
+    static string SizeClass(DialogSize size) => size switch
+    {
+        DialogSize.Small => "dialog--sm",
+        DialogSize.Large => "dialog--lg",
+        _ => "",
+    };
+
+    /// <summary>
+    /// DynamicComponent wants a mutable dictionary. Copied rather than cast, so a caller cannot
+    /// hand one dictionary to two dialogs and have the second edit the first.
+    /// </summary>
+    static Dictionary<string, object> Writable(IReadOnlyDictionary<string, object?> parameters)
+    {
+        var copy = new Dictionary<string, object>(StringComparer.Ordinal);
+
+        foreach (var (key, value) in parameters)
+        {
+            if (value is not null) copy[key] = value;
+        }
+
+        return copy;
+    }
+
+    public void Dispose() => Dialogs.Changed -= OnChanged;
+}

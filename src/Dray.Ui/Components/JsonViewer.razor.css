@@ -1,0 +1,36 @@
+.jv {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    height: 100%;
+    min-height: 0;
+}
+
+.jv__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    flex: 0 0 auto;
+}
+
+.jv__count {
+    font-size: var(--text-xs);
+}
+
+/* JSON has long lines and reflowing them destroys the indentation that makes it readable, so it
+   scrolls in both directions inside its own box rather than wrapping. */
+.jv__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+    padding: var(--s3);
+    overflow: auto;
+    white-space: pre;
+
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+}

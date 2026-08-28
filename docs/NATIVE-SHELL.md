@@ -357,6 +357,32 @@ The title row is the part people notice second: on macOS a dialog attached to a 
 and `MacShellBridge` shows the shape: a sheet on the key window, an accessory view when the decision
 needs one (type-to-confirm), the confirm button disabled until it is safe to press.
 
+### 4.5 As built
+
+`IShellBridge.ShowDialogAsync(DialogRequest)` is the whole surface. A request names a title, a
+Blazor component for the body, its parameters, and a button row; the result is the id of the button
+pressed, or null for a dismissal.
+
+| | |
+|---|---|
+| Contract | `Dray.Core/Shell/DialogRequest.cs`. Button *order* lives here too, with tests — AppKit adds buttons right-to-left and the browser lays them out left-to-right, and that is one sorting rule with a parameter rather than two implementations. |
+| Web | `WebDialogService` + `DialogHost`, over `<dialog>` and `showModal()`. |
+| macOS | `MacDialogSheet` — an `NSAlert` sheet whose `AccessoryView` is `MacDialogBody`, a second `BlazorWebView` built from the app's own service provider and hosting `DialogSurface`. |
+
+Three things about the macOS half that were learned by running it:
+
+- `IMauiContext` is **not** in the app's service collection. It is created per window, so the body
+  takes it from `Application.Current.Windows[0].Handler.MauiContext`; asking DI throws.
+- The sheet attaches to the key window, then the main window, then MAUI's own. Falling through to
+  `RunModal` because the app happened to be in the background blocks the main thread until someone
+  dismisses it — a hang, not a dialog.
+- The accessory view's size has to be set on the `NSView`, not only on the MAUI element, and it has
+  to be decided before the body renders: an alert lays its accessory view out once, from the frame
+  the view already has. That is why `DialogSize` is three named sizes rather than a measurement.
+
+The body declares nothing about chrome. `DialogSurface` renders the component and nothing else — no
+title, no buttons — which is the rule in one file.
+
 ### 4.4 Consequences for how a feature is written
 
 - Anything that would be a modal in a web app is asked for through the shell, not built in the page.

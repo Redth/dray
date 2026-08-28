@@ -6,36 +6,27 @@
    terminal — and Dray exists to make that unnecessary, not to insist its own curation is complete. *@
 @inject IShellBridge Shell
 
-<div class="page page--flush">
-    <div class="inspect__modes" role="tablist" aria-label="Detail level">
-        <button type="button" role="tab" class="tab @(_raw ? null : "is-active")"
-                aria-selected="@((!_raw).ToString().ToLowerInvariant())"
-                @onclick="() => _raw = false">Summary</button>
-
-        <button type="button" role="tab" class="tab @(_raw ? "is-active" : null)"
-                aria-selected="@(_raw.ToString().ToLowerInvariant())"
-                @onclick="() => _raw = true">Raw JSON</button>
+<div class="page page--flush inspect__root">
+    @* One view, not two tabs. The summary is the answer nearly every time, and a tab bar made the
+       page ask a question — "which of these do you want?" — before showing either. The raw
+       response is still one click away, in a dialog, where it can use the whole window instead of
+       the column this panel sits in. *@
+    <div class="inspect__bar">
+        <span class="muted inspect__note">Ten facts about this container, from the engine.</span>
 
         <span class="inspect__spacer"></span>
 
-        <Button Label="Copy" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost" OnClick="CopyAsync" />
+        <Button Label="Copy summary" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost"
+                Tooltip="Copy these facts as text, for an issue or a message"
+                OnClick="CopySummaryAsync" />
+
+        <Button Label="Raw JSON…" Icon="IconRef.Inspect" Variant="ButtonVariant.Secondary"
+                Tooltip="Everything the engine returned, verbatim"
+                Disabled="@string.IsNullOrEmpty(Inspect.RawJson)"
+                OnClick="ShowRawAsync" />
     </div>
 
-    @if (_raw)
-    {
-        @if (string.IsNullOrEmpty(Inspect.RawJson))
-        {
-            <EmptyState Icon="IconRef.Inspect" Title="No raw response"
-                        Body="The engine answered the typed request but not the raw one. The summary above is still accurate." />
-        }
-        else
-        {
-            <pre class="inspect__raw mono"><code>@Inspect.RawJson</code></pre>
-        }
-    }
-    else
-    {
-        <div class="inspect">
+    <div class="inspect">
             <section class="panel">
                 <div class="panel__head"><h3 class="panel__title">Identity</h3></div>
                 <dl class="kv">
@@ -202,8 +193,7 @@
                     </dl>
                 </section>
             }
-        </div>
-    }
+    </div>
 </div>
 
 @code {
@@ -212,7 +202,6 @@
     /// <summary>Open a named volume this container mounts. Not offered when unhandled.</summary>
     [Parameter] public EventCallback<string> OnBrowseVolume { get; set; }
 
-    bool _raw;
 
     /// <summary>
     /// A digest as people refer to it: the algorithm prefix kept, the hash cut to the first twelve
@@ -227,9 +216,24 @@
         return value[..(colon + 1)] + (hash.Length <= 12 ? hash : hash[..12]);
     }
 
-    // Copies whichever view is on screen: the JSON when reading raw, and otherwise the summary as
-    // text that can be pasted into an issue.
-    Task CopyAsync() => Shell.WriteClipboardAsync(_raw ? Inspect.RawJson : Summarise());
+    /// <summary>The facts as text, for pasting into an issue or a message.</summary>
+    Task CopySummaryAsync() => Shell.WriteClipboardAsync(Summarise());
+
+    /// <summary>
+    /// The engine's own response, in a dialog.
+    /// <para>
+    /// Through the shell rather than as an overlay in the page, so it is a real sheet on macOS, a
+    /// ContentDialog on Windows and a &lt;dialog&gt; in a browser — docs/NATIVE-SHELL.md section 4.
+    /// The button row is one button, because there is nothing here to decide; Copy sits with the
+    /// content, where it acts on the content rather than ending the dialog.
+    /// </para>
+    /// </summary>
+    Task ShowRawAsync() => Shell.ShowDialogAsync(new DialogRequest(
+        $"Raw JSON — {Inspect.Name}",
+        typeof(JsonViewer),
+        new Dictionary<string, object?> { [nameof(JsonViewer.Json)] = Inspect.RawJson },
+        Subtitle: "Everything the engine returned for this container, exactly as it sent it.",
+        Size: DialogSize.Large));
 
     string Summarise()
     {

@@ -10,10 +10,17 @@ namespace Dray.Ui.Services;
 /// picker that silently does nothing would be worse than one that says it is unavailable here.
 /// </para>
 /// </summary>
-public sealed class WebShellBridge(WebConfirmService confirms, IJSRuntime js) : IShellBridge
+public sealed class WebShellBridge(WebConfirmService confirms, WebDialogService dialogs, IJSRuntime js) : IShellBridge
 {
     public Task<ConfirmResult> ConfirmDestructiveAsync(DestructiveConfirm request, CancellationToken ct = default)
         => confirms.AskAsync(request);
+
+    /// <summary>
+    /// The one head that draws the whole dialog itself, because a browser has no other frame.
+    /// <c>DialogHost</c> renders it over <c>&lt;dialog&gt;</c>.
+    /// </summary>
+    public Task<string?> ShowDialogAsync(DialogRequest request, CancellationToken ct = default)
+        => dialogs.ShowAsync(request);
 
     public Task<string?> PickFileAsync(FilePickerOptions options, CancellationToken ct = default)
         => Task.FromResult<string?>(null);

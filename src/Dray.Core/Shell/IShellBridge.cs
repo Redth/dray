@@ -54,6 +54,20 @@ public interface IShellBridge
     /// </summary>
     Task<ConfirmResult> ConfirmDestructiveAsync(DestructiveConfirm request, CancellationToken ct = default);
 
+    /// <summary>
+    /// Present a dialog: a native title row, a Blazor body, and a native button row.
+    /// <para>
+    /// Every pop-up that is not an inline menu comes through here. See docs/NATIVE-SHELL.md
+    /// section 4 for why, and DESIGN.md section 2.4b for the short version — a dialog that draws
+    /// its own title bar or button row in HTML is a bug on every head that has a native one.
+    /// </para>
+    /// </summary>
+    /// <returns>
+    /// The id of the button pressed, or null if the dialog was dismissed without one — Escape,
+    /// the close box, or the sheet being cancelled by the window going away.
+    /// </returns>
+    Task<string?> ShowDialogAsync(DialogRequest request, CancellationToken ct = default);
+
     Task<string?> PickFileAsync(FilePickerOptions options, CancellationToken ct = default);
 
     Task<string?> PickFolderAsync(string title, CancellationToken ct = default);

@@ -33,6 +33,7 @@ builder.Services.AddSingleton<RegistryReader>();
 
 // No native chrome here, so confirmations are rendered by ConfirmHost.
 builder.Services.AddScoped<WebConfirmService>();
+builder.Services.AddScoped<WebDialogService>();
 builder.Services.AddScoped<IShellBridge, WebShellBridge>();
 
 var app = builder.Build();

@@ -44,6 +44,9 @@ public static class MacProgram
         builder.Services.AddSingleton(ShellCapabilities.Native(debug: IsDebug));
         builder.Services.AddSingleton<IShellState, ShellState>();
         builder.Services.AddSingleton<IShellBridge, MacShellBridge>();
+
+        // The request a native dialog is presenting, read by the body in its own WebView.
+        builder.Services.AddSingleton<Dray.Ui.Services.NativeDialogState>();
         builder.Services.AddSingleton<IPlatformTheme, MacTheme>();
 
         // The engine layer, same registrations as the dev host.

@@ -1072,6 +1072,34 @@ input, textarea, select {
   box-shadow: var(--shadow-dialog);
   max-width: min(560px, calc(100vw - var(--s6)));
   width: 100%;
+
+  /* The dialog never grows past the window, and its body is what scrolls. Without this a long
+     body — a raw inspect response is two hundred lines — pushes the button row off the bottom of
+     the screen, leaving a dialog with no visible way out. */
+  max-height: calc(100vh - var(--s6));
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog:not([open]) {
+  display: none;
+}
+
+/* Three sizes, because a question with one field and a document being read want different rooms.
+   The head decides what the size means: these are the browser's answer. */
+.dialog--sm {
+  max-width: min(420px, calc(100vw - var(--s6)));
+}
+
+.dialog--lg {
+  max-width: min(880px, calc(100vw - var(--s5)));
+}
+
+/* Under the title, in the body rather than the head: it is a sentence about the content, and the
+   native heads put it in the alert's informative text for the same reason. */
+.dialog__subtitle {
+  margin: 0 0 var(--s3);
+  font-size: var(--text-sm);
 }
 
 .dialog::backdrop {
@@ -1091,9 +1119,15 @@ input, textarea, select {
   padding: 0 var(--s5) var(--s4);
   font-size: var(--text-base);
   color: var(--muted);
+
+  /* The part that gives way when there is more content than window. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .dialog__foot {
+  flex: 0 0 auto;
   display: flex;
   justify-content: flex-end;
   gap: var(--s2);

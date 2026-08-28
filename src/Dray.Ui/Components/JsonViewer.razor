@@ -1,0 +1,48 @@
+@* The engine's own response, verbatim.
+
+   A dialog body: no title, no button row, because on every head that has them those are the
+   platform's. See docs/NATIVE-SHELL.md section 4. *@
+@inject IShellBridge Shell
+
+<div class="jv">
+    <div class="jv__bar">
+        <span class="muted jv__count">@Lines line@(Lines == 1 ? "" : "s")</span>
+
+        <Button Label="@(_copied ? "Copied" : "Copy")"
+                Icon="@(_copied ? IconRef.Check : IconRef.Copy)"
+                Variant="ButtonVariant.Secondary"
+                OnClick="CopyAsync" />
+    </div>
+
+    <pre class="jv__body mono"><code>@Json</code></pre>
+</div>
+
+@code {
+    /// <summary>The response as the engine sent it. Never re-serialised — see InspectPanel.</summary>
+    [Parameter, EditorRequired] public string Json { get; set; } = "";
+
+    bool _copied;
+
+    int Lines => Json.Length == 0 ? 0 : Json.AsSpan().Count('\n') + 1;
+
+    /// <summary>
+    /// Copy lives in the body rather than the button row.
+    /// <para>
+    /// A native button row closes the dialog when one is pressed — that is what those buttons are
+    /// for. Copy is something done *to* the content, so it belongs with the content, and the row
+    /// is left with the one thing that ends the dialog.
+    /// </para>
+    /// </summary>
+    async Task CopyAsync()
+    {
+        await Shell.WriteClipboardAsync(Json);
+
+        _copied = true;
+        StateHasChanged();
+
+        await Task.Delay(1400);
+
+        _copied = false;
+        StateHasChanged();
+    }
+}
