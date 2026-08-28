@@ -24,6 +24,8 @@
                       Query="@_image"
                       QueryChanged="@(v => _image = v)"
                       Source="SearchImagesAsync"
+                      DebounceMs="350"
+                      GroupOf="i => i.IsLocal ? 0 : 1"
                       LabelOf="i => i.Reference"
                       HaystackOf="i => i.Haystack"
                       KeyOf="i => i.Reference"
@@ -105,7 +107,11 @@
     /// One offerable image. Carries its own haystack so a search matches on the repository and the
     /// short id as well as on the reference the row shows.
     /// </summary>
-    sealed record ImageChoice(string Reference, string Detail, string Haystack);
+    /// <param name="IsLocal">
+    /// Already on this host. Decides which half of the dropdown it sits in: an image that is here
+    /// starts in seconds, and one that is not has to be pulled first.
+    /// </param>
+    sealed record ImageChoice(string Reference, string Detail, string Haystack, bool IsLocal = false);
 
     /// <summary>
     /// What is wrong right now — the first unreadable line, or the engine's refusal.
@@ -137,8 +143,8 @@
     /// The images on this host, read once when the dialog opens.
     /// <para>
     /// Not re-read per keystroke: the list does not change while a dialog is open, and the
-    /// combobox ranks it locally. A registry search — which does need a call per query — is the
-    /// outstanding Phase 6 item and slots in below these.
+    /// combobox ranks it locally. The registry search below it does need a call per query, which
+    /// is what the combobox's debounce is for.
     /// </para>
     /// </summary>
     async Task LoadLocalAsync()
@@ -151,14 +157,72 @@
                 .SelectMany(i => i.Tags.Select(t => new ImageChoice(
                     t.Display,
                     $"{Humanize.Bytes(i.SizeBytes)}{(i.IsInUse is true ? $" · {i.ContainerCount} in use" : "")}",
-                    $"{t.Display} {t.ShortRepository} {i.ShortId}".ToLowerInvariant())))
+                    $"{t.Display} {t.ShortRepository} {i.ShortId}".ToLowerInvariant(),
+                    IsLocal: true)))
                 .Where(c => !c.Reference.StartsWith("<untagged>", StringComparison.Ordinal))
                 .DistinctBy(c => c.Reference),
         ];
     }
 
-    Task<IReadOnlyList<ImageChoice>> SearchImagesAsync(string query, CancellationToken ct)
-        => Task.FromResult(_local);
+    /// <summary>
+    /// Local images first, then what the registry has.
+    /// <para>
+    /// One dropdown rather than two search boxes: from the user's side "which image" is one
+    /// question, and whether the answer is already on this machine is an attribute of the answer
+    /// rather than a different question. Local first because an image that is here starts in
+    /// seconds and one that is not has to be pulled.
+    /// </para>
+    /// <para>
+    /// The registry is only asked once there is something worth asking about, and never for a
+    /// reference that already names a tag or a host — at that point the user is typing a specific
+    /// image, not looking for one.
+    /// </para>
+    /// </summary>
+    async Task<IReadOnlyList<ImageChoice>> SearchImagesAsync(string query, CancellationToken ct)
+    {
+        var term = query.Trim();
+
+        // Local images are filtered on substring rather than left to the fuzzy ranker. Subsequence
+        // matching is right for commands, where "rsc" should find "Restart container"; for an
+        // image reference it puts mcr.microsoft.com/dotnet/sdk under "redis" — r, e, d, i, s all
+        // appear in it — and grouping local first would then rank that above the real answer.
+        var local = term.Length == 0
+            ? _local
+            : [.. _local.Where(c => c.Haystack.Contains(term, StringComparison.OrdinalIgnoreCase))];
+
+        var searchable = term.Length >= 2
+            && !term.Contains(':')
+            && !term.Contains('/')
+            && (Engine.Selected?.Capabilities.SupportsRegistrySearch ?? false);
+
+        if (!searchable) return local;
+
+        try
+        {
+            var remote = await Engine.SearchImagesAsync(term, 6, ct);
+
+            // Anything already here is already in the list above, and the registry's name for it
+            // is usually a longer spelling of the same thing.
+            var known = local.Select(c => c.Reference).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return
+            [
+                .. local,
+                .. remote
+                    .Where(r => !known.Contains(r.Name) && !known.Contains(r.Name + ":latest"))
+                    .Select(r => new ImageChoice(
+                        r.Name,
+                        r.IsOfficial ? "Docker Hub · official" : "Docker Hub",
+                        $"{r.Name} {r.ShortName} {r.Description}".ToLowerInvariant())),
+            ];
+        }
+        catch (Exception)
+        {
+            // No registry, no network, or an engine that would not answer. The local list is still
+            // a useful answer, and a dropdown is the wrong place to report a search failure.
+            return local;
+        }
+    }
 
     async Task SubmitAsync()
     {

@@ -126,6 +126,18 @@
     /// </summary>
     [Parameter] public bool RankLocally { get; set; } = true;
 
+    /// <summary>
+    /// Optional grouping, lowest first. Ranking happens inside a group, so a lower group always
+    /// sits above a higher one however well the higher one matched.
+    /// <para>
+    /// For the one case that needs it: an image already on this machine belongs above one that
+    /// would have to be pulled, and "how well the text matched" is the wrong reason to reorder
+    /// that. Without this the local <c>redis:7-alpine</c> ranked below five registry results,
+    /// because its reference is longer.
+    /// </para>
+    /// </summary>
+    [Parameter] public Func<TItem, int>? GroupOf { get; set; }
+
     /// <summary>How long to wait after a keystroke before asking the source. Zero for local lists.</summary>
     [Parameter] public int DebounceMs { get; set; }
 
@@ -212,7 +224,9 @@
     void Rerank(string query)
     {
         _matches = RankLocally
-            ? [.. FuzzySearch.Rank(_items, query, LabelOf, HaystackOf ?? (i => LabelOf(i).ToLowerInvariant())).Take(MaxRows)]
+            ? [.. FuzzySearch.Rank(_items, query, LabelOf, HaystackOf ?? (i => LabelOf(i).ToLowerInvariant()))
+                .OrderBy(m => GroupOf?.Invoke(m.Value) ?? 0)
+                .Take(MaxRows)]
             : [.. _items.Take(MaxRows).Select(i => new SearchMatch<TItem>(i, 0, []))];
 
         if (_selected >= _matches.Count) _selected = Math.Max(0, _matches.Count - 1);
