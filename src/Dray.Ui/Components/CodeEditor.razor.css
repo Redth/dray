@@ -74,3 +74,54 @@
     min-height: 0;
     overflow: hidden;
 }
+
+/* ${VAR} annotations.
+   ::deep because Monaco owns this DOM — it is created by the library inside our host element, so
+   scoped-CSS attributes never reach it. */
+
+/* The reference itself, marked as a thing that gets replaced rather than literal text. */
+::deep .mc-sub {
+    border-radius: 2px;
+    background: var(--surface-2);
+}
+
+::deep .mc-sub--missing,
+::deep .mc-sub--required {
+    /* Underlined rather than filled: a compose file can be dense with these, and four filled
+       highlights in one line would compete with the syntax colouring the editor already does. */
+    text-decoration: underline wavy var(--warn);
+    text-underline-offset: 3px;
+}
+
+::deep .mc-sub--required {
+    text-decoration-color: var(--danger);
+}
+
+/* The resolved value. Not in the model — it cannot be selected, copied or saved. */
+::deep .mc-hint {
+    margin-left: 0.35em;
+    padding: 0 0.35em;
+    border-radius: 2px;
+    font-style: normal;
+    opacity: 0.9;
+}
+
+::deep .mc-hint--ok {
+    color: var(--ok-ink);
+    background: var(--ok-tint);
+}
+
+::deep .mc-hint--default {
+    color: var(--neutral-ink);
+    background: var(--neutral-tint);
+}
+
+::deep .mc-hint--missing {
+    color: var(--warn-ink);
+    background: var(--warn-tint);
+}
+
+::deep .mc-hint--required {
+    color: var(--danger-ink);
+    background: var(--danger-tint);
+}

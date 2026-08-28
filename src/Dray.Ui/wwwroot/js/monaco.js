@@ -179,6 +179,59 @@ export const editor = {
     if (state?.monaco) defineTheme(state.monaco);
   },
 
+  /**
+   * Annotate every ${VAR} with what it will actually resolve to.
+   *
+   * Monaco's `after` content is the inlay-hint mechanism: it draws text that is not in the model,
+   * so nothing here can be selected, copied, or saved into the file. That matters — the annotation
+   * must never become part of what compose reads.
+   *
+   * `annotations` is [{ line, column, length, text, kind }] with 1-based positions, computed in C#
+   * by ComposeInterpolation so the rules live in one tested place rather than being re-implemented
+   * in JavaScript against the same spec.
+   */
+  annotate(state, annotations) {
+    if (!state?.instance) return;
+
+    const monaco = state.monaco;
+    const model = state.instance.getModel();
+    if (!model) return;
+
+    const decorations = (annotations ?? []).map((a) => ({
+      range: new monaco.Range(a.line, a.column, a.line, a.column + a.length),
+      options: {
+        // Marks the reference itself, so it is visibly a thing that gets replaced rather than
+        // literal text.
+        inlineClassName: `mc-sub mc-sub--${a.kind}`,
+
+        after: {
+          content: a.text,
+          inlineClassName: `mc-hint mc-hint--${a.kind}`,
+        },
+
+        // A problem is worth finding from the scrollbar without reading the file. Monaco needs a
+        // real colour rather than a CSS variable, so it comes from the same token resolver the
+        // theme uses — the palette stays in tokens.json either way.
+        overviewRuler: a.kind === 'ok' || a.kind === 'default'
+          ? undefined
+          : {
+              color: tokenColor(a.kind === 'required' ? 'danger' : 'warn'),
+              position: monaco.editor.OverviewRulerLane.Right,
+            },
+
+        hoverMessage: a.hover ? { value: a.hover } : undefined,
+      },
+    }));
+
+    // The collection replaces its own previous decorations, so re-annotating on every edit does
+    // not stack them up.
+    state.subs = state.instance.createDecorationsCollection
+      ? (state.subs
+          ? (state.subs.set(decorations), state.subs)
+          : state.instance.createDecorationsCollection(decorations))
+      : state.instance.deltaDecorations(state.subs ?? [], decorations);
+  },
+
   focus(state) {
     state?.instance?.focus();
   },

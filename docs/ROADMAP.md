@@ -430,8 +430,33 @@ undefined variable and carries on, which is the quietest way a stack has to brea
 that becomes `myapp:` or a port that becomes `:80`. Showing that before it is deployed is the whole
 point of the annotation.
 
+**Progress:** done, and verified against a live stack.
+
+- **Ports, environment and mounts** are structured editors. `RunParser` stays as the paste path, so
+  a line copied from a README still works.
+- **The secret flag** persists as a container label — verified end to end: marking `LICENCE_BLOB`
+  wrote `codes.redth.dray.env-secret` onto the container, `POSTGRES_PASSWORD` was correctly absent
+  from it, and the Env tab masks both afterwards, one from the label and one from the guess.
+- **`Combobox<T>` was built rather than vendored.** Tom Select, Choices.js and the Blazor suites
+  were all measured first; the deciding argument was not size but that the ranking was already
+  written, that a library replaces the element with a tree Blazor no longer owns, and that
+  `lint-tokens.mjs` skips `wwwroot/lib` — so a vendored stylesheet's raw colours would walk past the
+  one gate built to stop them. What a library would have given free was correct ARIA, and the
+  palette did not have it; that gap is now closed in a file we own.
+- **`PathInput` is a separate component**, because path completion is segment-scoped, ranks by
+  prefix rather than subsequence, and treats a trailing `/` as "keep going".
+- **The compose editor annotates every `${VAR}`** with what it resolves to, live, as the `.env`
+  panel beside it is edited — before saving, because seeing what a value will do is the reason to
+  type it.
+
+`ComposeInterpolation` implements Compose's real rules, including the one that catches people out:
+`${TAG:-latest}` replaces an empty value and `${TAG-latest}` keeps it. Bringing the test stack up
+confirmed the semantics from the other side — compose refused to start at all with a `:?` variable
+unset, which is exactly the state the annotation calls "will not run".
+
 **Exit:** nobody has to know a mapping syntax to publish a port · a variable marked secret is masked
 everywhere without exception · a `${VAR}` with nothing behind it is visible before deploy, not after.
+**All three met.**
 
 ---
 

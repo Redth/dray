@@ -1,0 +1,18 @@
+
+/* The compose file and its .env, side by side. The YAML gets the room because it is what is being
+   read; the variables are a reference column beside it. */
+.stack__compose {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 26rem);
+    min-height: 0;
+    height: 100%;
+}
+
+/* Below this the two columns stop being side by side and the .env would be a sliver, so it goes
+   under the editor instead. */
+@media (max-width: 60rem) {
+    .stack__compose {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(20rem, 1fr) auto;
+    }
+}

@@ -1,0 +1,136 @@
+@* The stack's `.env`, beside the compose file it feeds.
+
+   Nothing in the compose file refers to this. Compose loads `.env` from the project directory
+   automatically and uses it to interpolate ${VAR} anywhere in the YAML — which is why the two
+   belong on one screen: the file on the left is unreadable without the values on the right.
+
+   Not to be confused with `env_file:`, which is declared in the YAML and sets a *container's*
+   environment. The compose file never sees those. *@
+@inject IShellBridge Shell
+
+<div class="sep">
+    <div class="sep__head">
+        <span class="panel__title">Variables</span>
+        <span class="sep__path mono muted" title="@Path">@DotEnvFile.FileName</span>
+    </div>
+
+    <div class="sep__body">
+        @if (_error is { } error)
+        {
+            <p class="sep__error" role="alert">@error</p>
+        }
+
+        <EnvEditor Variables="_variables" VariablesChanged="OnChangedAsync" />
+
+        @if (Unused.Count > 0)
+        {
+            @* Harmless, but almost always the leftover of a variable that was renamed in the YAML
+               and not here — which is worth noticing while the pair is on screen together. *@
+            <p class="sep__note muted">
+                Not used by this compose file: @string.Join(", ", Unused).
+            </p>
+        }
+    </div>
+
+    <div class="sep__foot">
+        @if (_dirty)
+        {
+            <span class="sep__dirty muted">Unsaved</span>
+        }
+
+        <Button Label="Save" Variant="ButtonVariant.Primary" Busy="_saving"
+                Disabled="@(!_dirty || _saving)" OnClick="SaveAsync" />
+    </div>
+</div>
+
+@code {
+    /// <summary>The stack's project directory — where compose looks for <c>.env</c>.</summary>
+    [Parameter, EditorRequired] public string WorkingDirectory { get; set; } = "";
+
+    /// <summary>Raised whenever the values change, so the compose editor can re-annotate.</summary>
+    [Parameter] public EventCallback<IReadOnlyList<EnvVar>> VariablesChanged { get; set; }
+
+    /// <summary>Names the compose file actually references, for the unused check.</summary>
+    [Parameter] public IReadOnlyCollection<string> Referenced { get; set; } = [];
+
+    IReadOnlyList<EnvVar> _variables = [];
+    string? _error;
+    string? _loadedFor;
+    bool _dirty;
+    bool _saving;
+
+    string Path => System.IO.Path.Combine(WorkingDirectory, DotEnvFile.FileName);
+
+    IReadOnlyList<string> Unused =>
+    [
+        .. _variables
+            .Select(v => v.Key)
+            .Where(k => !Referenced.Contains(k, StringComparer.Ordinal)),
+    ];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == WorkingDirectory) return;
+
+        _loadedFor = WorkingDirectory;
+        _dirty = false;
+        _error = null;
+
+        Load();
+        await VariablesChanged.InvokeAsync(_variables);
+    }
+
+    /// <summary>
+    /// Read the file if it is there.
+    /// <para>
+    /// A missing <c>.env</c> is the normal case for a stack that has never needed one, not an
+    /// error — the editor simply starts empty and writes the file if anything is added.
+    /// </para>
+    /// </summary>
+    void Load()
+    {
+        try
+        {
+            _variables = System.IO.File.Exists(Path)
+                ? DotEnvFile.Parse(System.IO.File.ReadAllText(Path))
+                : [];
+        }
+        catch (Exception ex)
+        {
+            _variables = [];
+            _error = $"Could not read {DotEnvFile.FileName}: {ex.Message}";
+        }
+    }
+
+    async Task OnChangedAsync(IReadOnlyList<EnvVar> variables)
+    {
+        _variables = variables;
+        _dirty = true;
+
+        // The annotations follow immediately, before saving: seeing what a value will do is the
+        // reason to type it, and making that wait for a save would invert the order.
+        await VariablesChanged.InvokeAsync(_variables);
+    }
+
+    async Task SaveAsync()
+    {
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            System.IO.Directory.CreateDirectory(WorkingDirectory);
+            await System.IO.File.WriteAllTextAsync(Path, DotEnvFile.Serialize(_variables));
+
+            _dirty = false;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not write {DotEnvFile.FileName}: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

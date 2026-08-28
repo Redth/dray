@@ -87,10 +87,20 @@
                 }
                 else if (_file is { } file)
                 {
-                    @* The same editor the container and volume browsers use. A compose file is the
-                       one file in this app whose path came from the engine rather than from a
-                       directory Dray listed, so it is read from the host filesystem directly. *@
-                    <CodeEditor File="file" ReadOnly="@(!_writable)" OnSave="SaveAsync" OnClose="BackToServices" />
+                    @* The compose file and its .env, side by side, because the first is unreadable
+                       without the second: nothing in the YAML refers to the .env, and every
+                       ${VAR} in it resolves from there. *@
+                    <div class="stack__compose">
+                        <CodeEditor File="file" ReadOnly="@(!_writable)" OnSave="SaveAsync"
+                                    OnClose="BackToServices" Annotations="_annotations" />
+
+                        @if (WorkingDirectory is { Length: > 0 } directory)
+                        {
+                            <StackEnvPanel WorkingDirectory="@directory"
+                                           Referenced="_referenced"
+                                           VariablesChanged="OnVariablesChangedAsync" />
+                        }
+                    </div>
                 }
                 else
                 {
@@ -124,7 +134,99 @@
     bool _writable;
     string? _readFor;
 
+    IReadOnlyList<EditorAnnotation> _annotations = [];
+    IReadOnlyCollection<string> _referenced = [];
+
+    /// <summary>
+    /// Where compose looks for <c>.env</c> — the directory it was run from, which it records on
+    /// every container it creates. Falls back to the compose file's own folder, which is the same
+    /// place in all but the unusual case of `-f` pointing elsewhere.
+    /// </summary>
+    string? WorkingDirectory
+        => Stack?.WorkingDirectory is { Length: > 0 } recorded
+            ? recorded
+            : Stack?.ConfigFiles.FirstOrDefault() is { } path
+                ? System.IO.Path.GetDirectoryName(path)
+                : null;
+
     void BackToServices() => _tab = "Services";
+
+    /// <summary>
+    /// Re-annotate as the variables change — before saving, not after.
+    /// <para>
+    /// Seeing what a value will do is the reason to type it, so making the annotation wait for a
+    /// save would put the feedback after the decision it was meant to inform.
+    /// </para>
+    /// </summary>
+    Task OnVariablesChangedAsync(IReadOnlyList<EnvVar> variables)
+    {
+        Annotate(variables);
+        return Task.CompletedTask;
+    }
+
+    void Annotate(IReadOnlyList<EnvVar> variables)
+    {
+        if (_file is not { } file)
+        {
+            _annotations = [];
+            _referenced = [];
+            return;
+        }
+
+        var values = variables.ToDictionary(v => v.Key, v => v.Value, StringComparer.Ordinal);
+        var found = ComposeInterpolation.Find(file.Text, values);
+
+        _referenced = [.. found.Select(s => s.Name).Distinct(StringComparer.Ordinal)];
+
+        _annotations =
+        [
+            .. found.Select(s => new EditorAnnotation(
+                s.Line,
+                s.Column,
+                s.Length,
+                Hint(s),
+                Kind(s.State),
+                Hover(s))),
+        ];
+    }
+
+    /// <summary>
+    /// What is drawn beside the reference. Short, because it sits inside a line of YAML — the
+    /// explanation goes in the hover.
+    /// </summary>
+    static string Hint(Substitution s) => s.State switch
+    {
+        SubstitutionState.Missing => "→ empty",
+        SubstitutionState.Required => "→ will not run",
+        _ when s.Resolved.Length == 0 => "→ empty",
+        _ => "→ " + (s.Resolved.Length > 40 ? s.Resolved[..40] + "…" : s.Resolved),
+    };
+
+    static string Kind(SubstitutionState state) => state switch
+    {
+        SubstitutionState.Resolved => "ok",
+        SubstitutionState.Defaulted => "default",
+        SubstitutionState.Required => "required",
+        _ => "missing",
+    };
+
+    static string? Hover(Substitution s) => s.State switch
+    {
+        // The quiet failure, stated plainly. Compose does not error on this — it substitutes an
+        // empty string and carries on, so an image tag becomes `myapp:` and fails much later.
+        SubstitutionState.Missing =>
+            $"**{s.Name}** is not set.\n\nCompose substitutes an empty string and carries on, so "
+            + "this line becomes whatever it reads without the variable. Add it on the right.",
+
+        SubstitutionState.Required =>
+            $"**{s.Name}** is not set, and this reference requires it.\n\nCompose refuses to run "
+            + "the stack until it has a value.",
+
+        SubstitutionState.Defaulted =>
+            $"**{s.Name}** is not set, so the default in this reference is used.",
+
+        _ => null,
+    };
 
     protected override void OnParametersSet()
     {
@@ -155,6 +257,10 @@
             if (!System.IO.File.Exists(path)) return;
 
             _file = FileContent.Decode(path, System.IO.File.ReadAllBytes(path));
+
+            // Annotated once on load with no variables, so a file full of ${VAR} shows what it
+            // would do right now rather than nothing until the panel reports in.
+            Annotate([]);
 
             // Editing is offered only where it would actually take effect. A read-only file, or one
             // Dray cannot write, opens for reading rather than presenting a Save that fails.

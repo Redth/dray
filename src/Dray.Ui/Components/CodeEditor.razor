@@ -57,6 +57,16 @@
 
     [Parameter] public bool ReadOnly { get; set; }
 
+    /// <summary>
+    /// Inline annotations to draw beside the text — currently what each <c>${VAR}</c> resolves to.
+    /// <para>
+    /// Drawn with Monaco's <c>after</c> content, which is the inlay-hint mechanism: the text is not
+    /// in the model, so it cannot be selected, copied, or saved into the file. That is the whole
+    /// reason for using it — an annotation must never become part of what compose reads.
+    /// </para>
+    /// </summary>
+    [Parameter] public IReadOnlyList<EditorAnnotation> Annotations { get; set; } = [];
+
     ElementReference _host;
     IJSObjectReference? _module;
     IJSObjectReference? _editor;
@@ -95,6 +105,8 @@
             // again — an appearance change mid-edit would otherwise leave a light editor in a dark
             // window until the file was reopened.
             Theme.Changed += OnThemeChanged;
+
+            await AnnotateAsync();
             return;
         }
 
@@ -108,6 +120,23 @@
             await _module!.InvokeVoidAsync("editor.setValue", _editor, File.Text, File.Language);
             await SetDirtyAsync(false);
         }
+
+        // Re-sent on every render: the annotations depend on the .env beside the file, which the
+        // user edits in a panel next to this one, so they change without the file changing.
+        await AnnotateAsync();
+    }
+
+    /// <summary>The annotations last sent, so an unchanged set is not pushed across the interop
+    /// boundary on every keystroke.</summary>
+    IReadOnlyList<EditorAnnotation> _annotated = [];
+
+    async Task AnnotateAsync()
+    {
+        if (_editor is null || _module is null) return;
+        if (_annotated.SequenceEqual(Annotations)) return;
+
+        _annotated = Annotations;
+        await _module.InvokeVoidAsync("editor.annotate", _editor, Annotations);
     }
 
     [JSInvokable("OnDirtyChanged")]
