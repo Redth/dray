@@ -86,4 +86,83 @@ public static class DemoData
             Since = Now.AddDays(-14),
         },
     ];
+
+    // ------------------------------------------------------------ dependency graphs
+
+    /// <summary>
+    /// A compose file with four start steps, a fan-out and a fan-in, and one service that is
+    /// declared but not running.
+    /// <para>
+    /// A live stack cannot demonstrate all of that at once, and the interesting cases here are
+    /// exactly the ones nobody keeps running on their laptop.
+    /// </para>
+    /// </summary>
+    public const string LayeredCompose = """
+        services:
+          proxy:
+            depends_on: [web, api]
+          web:
+            depends_on: [api]
+          api:
+            depends_on:
+              db:
+                condition: service_healthy
+              cache:
+                condition: service_started
+          db:
+            image: postgres:16-alpine
+          cache:
+            image: redis:7
+          migrate:
+            depends_on:
+              - db
+        """;
+
+    /// <summary>A file compose refuses to run, because the order it asks for does not exist.</summary>
+    public const string CyclicCompose = """
+        services:
+          web:
+            depends_on: [api]
+          api:
+            depends_on: [web]
+          db:
+            image: postgres:16-alpine
+        """;
+
+    /// <summary>
+    /// The live half of <see cref="LayeredCompose"/> — every service but <c>migrate</c>, which has
+    /// finished and been removed the way a one-shot job is.
+    /// </summary>
+    public static IReadOnlyList<StackService> LayeredServices { get; } =
+    [
+        Service("proxy", DockerState.Running),
+        Service("web", DockerState.Running, replicas: 3),
+        Service("api", DockerState.Running, health: DockerHealth.Unhealthy),
+        Service("db", DockerState.Running, health: DockerHealth.Healthy),
+        Service("cache", DockerState.Restarting),
+    ];
+
+    public static IReadOnlyList<StackService> CyclicServices { get; } =
+    [
+        Service("db", DockerState.Running, health: DockerHealth.Healthy),
+    ];
+
+    static StackService Service(
+        string name,
+        DockerState state,
+        DockerHealth health = DockerHealth.None,
+        int replicas = 1)
+        => new(name,
+        [
+            .. Enumerable.Range(1, replicas).Select(i => new ContainerSummary
+            {
+                Id = $"{name}{i}".PadRight(16, '0'),
+                Name = $"demo-{name}-{i}",
+                Image = "ghcr.io/redth/dray-demo:1.0",
+                State = state,
+                Health = health,
+                Since = Now.AddHours(-2),
+                Compose = new ComposeMembership("demo", name, Replica: i),
+            }),
+        ]);
 }

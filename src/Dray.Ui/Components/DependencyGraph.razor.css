@@ -1,0 +1,110 @@
+.graph {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    padding: var(--s4);
+}
+
+.graph__legend {
+    margin: 0;
+    font-size: var(--text-sm);
+}
+
+/* The canvas is a fixed size in both directions, so the graph scrolls inside its own box rather
+   than pushing the page sideways. */
+.graph__scroll {
+    overflow: auto;
+    max-height: 60vh;
+}
+
+.graph__canvas {
+    position: relative;
+}
+
+.graph__edges {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.graph__edge {
+    stroke: var(--line-strong);
+    stroke-width: 1.5;
+    transition: stroke var(--motion-fast) var(--motion-ease),
+                opacity var(--motion-fast) var(--motion-ease);
+}
+
+.graph__edge.is-lit {
+    stroke: var(--brand);
+    stroke-width: 2;
+}
+
+.graph__edge.is-bad {
+    stroke: var(--danger);
+    stroke-dasharray: 4 3;
+}
+
+.graph__edge.is-dim {
+    opacity: 0.25;
+}
+
+.graph__node {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--s1);
+    padding: 0 var(--s3);
+
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+
+    transition: border-color var(--motion-fast) var(--motion-ease),
+                opacity var(--motion-fast) var(--motion-ease);
+}
+
+.graph__node.is-focus {
+    border-color: var(--brand);
+}
+
+.graph__node.is-dim {
+    opacity: 0.4;
+}
+
+.graph__node:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.graph__name {
+    font-size: var(--text-md);
+    font-weight: var(--text-md-weight);
+
+    /* The box is a fixed width because the curves are drawn to it, so a long service name has to
+       give way rather than widen the node out from under its own arrows. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.graph__state {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+}
+
+.graph__count {
+    font-size: var(--text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .graph__edge,
+    .graph__node {
+        transition: none;
+    }
+}

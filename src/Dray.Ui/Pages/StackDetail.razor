@@ -57,14 +57,29 @@
                 else if (_tab == "Services")
                 {
                     <div class="page page--flush">
+                        @if (_notice is { } notice)
+                        {
+                            <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+                                <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                                <span>@notice</span>
+                                <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true"
+                                        Variant="ButtonVariant.Ghost" OnClick="() => _notice = null" />
+                            </div>
+                        }
+
                         <table class="table">
                             <thead>
-                                <tr><th>Service</th><th>State</th><th>Container</th><th>Image</th><th class="num">Uptime</th></tr>
+                                <tr>
+                                    <th>Service</th><th>State</th><th>Container</th><th>Image</th>
+                                    <th class="num">Uptime</th><th class="num">Replicas</th>
+                                </tr>
                             </thead>
                             <tbody>
                                 @foreach (var service in current.Services)
                                 {
-                                    @foreach (var replica in service.Replicas)
+                                    var captured = service;
+
+                                    @foreach (var (replica, index) in service.Replicas.Select((r, i) => (r, i)))
                                     {
                                         <tr @key="replica.Id">
                                             <td>
@@ -78,12 +93,34 @@
                                             <td><a href="@($"/containers/{replica.ShortId}")">@replica.Name</a></td>
                                             <td class="muted">@Humanize.ImageName(replica.Image):@Humanize.ImageTag(replica.Image)</td>
                                             <td class="num muted">@Humanize.Since(replica.Since)</td>
+
+                                            @* The control belongs to the service, not to any one of
+                                               its containers, so it sits on the first replica's row
+                                               and the rest leave the cell empty rather than
+                                               repeating a control that would fight itself. *@
+                                            @if (index == 0)
+                                            {
+                                                <td class="num">
+                                                    <ScaleControl Service="captured" Busy="@(_scaling == captured.Name)"
+                                                                  OnScale="n => ScaleAsync(captured, n)" />
+                                                </td>
+                                            }
+                                            else
+                                            {
+                                                <td></td>
+                                            }
                                         </tr>
                                     }
                                 }
                             </tbody>
                         </table>
                     </div>
+                }
+                else if (_tab == "Dependencies")
+                {
+                    @* Drawn from the file rather than the engine: compose reads depends_on to
+                       decide start order and keeps no record of it afterwards. *@
+                    <DependencyGraph Services="current.Services" Yaml="@(_file?.Text)" />
                 }
                 else if (_file is { } file)
                 {
@@ -115,7 +152,7 @@
 </EngineScope>
 
 @code {
-    static readonly string[] Tabs = ["Services", "Compose file"];
+    static readonly string[] Tabs = ["Services", "Dependencies", "Compose file"];
 
     const string ComposeFileExplanation =
         "The engine did not record which file this stack came from, or the file is on the machine "
@@ -150,6 +187,67 @@
                 : null;
 
     void BackToServices() => _tab = "Services";
+
+    string? _scaling;
+    string? _notice;
+    bool _noticeOk;
+
+    /// <summary>
+    /// Ask compose for a different number of containers for one service.
+    /// <para>
+    /// <c>up --scale</c> rather than the deprecated <c>compose scale</c>, and <c>--no-recreate</c>
+    /// so the containers already running are left alone: without it compose recreates the whole
+    /// service, which restarts things the user did not ask to restart just to add one replica.
+    /// </para>
+    /// <para>
+    /// Nothing is written to the store. The new containers arrive on the event stream like any
+    /// others, which is also what makes the count on screen correct a moment later without this
+    /// method knowing anything about it.
+    /// </para>
+    /// </summary>
+    async Task ScaleAsync(StackService service, int replicas)
+    {
+        if (Stack is not { } stack || _scaling is not null) return;
+
+        _scaling = service.Name;
+        _notice = null;
+
+        try
+        {
+            var failed = false;
+
+            await foreach (var line in Engine.RunComposeAsync(
+                stack, ["up", "-d", "--no-recreate", "--scale", $"{service.Name}={replicas}"]))
+            {
+                // Compose reports failure in its output rather than by failing the command, so a
+                // scale that could not happen otherwise looks like it worked.
+                if (line.IsError && line.Text.Contains("error", StringComparison.OrdinalIgnoreCase))
+                {
+                    _notice = line.Text.Trim();
+                    _noticeOk = false;
+                    failed = true;
+                }
+            }
+
+            if (!failed)
+            {
+                _notice = replicas == 1
+                    ? $"{service.Name} is back to a single container."
+                    : $"{service.Name} scaled to {replicas} containers.";
+
+                _noticeOk = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _notice = ex.Message;
+            _noticeOk = false;
+        }
+        finally
+        {
+            _scaling = null;
+        }
+    }
 
     /// <summary>
     /// Re-annotate as the variables change — before saving, not after.

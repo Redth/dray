@@ -1,0 +1,74 @@
+@* How many containers a compose service runs.
+
+   A stepper rather than a number field: the useful range is one to a handful, every value in it is
+   one click away, and a text box invites someone to type 100 into a laptop.
+
+   The count shown is what compose was asked for, not what is running — those differ for the seconds
+   between asking and the containers appearing, and a control that snapped back to the old number
+   while the new containers were starting would read as the click not having worked. *@
+
+<div class="scale">
+    <button type="button" class="scale__step"
+            aria-label="@($"Run one fewer {Service.Name}")"
+            disabled="@(Busy || Target <= Minimum)"
+            @onclick="() => SetAsync(Target - 1)">−</button>
+
+    <span class="scale__count num" aria-live="polite"
+          aria-label="@($"{Service.Name}: {Target} container{(Target == 1 ? "" : "s")}")">
+        @if (Busy)
+        {
+            <span class="scale__spinner" aria-hidden="true"></span>
+        }
+        else
+        {
+            @Target
+        }
+    </span>
+
+    <button type="button" class="scale__step"
+            aria-label="@($"Run one more {Service.Name}")"
+            disabled="@(Busy || Target >= Maximum)"
+            @onclick="() => SetAsync(Target + 1)">+</button>
+</div>
+
+@code {
+    /// <summary>
+    /// Zero is a real answer — it stops a service without bringing the stack down — but it is not
+    /// reachable from here. A service scaled to nothing disappears from this table, taking the
+    /// control that would bring it back with it.
+    /// </summary>
+    const int Minimum = 1;
+
+    /// <summary>
+    /// A ceiling, because this is a stepper on a developer machine rather than an orchestrator.
+    /// Anyone who genuinely wants more than this is editing the compose file.
+    /// </summary>
+    const int Maximum = 20;
+
+    [Parameter, EditorRequired] public StackService Service { get; set; } = default!;
+
+    [Parameter] public bool Busy { get; set; }
+
+    [Parameter] public EventCallback<int> OnScale { get; set; }
+
+    /// <summary>What was last asked for, or what is actually running when nothing has been asked.</summary>
+    int? _requested;
+
+    int Target => _requested ?? Service.Replicas.Count;
+
+    protected override void OnParametersSet()
+    {
+        // The engine has caught up with the request, so the control goes back to reporting reality.
+        // Without this a service scaled elsewhere — a terminal, another window — would keep showing
+        // the number this control last asked for.
+        if (_requested == Service.Replicas.Count) _requested = null;
+    }
+
+    async Task SetAsync(int replicas)
+    {
+        if (replicas < Minimum || replicas > Maximum || Busy) return;
+
+        _requested = replicas;
+        await OnScale.InvokeAsync(replicas);
+    }
+}

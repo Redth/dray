@@ -1,0 +1,343 @@
+@* What waits for what, drawn from the compose file's depends_on.
+
+   The engine cannot answer this: compose reads depends_on to decide start order and then keeps no
+   record of it, so a stack read back from the host has no edges at all. Everything here comes from
+   the file, and the live state comes from the engine — which is also why a service can appear here
+   with no containers.
+
+   The layout is computed in C# rather than measured in the browser: node boxes are a fixed size, so
+   the same arithmetic places the HTML nodes and draws the SVG curves behind them. That keeps the
+   nodes real elements — focusable, linked, with a StatePill in them — instead of SVG shapes
+   pretending to be. *@
+
+@if (_nodes.Count == 0)
+{
+    <EmptyState Icon="IconRef.Stack" Title="Nothing to draw"
+                Body="@(Yaml is { Length: > 0 }
+                        ? "No service in this file declares depends_on, so compose starts them all at once."
+                        : ComposeFileMissing)" />
+}
+else
+{
+    <div class="graph">
+        <p class="graph__legend muted">
+            Start order runs left to right. An arrow points from a service to whatever waits for it.
+        </p>
+
+        @if (_cycle)
+        {
+            <div class="banner" role="status">
+                <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                <span>
+                    These services depend on each other in a loop. Compose refuses to start a stack
+                    it cannot order, so the loop has to be broken before this file will come up.
+                </span>
+            </div>
+        }
+
+        <div class="graph__scroll">
+            <div class="graph__canvas" style="width: @(Px(_width)); height: @(Px(_height));"
+                 @onmouseleave="() => _focus = null">
+
+                <svg class="graph__edges" width="@_width" height="@_height" aria-hidden="true"
+                     viewBox="@($"0 0 {_width} {_height}")">
+                    <defs>
+                        <marker id="dg-arrow" viewBox="0 0 8 8" refX="7" refY="4"
+                                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M0,0 L8,4 L0,8 z" fill="var(--line-strong)" />
+                        </marker>
+                        <marker id="dg-arrow-lit" viewBox="0 0 8 8" refX="7" refY="4"
+                                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M0,0 L8,4 L0,8 z" fill="var(--brand)" />
+                        </marker>
+                        <marker id="dg-arrow-bad" viewBox="0 0 8 8" refX="7" refY="4"
+                                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M0,0 L8,4 L0,8 z" fill="var(--danger)" />
+                        </marker>
+                    </defs>
+
+                    @foreach (var edge in _edges)
+                    {
+                        var lit = _focus is { } f && (edge.From == f || edge.To == f);
+
+                        <path d="@edge.Path" fill="none"
+                              class="graph__edge @(edge.Loops ? "is-bad" : null) @(lit ? "is-lit" : null) @(_focus is not null && !lit ? "is-dim" : null)"
+                              marker-end="@($"url(#{(edge.Loops ? "dg-arrow-bad" : lit ? "dg-arrow-lit" : "dg-arrow")})")" />
+                    }
+                </svg>
+
+                @foreach (var node in _nodes)
+                {
+                    var related = _focus is null || node.Name == _focus || Touches(node.Name, _focus);
+                    var classes = $"graph__node {(node.Name == _focus ? "is-focus" : null)} {(related ? null : "is-dim")}";
+                    var style = $"left: {Px(node.X)}; top: {Px(node.Y)}; width: {Px(NodeW)}; height: {Px(NodeH)};";
+
+                    @if (node.Service.Replicas.FirstOrDefault() is { } first)
+                    {
+                        <a class="@classes" style="@style" href="@($"/containers/{first.ShortId}")"
+                           aria-label="@Describe(node)"
+                           @onmouseenter="() => _focus = node.Name"
+                           @onfocus="() => _focus = node.Name">
+                            @Body(node)
+                        </a>
+                    }
+                    else
+                    {
+                        @* Declared in the file and not running: nowhere to navigate to, but it is
+                           still part of the graph and still worth focusing to trace its edges. *@
+                        <div class="@classes" style="@style" tabindex="0" role="group"
+                             aria-label="@Describe(node)"
+                             @onmouseenter="() => _focus = node.Name"
+                             @onfocus="() => _focus = node.Name">
+                            @Body(node)
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    const string ComposeFileMissing =
+        "The compose file is not readable from here, and the engine does not record depends_on — "
+        + "so there is nothing to draw the order from.";
+
+    // Geometry. Fixed, because the same numbers place the nodes and draw the curves.
+    const double NodeW = 172;
+    const double NodeH = 64;
+    const double ColGap = 66;
+    const double RowGap = 12;
+    const double Pad = 6;
+
+    /// <summary>Room under the graph for edges that cannot be drawn left to right.</summary>
+    const double LoopReserve = 44;
+    const double LoopGap = 12;
+
+    /// <summary>The services the engine knows about — the ones with containers.</summary>
+    [Parameter] public IReadOnlyList<StackService> Services { get; set; } = [];
+
+    /// <summary>The compose file, which is the only place the edges exist.</summary>
+    [Parameter] public string? Yaml { get; set; }
+
+    sealed record Node(string Name, StackService Service, int Level, double X, double Y);
+
+    sealed record Edge(string From, string To, string Path, bool Loops);
+
+    List<Node> _nodes = [];
+    List<Edge> _edges = [];
+    IReadOnlyList<ServiceDependency> _deps = [];
+
+    double _width;
+    double _height;
+    int _levels;
+    bool _cycle;
+
+    string? _focus;
+
+    string? _builtFor;
+
+    protected override void OnParametersSet()
+    {
+        // Rebuilding on every render would throw away nothing but time; rebuilding when the file or
+        // the running services change is what actually matters.
+        var signature = $"{Yaml?.Length}:{Yaml?.GetHashCode()}:{string.Join(",", Services.Select(s => $"{s.Name}={s.Replicas.Count}"))}";
+        if (_builtFor == signature) return;
+
+        _builtFor = signature;
+        Build();
+    }
+
+    void Build()
+    {
+        _nodes = [];
+        _edges = [];
+        _cycle = false;
+
+        _deps = ComposeGraph.Parse(Yaml);
+        if (_deps.Count == 0) return;
+
+        // The file's list first, then anything running that the file does not name — a container
+        // left behind by an older version of the file still belongs on the picture.
+        var running = Services.ToDictionary(s => s.Name, StringComparer.Ordinal);
+
+        var names = new List<string>(ComposeGraph.Services(Yaml));
+        names.AddRange(Services.Select(s => s.Name).Where(n => !names.Contains(n, StringComparer.Ordinal)));
+
+        // Layered first, then untangled: the levels decide how far right a service sits, the
+        // arrangement decides how far down.
+        var levels = ComposeGraph.Arrange(ComposeGraph.Levels(names, _deps), _deps);
+        _levels = levels.Count;
+
+        var tallest = levels.Max(l => l.Count);
+        _height = Pad * 2 + tallest * NodeH + (tallest - 1) * RowGap;
+        _width = Pad * 2 + levels.Count * NodeW + (levels.Count - 1) * ColGap;
+
+        var at = new Dictionary<string, Node>(StringComparer.Ordinal);
+
+        for (var level = 0; level < levels.Count; level++)
+        {
+            var column = levels[level];
+            var columnHeight = column.Count * NodeH + (column.Count - 1) * RowGap;
+            var top = Pad + (_height - Pad * 2 - columnHeight) / 2;
+
+            for (var row = 0; row < column.Count; row++)
+            {
+                var name = column[row];
+
+                var node = new Node(
+                    name,
+                    running.TryGetValue(name, out var service) ? service : new StackService(name, []),
+                    level,
+                    Pad + level * (NodeW + ColGap),
+                    top + row * (NodeH + RowGap));
+
+                _nodes.Add(node);
+                at[name] = node;
+            }
+        }
+
+        var pairs = _deps
+            .SelectMany(d => d.DependsOn.Select(name => (Dependency: name, d.Service)))
+            .Where(p => at.ContainsKey(p.Dependency) && at.ContainsKey(p.Service))
+            .Select(p => (From: at[p.Dependency], To: at[p.Service]))
+            .ToList();
+
+        // A dependency that is not in an earlier column could not be ordered — it is in a loop.
+        // Those are routed around the outside of the graph, which needs room reserving before
+        // anything is drawn: two services in the same column go past the side, and two in the wrong
+        // order go underneath.
+        var beside = pairs.Count(p => p.From.Level == p.To.Level);
+        var under = pairs.Count(p => p.From.Level > p.To.Level);
+
+        _cycle = beside + under > 0;
+
+        var floor = _height - Pad;
+        if (under > 0) _height += LoopReserve + LoopGap * under;
+
+        var nextUnder = 0;
+        var nextBeside = 0;
+        var widest = 0d;
+
+        foreach (var (from, to) in pairs)
+        {
+            if (from.Level < to.Level)
+            {
+                _edges.Add(new Edge(from.Name, to.Name, Curve(from, to), Loops: false));
+                continue;
+            }
+
+            string path;
+
+            if (from.Level == to.Level)
+            {
+                var lane = Math.Max(from.X, to.X) + NodeW + LoopReserve / 2 + LoopGap * nextBeside++;
+
+                widest = Math.Max(widest, lane);
+                path = Beside(from, to, lane);
+            }
+            else
+            {
+                path = Under(from, to, floor + LoopReserve / 2 + LoopGap * nextUnder++);
+            }
+
+            _edges.Add(new Edge(from.Name, to.Name, path, Loops: true));
+        }
+
+        // A side lane past the last column widens the picture; one past an inner column runs
+        // through space the graph already has.
+        _width = Math.Max(_width, widest + Pad);
+    }
+
+    /// <summary>A cubic from one box's right edge to the next box's left edge.</summary>
+    static string Curve(Node from, Node to)
+    {
+        var x1 = from.X + NodeW;
+        var x2 = to.X;
+        var y1 = from.Y + NodeH / 2;
+        var y2 = to.Y + NodeH / 2;
+
+        var bend = Math.Max((x2 - x1) / 2, 24);
+
+        return Fmt($"M {x1} {y1} C {x1 + bend} {y1}, {x2 - bend} {y2}, {x2} {y2}");
+    }
+
+    /// <summary>
+    /// An edge in a loop between two services in the same column, routed past the side.
+    /// <para>
+    /// Underneath is no good here: both ends share a column, so the curve would be a vertical line
+    /// hidden behind the boxes between them.
+    /// </para>
+    /// </summary>
+    static string Beside(Node from, Node to, double lane)
+    {
+        var x1 = from.X + NodeW;
+        var x2 = to.X + NodeW;
+        var y1 = from.Y + NodeH / 2;
+        var y2 = to.Y + NodeH / 2;
+
+        return Fmt($"M {x1} {y1} C {lane} {y1}, {lane} {y2}, {x2} {y2}");
+    }
+
+    /// <summary>
+    /// An edge in a loop, routed under the whole graph rather than through it.
+    /// <para>
+    /// It cannot be drawn like the others: both ends are in the same column or the wrong way round,
+    /// so a left-to-right curve would either be a flat line or run backwards through the boxes.
+    /// Going underneath keeps it visible, and each loop gets its own depth so a pair of services
+    /// that wait for each other draws as two arcs rather than one on top of the other.
+    /// </para>
+    /// </summary>
+    static string Under(Node from, Node to, double dip)
+    {
+        var x1 = from.X + NodeW / 2;
+        var x2 = to.X + NodeW / 2;
+
+        return Fmt($"M {x1} {from.Y + NodeH} C {x1} {dip}, {x2} {dip}, {x2} {to.Y + NodeH}");
+    }
+
+    static string Fmt(FormattableString s) => FormattableString.Invariant(s);
+
+    static string Px(double value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "px";
+
+    bool Touches(string name, string focus)
+        => _deps.Any(d =>
+            (d.Service == focus && d.DependsOn.Contains(name, StringComparer.Ordinal))
+            || (d.Service == name && d.DependsOn.Contains(focus, StringComparer.Ordinal)));
+
+    RenderFragment Body(Node node) =>
+        @<text>
+            <span class="graph__name" title="@node.Name">@node.Name</span>
+
+            <span class="graph__state">
+                <StatePill Status="node.Service.Status" />
+
+                @if (node.Service.Replicas.Count > 1)
+                {
+                    <span class="graph__count muted num">×@node.Service.Replicas.Count</span>
+                }
+            </span>
+        </text>;
+
+    /// <summary>
+    /// The graph in words, because the curves are drawn for the eye and carry no text. Everything
+    /// the picture says about one node — its state, when it starts, and what it waits for — has to
+    /// be in here for anyone reading the page rather than looking at it.
+    /// </summary>
+    string Describe(Node node)
+    {
+        var waits = _deps.FirstOrDefault(d => d.Service == node.Name)?.DependsOn ?? [];
+        var feeds = _deps.Where(d => d.DependsOn.Contains(node.Name, StringComparer.Ordinal)).Select(d => d.Service).ToList();
+
+        var parts = new List<string>
+        {
+            $"{node.Name}, {node.Service.Status.Label}",
+            $"starts in step {node.Level + 1} of {_levels}",
+        };
+
+        if (waits.Count > 0) parts.Add($"waits for {string.Join(", ", waits)}");
+        if (feeds.Count > 0) parts.Add($"{string.Join(", ", feeds)} waits for it");
+
+        return string.Join(". ", parts) + ".";
+    }
+}

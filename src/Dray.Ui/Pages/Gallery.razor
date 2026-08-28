@@ -119,6 +119,27 @@
         </div>
     </section>
 
+    <section class="gal">
+        <h2 class="gal__h">Dependency graph</h2>
+        <p class="gal__note">
+            Drawn from the compose file, because the engine keeps no record of depends_on. Hover or
+            tab a service to trace what it waits for. The second file is one compose refuses to run.
+        </p>
+
+        <div class="panel">
+            <DependencyGraph Services="DemoData.LayeredServices" Yaml="@DemoData.LayeredCompose" />
+        </div>
+
+        <p class="gal__note">
+            <strong>migrate</strong> is declared and not running — a one-shot job that has finished.
+            It is still on the graph, because the file still says the order depends on it.
+        </p>
+
+        <div class="panel">
+            <DependencyGraph Services="DemoData.CyclicServices" Yaml="@DemoData.CyclicCompose" />
+        </div>
+    </section>
+
 </div>
 
 <Dialog Title="Container details" @bind-Open="_dialogOpen">
