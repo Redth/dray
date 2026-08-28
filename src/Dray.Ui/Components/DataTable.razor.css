@@ -1,7 +1,32 @@
-/* The table owns the scrolling so its header can stay put while the body moves. */
+/* The surface a table sits on: the same border, radius and background as .table-wrap, so a list
+   built from this component looks like every list that came before it. */
 .dt {
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
+    display: flex;
+
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+
+    /* Clips the table's square corners to the radius. The scrolling happens inside. */
+    overflow: hidden;
+}
+
+/* Inside a card the table is the card's content, not a box dropped into it — so it keeps its
+   scrolling and gives up its own surface. */
+.dt--flush {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+/* The part that scrolls, so the sticky header has something to stay put against and the rounded
+   corners above are not scrolled away with the content. */
+.dt__scroll {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: auto;
     position: relative;
 }
@@ -95,4 +120,21 @@
     padding: var(--s7) var(--s5);
     text-align: center;
     font-size: var(--text-base);
+}
+
+/* A name cell holds two lines and the second is often long — an anonymous volume's name is a
+   64-character hash. Under a fixed layout the cell has a width and the text has to respect it,
+   or it runs straight across the column beside it. */
+.dt .cell-name {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.dt .cell-name > * {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

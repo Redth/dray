@@ -61,67 +61,15 @@
         }
         else
         {
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th class="col-low">Driver</th>
-                            <th class="col-mid">Used by</th>
-                            <th class="col-low">Stack</th>
-                            <th class="num">Size</th>
-                            <th class="num col-low">Created</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var volume in Visible)
-                        {
-                            <tr @key="volume.Name" @ondblclick="() => Open(volume)">
-                                <td>
-                                    <div class="cell-name">
-                                        <a href="@Route(volume)" @onclick:stopPropagation>@volume.DisplayName</a>
-
-                                        @* Only when the display name is not the real one. For a
-                                           named volume they are identical, and printing both puts
-                                           the same word twice in one cell. *@
-                                        @if (volume.IsAnonymous)
-                                        {
-                                            @* Titled because it truncates in a narrow window, and
-                                               a hash cut off mid-way is not identifying. *@
-                                            <span class="mono muted" title="@volume.Name">@volume.Name</span>
-                                        }
-                                    </div>
-                                </td>
-                                <td class="muted col-low">@volume.Driver</td>
-                                <td class="col-mid">
-                                    @if (volume.UsedBy.Count == 0)
-                                    {
-                                        @* The fact that matters before deleting one. *@
-                                        <span class="muted">nothing</span>
-                                    }
-                                    else
-                                    {
-                                        @string.Join(", ", volume.UsedBy)
-                                    }
-                                </td>
-                                <td class="col-low">@(volume.Stack ?? "—")</td>
-                                <td class="num mono muted">
-                                    @* Null means the engine did not measure it, which is not the
-                                       same as empty and must not read as zero. *@
-                                    @(volume.SizeBytes is { } size ? Humanize.Bytes(size) : "—")
-                                </td>
-                                <td class="num muted col-low">@(volume.Created is { } c ? Humanize.Since(c) : "—")</td>
-                                <td class="cell-actions">
-                                    <Button Label="@($"Remove {volume.DisplayName}")" Icon="IconRef.Trash"
-                                            IconOnly="true" Variant="ButtonVariant.Ghost" Danger="true"
-                                            OnClick="() => RemoveAsync(volume)" />
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+            <DataTable TRow="VolumeSummary"
+                       Columns="VolumeGrid.Columns(Visible.Any(v => v.Stack is not null))"
+                       Rows="Visible"
+                       Values="v => VolumeGrid.Row(v)"
+                       Key="v => v.Name"
+                       ActionsFor="ActionsFor"
+                       OnAction="RunRowActionAsync"
+                       OnRowOpen="OpenByName"
+                       Placeholder="No volumes" />
         }
     </div>
 
@@ -173,6 +121,27 @@
             _volumes = null;
             _error = ex.Message;
         }
+    }
+
+    /// <summary>
+    /// Removal is the only thing a volume row offers, so it is the only thing in its menu — the
+    /// rest of what you can do with a volume needs the volume's own page.
+    /// </summary>
+    IReadOnlyList<RowAction> ActionsFor(VolumeSummary volume) =>
+    [
+        new("remove", "Remove", IconRef.Trash, $"Remove {volume.DisplayName}", Danger: true),
+    ];
+
+    VolumeSummary? ByName(string name) => Visible.FirstOrDefault(v => v.Name == name);
+
+    Task RunRowActionAsync((string Row, string Action) chosen)
+        => chosen.Action == "remove" && ByName(chosen.Row) is { } volume
+            ? RemoveAsync(volume)
+            : Task.CompletedTask;
+
+    void OpenByName(string name)
+    {
+        if (ByName(name) is { } volume) Open(volume);
     }
 
     async Task RemoveAsync(VolumeSummary volume)

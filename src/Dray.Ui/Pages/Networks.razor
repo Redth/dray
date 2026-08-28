@@ -104,28 +104,16 @@
                         }
                         else
                         {
-                            <table class="table">
-                                <thead>
-                                    <tr><th>Container</th><th>Address</th><th class="col-low">MAC</th><th></th></tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var member in network.Members)
-                                    {
-                                        <tr @key="member.ContainerId">
-                                            <td>
-                                                <a href="@($"/containers/{member.ShortId}")">@member.Name</a>
-                                            </td>
-                                            <td class="mono">@(member.Address ?? "—")</td>
-                                            <td class="mono muted col-low">@(member.MacAddress ?? "—")</td>
-                                            <td class="cell-actions">
-                                                <Button Label="@($"Disconnect {member.Name}")" Icon="IconRef.Close"
-                                                        IconOnly="true" Variant="ButtonVariant.Ghost"
-                                                        OnClick="() => DisconnectAsync(network, member)" />
-                                            </td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
+                            @* Flush: this is inside the network's card, and a card inside a card
+                               is always wrong. *@
+                            <DataTable TRow="NetworkMember"
+                                       Flush="true"
+                                       Columns="NetworkMemberGrid.Columns()"
+                                       Rows="network.Members"
+                                       Values="m => NetworkMemberGrid.Row(m)"
+                                       Key="m => m.ContainerId"
+                                       ActionsFor="_ => MemberActions"
+                                       OnAction="a => DisconnectByIdAsync(network, a.Row)" />
                         }
                     </section>
                 }
@@ -205,6 +193,15 @@
 
         await LoadAsync();
     }
+
+    /// <summary>The one thing a member row offers. Everything else about a container is its page.</summary>
+    static readonly IReadOnlyList<RowAction> MemberActions =
+        [new("disconnect", "Disconnect", IconRef.Close, "Detach this container from the network")];
+
+    Task DisconnectByIdAsync(NetworkSummary network, string containerId)
+        => network.Members.FirstOrDefault(m => m.ContainerId == containerId) is { } member
+            ? DisconnectAsync(network, member)
+            : Task.CompletedTask;
 
     async Task DisconnectAsync(NetworkSummary network, NetworkMember member)
     {

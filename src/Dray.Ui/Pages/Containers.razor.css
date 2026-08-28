@@ -66,19 +66,20 @@
 }
 
 /* The table fills what the page has left and scrolls inside itself, so its header stays put and
-   the bulk bar above it does not move as rows come and go. */
+   the bulk bar above it does not move as rows come and go. The side margin is the page's, which
+   page--fill no longer applies — see the note in the markup. */
 .containers__grid {
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
+    margin: 0 var(--chrome-inset) var(--chrome-inset);
 }
 
 .containers__grid:focus-visible {
     outline: none;
 }
 
-/* The page no longer pads its sides, so the things that are read rather than scanned take that
-   margin themselves. The table does not: a list runs to the edges. */
+/* The page no longer pads its sides, so what sits on it takes that margin itself. */
 .containers__page > .banner,
 .containers__page > .bulkbar,
 .containers__page ::deep .empty {

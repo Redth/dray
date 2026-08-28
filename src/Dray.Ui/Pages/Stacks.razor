@@ -98,40 +98,17 @@
                         <div id="@services" class="stacks__services">
                             @if (open)
                             {
-                        <table class="table">
-                            <thead>
-                                <tr><th>Service</th><th>State</th><th>Containers</th><th class="col-mid">Image</th><th></th></tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var service in stack.Services)
-                                {
-                                    <tr @key="@($"{stack.Name}/{service.Name}")">
-                                        <td>@service.Name</td>
-                                        <td><StatePill Status="service.Status" /></td>
-                                        <td>
-                                            @if (service.IsScaled)
-                                            {
-                                                <span>@service.RunningCount of @service.Replicas.Count</span>
-                                            }
-                                            else if (service.Replicas.FirstOrDefault() is { } only)
-                                            {
-                                                <a href="@($"/containers/{only.ShortId}")">@only.Name</a>
-                                            }
-                                        </td>
-                                        <td class="muted col-mid">
-                                            @(service.Replicas.FirstOrDefault() is { } r
-                                                ? $"{Humanize.ImageName(r.Image)}:{Humanize.ImageTag(r.Image)}"
-                                                : "—")
-                                        </td>
-                                        <td class="cell-actions">
-                                            <Button Label="@($"Logs for {service.Name}")" Icon="IconRef.Logs"
-                                                    IconOnly="true" Variant="ButtonVariant.Ghost"
-                                                    OnClick="() => OpenLogs(stack, service)" />
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
+                        @* Flush: this is the card's content, and a card inside a card is always
+                           wrong. Columns from StackServiceGrid — narrower than the containers
+                           list, because the stack's own name and state are already above it. *@
+                        <DataTable TRow="StackService"
+                                   Flush="true"
+                                   Columns="StackServiceGrid.Columns()"
+                                   Rows="stack.Services"
+                                   Values="s => StackServiceGrid.Row(s)"
+                                   Key="s => s.Name"
+                                   ActionsFor="_ => ServiceActions"
+                                   OnAction="a => OpenLogsByName(stack, a.Row)" />
                             }
                         </div>
                     </section>
@@ -421,6 +398,18 @@
             _watchCts?.Dispose();
             _watchCts = null;
         }
+    }
+
+    /// <summary>
+    /// What a service row offers. Logs is the reason anyone looks at a service from this page;
+    /// everything else about it is on the stack's own page.
+    /// </summary>
+    static readonly IReadOnlyList<RowAction> ServiceActions =
+        [new("logs", "Logs", IconRef.Logs, "Read this service's output")];
+
+    void OpenLogsByName(StackSummary stack, string service)
+    {
+        if (stack.Services.FirstOrDefault(s => s.Name == service) is { } found) OpenLogs(stack, found);
     }
 
     void OpenLogs(StackSummary stack, StackService service)

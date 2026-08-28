@@ -13,8 +13,12 @@
    browser already lays a table out, and asking it to do that with one column pinned is one style
    attribute. *@
 
-<div class="dt" @onpointermove="OnDragAsync" @onpointerup="EndDrag" @onpointerleave="EndDrag">
-    <table class="table dt__table">
+<div class="dt @(Flush ? "dt--flush" : null)" @onpointermove="OnDragAsync" @onpointerup="EndDrag" @onpointerleave="EndDrag">
+    @* Two elements, because they do different jobs: the outer one is the bordered, rounded surface
+       a table sits on everywhere in Dray, and the inner one is what scrolls. One element cannot be
+       both — a rounded box that scrolls clips its own corners away as soon as content moves. *@
+    <div class="dt__scroll">
+        <table class="table dt__table">
         <thead>
             <tr>
                 @foreach (var column in Columns)
@@ -74,13 +78,14 @@
                     }
                 </tr>
             }
-        </tbody>
-    </table>
+            </tbody>
+        </table>
 
-    @if (Sorted.Count == 0)
-    {
-        <div class="dt__empty muted">@Placeholder</div>
-    }
+        @if (Sorted.Count == 0)
+        {
+            <div class="dt__empty muted">@Placeholder</div>
+        }
+    </div>
 </div>
 
 @code {
@@ -105,6 +110,13 @@
     [Parameter] public EventCallback<string> OnRowOpen { get; set; }
 
     [Parameter] public string Placeholder { get; set; } = "Nothing here";
+
+    /// <summary>
+    /// Drops the border, radius and surface, for a table that is already inside a card. A card
+    /// inside a card is always wrong — it reads as a bug, and the inner border fights the outer one
+    /// for the eye (DESIGN.md, and the same rule .card .panel already follows).
+    /// </summary>
+    [Parameter] public bool Flush { get; set; }
 
     string? _sort;
     bool _descending;

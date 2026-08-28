@@ -3,6 +3,7 @@
 @inject IShellBridge Shell
 @inject PruneService Prune
 @inject ShellCapabilities Caps
+@inject NavigationManager Nav
 
 <PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="s => _search = s" OnFilter="HandleFilter" />
 
@@ -54,80 +55,18 @@
         }
         else
         {
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Image</th>
-                            <th>Tag</th>
-                            <th class="col-low">ID</th>
-                            @* Size goes before the tag does: identifying the image is what the
-                               row is for, and a size is reference material. *@
-                            <th class="num col-mid">Size</th>
-                            <th class="col-mid">Used by</th>
-                            <th class="num col-low">Created</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <Virtualize Items="Visible" Context="image" ItemSize="42" OverscanCount="6" SpacerElement="tr">
-                            <tr @key="@($"{image.Id}:{image.Tags.FirstOrDefault()?.Display}")"
-                                class="@(image.IsDangling ? "is-dangling" : null)">
-                                <td>
-                                    <div class="cell-name">
-                                        <a href="@($"/images/{Uri.EscapeDataString(image.Id)}")">
-                                            @(image.Tags.Count > 0 ? image.Tags[0].ShortRepository : "untagged")
-                                        </a>
-
-                                        @if (image.Tags.Count > 1)
-                                        {
-                                            @* Several tags on one image is normal — :latest and a
-                                               version usually point at the same bytes. *@
-                                            <span class="muted">+@(image.Tags.Count - 1) more tags</span>
-                                        }
-                                    </div>
-                                </td>
-                                <td class="mono">@(image.Tags.Count > 0 ? image.Tags[0].Tag : "—")</td>
-                                <td class="mono muted col-low">@image.ShortId</td>
-                                @* An engine that does not measure image size gets an em dash, not
-                                   "0 B" — a measured zero and an unknown are different answers. *@
-                                <td class="num mono col-mid">
-                                    @(image.SizeReported ? Humanize.Bytes(image.SizeBytes) : "—")
-                                </td>
-                                <td class="col-mid">
-                                    @if (image.IsInUse is true)
-                                    {
-                                        <span>@image.ContainerCount container@(image.ContainerCount == 1 ? "" : "s")</span>
-                                    }
-                                    else if (image.IsDangling)
-                                    {
-                                        <StatePill Status="DanglingStatus" />
-                                    }
-                                    else if (image.IsInUse is false)
-                                    {
-                                        <span class="muted">nothing</span>
-                                    }
-                                    else
-                                    {
-                                        @* The engine did not count. "nothing" would be a claim it
-                                           never made, and the one that makes Remove look safe. *@
-                                        <span class="muted">—</span>
-                                    }
-                                </td>
-                                <td class="num muted col-low">@(image.Created is { } c ? Humanize.Since(c) : "—")</td>
-                                <td class="cell-actions">
-                                    @* Run is what an image is for; everything else — tagging,
-                                       pushing, saving, removing — is something done deliberately
-                                       after looking, not while scanning a list. *@
-                                    <RowActions Actions="ActionsFor(image)" Visible="1"
-                                                MenuLabel="@($"More for {image.DisplayName}")"
-                                                OnAction="id => RunRowAsync(id, image)" />
-                                </td>
-                            </tr>
-                        </Virtualize>
-                    </tbody>
-                </table>
-            </div>
+            @* The shared table. Which columns exist and what they say come from ImageGrid, in
+               Core, where the judgement about which fact matters more than which other is
+               testable. *@
+            <DataTable TRow="ImageSummary"
+                       Columns="ImageGrid.Columns()"
+                       Rows="Visible"
+                       Values="i => ImageGrid.Row(i)"
+                       Key="i => i.Id"
+                       ActionsFor="ActionsFor"
+                       OnAction="RunRowActionAsync"
+                       OnRowOpen="OpenById"
+                       Placeholder="No images" />
         }
     </div>
 
@@ -202,6 +141,16 @@
         new RowAction("copy-id", "Copy ID", IconRef.Copy, $"Copy the ID of {image.DisplayName}"),
         new RowAction("remove", "Remove", IconRef.Trash, $"Remove {image.DisplayName}", Danger: true),
     ];
+
+    ImageSummary? ById(string id) => Visible.FirstOrDefault(i => i.Id == id);
+
+    Task RunRowActionAsync((string Row, string Action) chosen)
+        => ById(chosen.Row) is { } image ? RunRowAsync(chosen.Action, image) : Task.CompletedTask;
+
+    void OpenById(string id)
+    {
+        if (ById(id) is { } image) Nav.NavigateTo($"/images/{Uri.EscapeDataString(image.Id)}");
+    }
 
     Task RunRowAsync(string id, ImageSummary image)
     {
