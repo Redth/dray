@@ -106,7 +106,7 @@
                         {
                             <table class="table">
                                 <thead>
-                                    <tr><th>Container</th><th>Address</th><th>MAC</th><th></th></tr>
+                                    <tr><th>Container</th><th>Address</th><th class="col-low">MAC</th><th></th></tr>
                                 </thead>
                                 <tbody>
                                     @foreach (var member in network.Members)
@@ -116,7 +116,7 @@
                                                 <a href="@($"/containers/{member.ShortId}")">@member.Name</a>
                                             </td>
                                             <td class="mono">@(member.Address ?? "—")</td>
-                                            <td class="mono muted">@(member.MacAddress ?? "—")</td>
+                                            <td class="mono muted col-low">@(member.MacAddress ?? "—")</td>
                                             <td class="cell-actions">
                                                 <Button Label="@($"Disconnect {member.Name}")" Icon="IconRef.Close"
                                                         IconOnly="true" Variant="ButtonVariant.Ghost"

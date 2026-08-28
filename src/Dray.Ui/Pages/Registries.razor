@@ -51,7 +51,7 @@
         <div class="table-wrap">
             <table class="table">
                 <thead>
-                    <tr><th>Registry</th><th>Username</th><th>Credential</th><th></th></tr>
+                    <tr><th>Registry</th><th class="col-mid">Username</th><th class="col-low">Credential</th><th></th></tr>
                 </thead>
                 <tbody>
                     @foreach (var entry in _entries)
@@ -66,8 +66,8 @@
                                     }
                                 </div>
                             </td>
-                            <td class="mono">@(entry.Username ?? "—")</td>
-                            <td>
+                            <td class="mono col-mid">@(entry.Username ?? "—")</td>
+                            <td class="col-low">
                                 @if (entry.HelperMissing)
                                 {
                                     <StatePill Status="MissingStatus" />

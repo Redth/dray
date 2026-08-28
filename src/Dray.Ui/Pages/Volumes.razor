@@ -87,7 +87,9 @@
                                            the same word twice in one cell. *@
                                         @if (volume.IsAnonymous)
                                         {
-                                            <span class="mono muted">@volume.Name</span>
+                                            @* Titled because it truncates in a narrow window, and
+                                               a hash cut off mid-way is not identifying. *@
+                                            <span class="mono muted" title="@volume.Name">@volume.Name</span>
                                         }
                                     </div>
                                 </td>

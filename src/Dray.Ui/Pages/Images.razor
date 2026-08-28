@@ -61,7 +61,9 @@
                             <th>Image</th>
                             <th>Tag</th>
                             <th class="col-low">ID</th>
-                            <th class="num">Size</th>
+                            @* Size goes before the tag does: identifying the image is what the
+                               row is for, and a size is reference material. *@
+                            <th class="num col-mid">Size</th>
                             <th class="col-mid">Used by</th>
                             <th class="num col-low">Created</th>
                             <th></th>
@@ -89,7 +91,7 @@
                                 <td class="mono muted col-low">@image.ShortId</td>
                                 @* An engine that does not measure image size gets an em dash, not
                                    "0 B" — a measured zero and an unknown are different answers. *@
-                                <td class="num mono">
+                                <td class="num mono col-mid">
                                     @(image.SizeReported ? Humanize.Bytes(image.SizeBytes) : "—")
                                 </td>
                                 <td class="col-mid">
@@ -128,11 +130,11 @@
                                         @if (!image.IsDangling)
                                         {
                                             <Button Label="@($"Tag {image.DisplayName}")" Icon="IconRef.Inspect"
-                                                    IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                    IconOnly="true" Variant="ButtonVariant.Ghost" Class="act-low"
                                                     OnClick="() => _tagging = image" />
 
                                             <Button Label="@($"Push {image.DisplayName}")" Icon="IconRef.Push"
-                                                    IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                    IconOnly="true" Variant="ButtonVariant.Ghost" Class="act-low"
                                                     OnClick="() => _pushing = image.Tags[0].Display" />
                                         }
 
@@ -147,8 +149,12 @@
                                                     OnClick="() => SaveAsync(image)" />
                                         }
 
+                                        @* Run and Remove survive every width; the rest give way. An
+                                           image row carries six controls, and on macOS the native
+                                           sidebar leaves the content 410px in a small window —
+                                           measured there, where all six ran off the edge. *@
                                         <Button Label="@($"Copy ID of {image.DisplayName}")" Icon="IconRef.Copy"
-                                                IconOnly="true" Variant="ButtonVariant.Ghost"
+                                                IconOnly="true" Variant="ButtonVariant.Ghost" Class="act-low"
                                                 OnClick="() => Shell.WriteClipboardAsync(image.Id)" />
 
                                         <Button Label="@($"Remove {image.DisplayName}")" Icon="IconRef.Trash"

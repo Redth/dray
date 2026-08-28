@@ -440,6 +440,21 @@ input, textarea, select {
   .table .pill__detail {
     display: none;
   }
+
+  /* A name cell gives way rather than forcing the table wider than the window. Cells are nowrap,
+     so a 64-character anonymous volume hash sets the column's width and pushes the row's controls
+     off the edge — measured on macOS, where the native sidebar leaves the content 410px in a small
+     window. The full name stays in the title attribute and on the row's own page. */
+  .table .cell-name {
+    max-width: 14rem;
+  }
+
+  .table .cell-name > * {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* ------------------------------------------------------------------ framework overlays
