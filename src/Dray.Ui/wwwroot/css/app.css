@@ -873,11 +873,14 @@ input, textarea, select {
   top: 0;
   z-index: var(--z-sticky);
 
-  /* Deliberately --surface-2 rather than --selected, even on macOS where --selected is AppKit's
-     own. A header band at the selection shade puts quiet header text at 4.16:1 against it, below
-     AA. The selection colour is used where its text is --ink and has the contrast to sit on it:
-     the selected row itself. */
-  background: var(--surface-2);
+  /* The shade a native list paints behind a selected row. A column heading and a sidebar's
+     selected item are the same kind of surface — a quiet band over the panel — and on macOS
+     --selected is exactly what AppKit uses for both, so the two match rather than being two
+     opinions about the same thing.
+
+     It is lighter than any surface Dray has, which is why --muted is strengthened on macOS: quiet
+     text has to clear AA on the lightest thing it sits on (DESIGN.md 9.1.1). */
+  background: var(--selected, var(--surface-2));
   color: var(--muted);
   font-size: var(--text-xs);
   font-weight: var(--text-xs-weight);

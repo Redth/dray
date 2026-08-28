@@ -184,10 +184,15 @@ public sealed class MacTheme : IPlatformTheme, IDisposable
             //
             // So the same trade as the surfaces: keep Dray's own value, take the platform's hue.
             // Its muted greys carry a warm tint about ten channels wide, which is what read as a
-            // different kind of quiet next to neutral system text. These are the exact
-            // luminance-matched neutrals, so every contrast pair is unchanged to two decimal
-            // places while the cast is gone.
-            overrides["muted"] = IsDark ? Css(158, 158, 158, 1) : Css(105, 105, 105, 1);
+            // different kind of quiet next to neutral system text.
+            //
+            // Then one step further from Dray's luminance, which is the part worth explaining. A
+            // column heading sits on --selected here, and that band is lighter than any surface
+            // Dray has — quiet text at Dray's own luminance lands on it at 4.16:1. Rather than
+            // move the heading off the platform's colour, the text is strengthened until it clears
+            // AA on the lightest thing it has to sit on: 4.60:1 on the selection, and 6–7:1 on the
+            // surfaces, where it was 4.9–5.5:1 before. Quiet, and never below the bar.
+            overrides["muted"] = IsDark ? Css(181, 181, 181, 1) : Css(95, 95, 95, 1);
         });
 
         // The content view runs the full height of the window under a unified titlebar, so the

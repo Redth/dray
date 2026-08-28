@@ -473,8 +473,11 @@ chroma removed and its luminance preserved exactly.
 - **`secondaryLabel` is the colour macOS puts on sidebar section headings, and it fails AA here** —
   4.16:1 in dark, 3.72:1 in light against these backgrounds. Apple targets a lower bar for secondary
   text than WCAG AA. `--muted` keeps Dray's luminance and takes only the hue.
-- **A table header at the selection shade** puts quiet header text at 4.16:1. `--selected` is used
-  where the text on it is `--ink` and has the contrast to sit there: the selected row itself.
+- **A table header at the selection shade** puts quiet text at 4.16:1 — and the first attempt at
+  this moved the header off the platform's colour to fix it, which solved the wrong half. A column
+  heading and a sidebar's selected item *are* the same kind of surface and should match. So the
+  header keeps `--selected` and the text is strengthened instead: `--muted` on macOS clears AA on
+  the lightest thing it has to sit on (4.60:1 on the selection, 6–7:1 on the surfaces).
 
 **`verify-contrast.mjs` cannot see any of this.** It checks the generated palette, and these are
 resolved from the OS at run time. Every pair above was computed by hand against the measured system
