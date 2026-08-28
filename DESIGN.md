@@ -445,6 +445,41 @@ The Blazor content sits inside a native window. At the boundary, these must matc
 - **System settings are honoured:** reduce-transparency, increase-contrast, and the system text-size
   preference all map onto tokens.
 
+### 9.1.1 Which tokens the platform gets to set
+
+Measured from AppKit on macOS 26, not guessed from names — `controlBackgroundColor` sounds like a
+card and is the window colour, and `underPageBackgroundColor` sounds like a ground and is a mid grey
+in light.
+
+| token | source | why |
+|---|---|---|
+| `--ground` | nothing — **transparent** | The window's material is behind a transparent WebView. Painting a flat approximation over it leaves a visible seam; a material cannot be matched by a colour, so it is not covered. |
+| `--bg` | `windowBackgroundColor` | Still resolved, because `color-mix()` needs a real colour to blend against. |
+| `--line` | `separatorColor` | |
+| `--line-strong` | `tertiaryLabelColor` | The system's own next step up the same ramp, so the two stay in proportion. |
+| `--surface`, `--surface-2` | the ground, stepped | See below. |
+| `--selected` | `unemphasizedSelectedContentBackground` | What a native list paints behind a selected row when its view is not first responder — which is what a sidebar's selection is showing while you look at the content. |
+| `--muted` | Dray's own, neutralised | See below. |
+| `--text-base/sm/xs` | `NSFont` system sizes | The family was already right; the sizes were a scale Dray chose. |
+
+**The rule that emerged: Dray's ramp, the platform's hue.** The system's greys are perfectly
+neutral; Dray's generated surfaces carry a warm tint about ten channels wide, and next to neutral
+system chrome that tint is what reads as slightly-off. So the surfaces are built by stepping the
+*system* ground by the distances Dray's own palette uses, and `--muted` is Dray's own value with its
+chroma removed and its luminance preserved exactly.
+
+**Two places where matching the platform would have broken something, and did not win.**
+
+- **`secondaryLabel` is the colour macOS puts on sidebar section headings, and it fails AA here** —
+  4.16:1 in dark, 3.72:1 in light against these backgrounds. Apple targets a lower bar for secondary
+  text than WCAG AA. `--muted` keeps Dray's luminance and takes only the hue.
+- **A table header at the selection shade** puts quiet header text at 4.16:1. `--selected` is used
+  where the text on it is `--ink` and has the contrast to sit there: the selected row itself.
+
+**`verify-contrast.mjs` cannot see any of this.** It checks the generated palette, and these are
+resolved from the OS at run time. Every pair above was computed by hand against the measured system
+grounds; anyone changing a step has to redo that arithmetic, because the gate will not catch it.
+
 ### 9.2 What is native, per platform
 
 | | macOS (AppKit) | Windows | Linux (GTK4) |

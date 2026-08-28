@@ -126,7 +126,14 @@ input, textarea, select {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg);
+
+  /* The ground, which a native head may decline to paint. On macOS the window's own material is
+     behind a transparent WebView, and painting a flat approximation of it over the top leaves a
+     visible seam where the web content meets the window — a material cannot be matched by a
+     colour. There, --ground is transparent and the material shows through.
+
+     Falls back to --bg everywhere else, which is every head that owns its own background. */
+  background: var(--ground, var(--bg));
   color: var(--ink);
 }
 
@@ -865,6 +872,11 @@ input, textarea, select {
      padding, so 0 is correct here — the header lands exactly at the toolbar's lower edge. */
   top: 0;
   z-index: var(--z-sticky);
+
+  /* Deliberately --surface-2 rather than --selected, even on macOS where --selected is AppKit's
+     own. A header band at the selection shade puts quiet header text at 4.16:1 against it, below
+     AA. The selection colour is used where its text is --ink and has the contrast to sit on it:
+     the selected row itself. */
   background: var(--surface-2);
   color: var(--muted);
   font-size: var(--text-xs);
@@ -885,8 +897,11 @@ input, textarea, select {
   background: var(--surface-2);
 }
 
+/* Selection matches the platform's. On macOS --selected is AppKit's own unemphasized selection,
+   so a selected row here and a selected row in Finder are the same shade rather than two different
+   opinions about what selected looks like. */
 .table tbody tr[aria-selected="true"] {
-  background: color-mix(in oklab, var(--brand) 14%, var(--bg));
+  background: var(--selected, color-mix(in oklab, var(--brand) 14%, var(--bg)));
 }
 
 /* A row whose host is unreachable: every other column is stale rather than wrong. */
