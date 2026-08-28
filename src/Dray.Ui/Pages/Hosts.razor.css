@@ -24,3 +24,7 @@
 .hosts__spacer {
     flex: 1 1 auto;
 }
+
+.hosts__suggest {
+    margin-top: var(--s4);
+}

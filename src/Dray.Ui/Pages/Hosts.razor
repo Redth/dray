@@ -63,6 +63,30 @@
                 </table>
             </div>
 
+            @* The case discovery cannot cover: a Mac that could run Apple's engine and has not got
+               it. Gated on the machine actually being able to run it — pointing someone at a
+               download that will not start is worse than saying nothing. *@
+            @if (AppleEngine.Explain(AppleAvailability) is { } suggestion)
+            {
+                <div class="panel hosts__suggest">
+                    <div class="panel__body hosts__servicebody">
+                        <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                        <p class="muted hosts__note">@suggestion</p>
+
+                        <span class="hosts__spacer"></span>
+
+                        @if (AppleAvailability == AppleEngineAvailability.Available)
+                        {
+                            @* Apple's own signed installer, opened in the user's browser rather
+                               than in Dray's WebView — a download is the browser's job. *@
+                            <Button Label="Get it from Apple" Icon="IconRef.External"
+                                    Variant="ButtonVariant.Secondary"
+                                    OnClick="() => Shell.OpenExternalAsync(AppleEngine.Downloads)" />
+                        }
+                    </div>
+                </div>
+            }
+
             @if (_error is { } problem)
             {
                 <div class="banner" role="alert">
@@ -152,6 +176,19 @@
         "Hosts",
         Subtitle: Engine.HasNoHosts ? null : $"{Engine.Hosts.Count} known",
         Actions: [ChromeAction.Secondary("refresh", "Look again", IconRef.Refresh)]);
+
+    /// <summary>
+    /// Whether Apple's engine is worth mentioning. Discovery finds it on PATH, so both ways of
+    /// installing it are already handled — Apple's signed package puts it in /usr/local/bin and
+    /// Homebrew's formula puts a wrapper in /opt/homebrew/bin. This is the case discovery cannot
+    /// cover: a machine that could run it and has not got it.
+    /// </summary>
+    AppleEngineAvailability AppleAvailability => AppleEngine.Check(
+        installed: Engine.Hosts.Any(h => h.Origin == HostOrigin.AppleContainer),
+        isMacOS: OperatingSystem.IsMacOS(),
+        isAppleSilicon: System.Runtime.InteropServices.RuntimeInformation.OSArchitecture
+            is System.Runtime.InteropServices.Architecture.Arm64,
+        macOSMajor: Environment.OSVersion.Version.Major);
 
     EngineServiceState? _service;
     bool _working;
