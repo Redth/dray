@@ -54,9 +54,26 @@
                 <div class="log__line @(line.Stream == LogStream.StdErr ? "is-stderr" : null)" @key="line.Sequence">
                     @if (_showTimestamps && line.Timestamp is { } ts)
                     {
-                        <span class="log__ts">@ts.ToLocalTime().ToString("HH:mm:ss.fff")</span>
+                        @* Empty where the line already prints its own clock — the same instant
+                           twice, in two formats, is what a redis or nginx line looked like. The
+                           span still renders so the column keeps its width and the text stays
+                           aligned with the lines above it. Nothing is hidden that was not already
+                           on screen: the program's own timestamp is right there. *@
+                        <span class="log__ts">
+                            @(LogTimestamps.CarriesItsOwn(line.Text) ? "" : ts.ToLocalTime().ToString("HH:mm:ss.fff"))
+                        </span>
                     }
-                    <span class="log__text">@line.Text</span>
+                    @* Escapes become spans; everything else stays text. The converted HTML is
+                       escaped by the converter, because container output is the least trusted
+                       string in the app. *@
+                    @if (_coloured.TryGetValue(line.Sequence, out var html))
+                    {
+                        <span class="log__text">@((MarkupString)html)</span>
+                    }
+                    else
+                    {
+                        <span class="log__text">@line.Text</span>
+                    }
                 </div>
             }
         }
@@ -120,8 +137,11 @@
 
             if (!string.IsNullOrWhiteSpace(_filter))
             {
+                // Matched against the line without its escapes, so a search for "31" cannot hit
+                // the red in ESC[31m and a search for a word is not defeated by a colour change
+                // in the middle of it.
                 var needle = _filter.Trim();
-                q = q.Where(l => l.Text.Contains(needle, StringComparison.OrdinalIgnoreCase));
+                q = q.Where(l => AnsiText.Strip(l.Text).Contains(needle, StringComparison.OrdinalIgnoreCase));
             }
 
             return [.. q];
@@ -172,6 +192,29 @@
         _pump = PumpAsync(Container.Id, _cts.Token);
     }
 
+    /// <summary>Sequence number to the HTML its escapes became.</summary>
+    readonly Dictionary<long, string> _coloured = [];
+
+    async Task ColourAsync(LogLine line)
+    {
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+
+        try
+        {
+            // One line per call, and the argument is a string rather than an array: InvokeAsync
+            // takes params object?[], so handing it a string[] spreads the elements into separate
+            // arguments instead of passing one array.
+            var html = await _module.InvokeAsync<string>("ansi.render", line.Text);
+
+            if (!string.IsNullOrEmpty(html)) _coloured[line.Sequence] = html;
+        }
+        catch (JSException)
+        {
+            // A line Dray could not colour is still a line. It renders as text, escapes and all,
+            // which is what it did before there was a converter.
+        }
+    }
+
     async Task PumpAsync(string containerId, CancellationToken ct)
     {
         try
@@ -179,6 +222,11 @@
             await foreach (var line in Engine.StreamLogsAsync(containerId, LogOptions.Default, ct))
             {
                 _lines.Add(line);
+
+                // Only lines that actually carry escapes cost anything: the check is a string scan
+                // in C# and the conversion is one interop call for the line that needs it. On the
+                // overwhelming majority of output this does nothing at all.
+                if (AnsiText.Contains(line.Text)) await ColourAsync(line);
 
                 if (_lines.Count > MaxLines)
                 {
@@ -239,9 +287,12 @@
     {
         var text = string.Join(
             '\n',
-            Filtered.Select(l => _showTimestamps && l.Timestamp is { } ts
-                ? $"{ts.ToLocalTime():HH:mm:ss.fff} {l.Text}"
-                : l.Text));
+            // Stripped, because escape bytes on the clipboard paste as gibberish anywhere but a
+            // terminal — and the timestamp is left off a line that prints its own, for the same
+            // reason it is not drawn.
+            Filtered.Select(l => _showTimestamps && l.Timestamp is { } ts && !LogTimestamps.CarriesItsOwn(l.Text)
+                ? $"{ts.ToLocalTime():HH:mm:ss.fff} {AnsiText.Strip(l.Text)}"
+                : AnsiText.Strip(l.Text)));
 
         await Shell.WriteClipboardAsync(text);
     }

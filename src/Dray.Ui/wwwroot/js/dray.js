@@ -208,3 +208,25 @@ export const notify = {
     }
   },
 };
+
+export const ansi = {
+  /**
+   * Turn a log line's ANSI escapes into spans.
+   *
+   * Not hand-rolled: the escape grammar has 8-bit and 24-bit colour as well as the sixteen
+   * everyone remembers, and a parser that gets it slightly wrong corrupts the text rather than the
+   * colour. ansi_up has been doing this since 2011.
+   *
+   * escapeHtml stays on, so a line containing `<script>` is text and not markup — container output
+   * is the least trusted string in the app.
+   */
+  async render(line) {
+    const { AnsiUp } = await import('../lib/ansi/ansi_up.js');
+
+    const up = new AnsiUp();
+    up.escape_html = true;
+    up.use_classes = true;
+
+    return up.ansi_to_html(line);
+  },
+};

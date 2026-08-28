@@ -40,6 +40,9 @@ jobs:
       - name: Vendored Tabulator is current
         run: node build/vendor-tabulator.mjs --check
 
+      - name: Vendored ansi_up is current
+        run: node build/vendor-ansi.mjs --check
+
   build:
     name: Build (${{ matrix.name }})
     needs: design

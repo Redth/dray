@@ -68,8 +68,11 @@
     background: color-mix(in oklab, var(--warn) 5%, transparent);
 }
 
+/* Fixed width, because it is empty on any line that prints its own clock — see LogView. A column
+   that collapsed on those lines would shuffle the text left and right down the page. */
 .log__ts {
     flex: 0 0 auto;
+    width: 12ch;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
     user-select: none;
@@ -116,4 +119,44 @@
     border-top: 1px solid var(--line);
     font-size: var(--text-xs);
     background: var(--surface-2);
+}
+
+/* ---------------------------------------------------------------- ansi colour
+
+   The classes ansi_up emits, mapped onto Dray's own palette rather than the sixteen literal
+   terminal colours. A program's idea of "red" is a token here for the same reason everything else
+   is: these have to stay legible on both appearances and on whatever the platform's window colour
+   turns out to be, and a raw terminal red does not.
+
+   Only the eight base colours and their bright forms are mapped. ansi_up's 8-bit and 24-bit output
+   carries inline styles instead of classes, which is the right answer for a program asking for one
+   specific colour — it gets it. */
+.log__body ::deep .ansi-black-fg    { color: var(--ink); }
+.log__body ::deep .ansi-red-fg      { color: var(--danger); }
+.log__body ::deep .ansi-green-fg    { color: var(--ok); }
+.log__body ::deep .ansi-yellow-fg   { color: var(--warn-ink); }
+.log__body ::deep .ansi-blue-fg     { color: var(--key-1); }
+.log__body ::deep .ansi-magenta-fg  { color: var(--key-4); }
+.log__body ::deep .ansi-cyan-fg     { color: var(--key-5); }
+.log__body ::deep .ansi-white-fg    { color: var(--muted); }
+
+.log__body ::deep .ansi-bright-black-fg   { color: var(--line-strong); }
+.log__body ::deep .ansi-bright-red-fg     { color: var(--danger); }
+.log__body ::deep .ansi-bright-green-fg   { color: var(--ok); }
+.log__body ::deep .ansi-bright-yellow-fg  { color: var(--warn); }
+.log__body ::deep .ansi-bright-blue-fg    { color: var(--key-1); }
+.log__body ::deep .ansi-bright-magenta-fg { color: var(--key-4); }
+.log__body ::deep .ansi-bright-cyan-fg    { color: var(--key-5); }
+.log__body ::deep .ansi-bright-white-fg   { color: var(--ink); }
+
+.log__body ::deep .ansi-bold { font-weight: 600; }
+.log__body ::deep .ansi-italic { font-style: italic; }
+.log__body ::deep .ansi-underline { text-decoration: underline; }
+
+/* A background the program asked for is drawn as a tint rather than a block of colour: a full-bleed
+   terminal background inside a light panel is a hole in the page. */
+.log__body ::deep [class*="-bg"] {
+    padding: 0 2px;
+    border-radius: 2px;
+    background: color-mix(in oklab, currentColor 14%, transparent);
 }
