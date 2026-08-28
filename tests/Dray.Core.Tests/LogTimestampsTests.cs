@@ -63,4 +63,69 @@ public class LogTimestampsTests
         Assert.False(LogTimestamps.CarriesItsOwn("connecting to 10.88.0.7:6379 with 3 retries"));
         Assert.False(LogTimestamps.CarriesItsOwn("listening on [::]:8080"));
     }
+
+    // ---------------------------------------------------------------- lifting it out
+
+    [Theory]
+    // redis: the process role and the severity glyph stay, the clock goes
+    [InlineData(
+        "1:M 27 Aug 2026 21:49:47.403 * Ready to accept connections tcp",
+        "1:M * Ready to accept connections tcp")]
+    // nginx error log
+    [InlineData(
+        "2026/08/27 17:06:45 [error] 17#17: *6 open() failed",
+        "[error] 17#17: *6 open() failed")]
+    // an access log, whose timestamp is bracketed — the empty brackets go with it
+    [InlineData(
+        "10.88.0.7 - - [27/Aug/2026:17:06:45 +0000] \"GET / HTTP/1.1\" 404 153",
+        "10.88.0.7 - - \"GET / HTTP/1.1\" 404 153")]
+    // Go, and anything else printing ISO 8601
+    [InlineData("2026-08-27T21:47:59.214Z INFO starting up", "INFO starting up")]
+    // postgres, which puts a timezone after the fraction
+    [InlineData(
+        "2026-08-27 21:47:59.214 UTC [1] LOG:  database system is ready",
+        "[1] LOG: database system is ready")]
+    // syslog, which prints no year
+    [InlineData("Aug 27 21:47:59 host sshd[1234]: Accepted publickey", "host sshd[1234]: Accepted publickey")]
+    public void TheProgramsOwnClockIsLiftedOut(string line, string expected)
+        => Assert.Equal(expected, LogTimestamps.WithoutItsOwn(line));
+
+    [Fact]
+    public void ALineWithNoClockIsUntouched()
+    {
+        const string line = "Running in standalone mode";
+
+        Assert.Equal(line, LogTimestamps.WithoutItsOwn(line));
+    }
+
+    [Fact]
+    public void ALineThatIsNothingButItsClockKeepsIt()
+    {
+        // An empty row says less than a redundant one, and this is a display change rather than an
+        // edit to the program's output.
+        Assert.Equal("21:47:59", LogTimestamps.WithoutItsOwn("21:47:59"));
+    }
+
+    [Fact]
+    public void OnlyTheFirstOneGoes()
+    {
+        // A line that quotes a second time — a duration, a deadline — keeps it. Removing every
+        // clock would cut holes in the message.
+        Assert.Equal(
+            "1:M * retrying until 22:00:00",
+            LogTimestamps.WithoutItsOwn("1:M 27 Aug 2026 21:49:47.403 * retrying until 22:00:00"));
+    }
+
+    [Fact]
+    public void ADateWithNoClockIsLeftAlone()
+    {
+        // It is the time that repeats in the column. A line about a date is a line about a date.
+        const string line = "backup for 2026-08-27 completed";
+
+        Assert.Equal(line, LogTimestamps.WithoutItsOwn(line));
+    }
+
+    [Fact]
+    public void NullBecomesEmptyRatherThanThrowing()
+        => Assert.Equal("", LogTimestamps.WithoutItsOwn(null));
 }

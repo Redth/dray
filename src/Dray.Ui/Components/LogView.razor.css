@@ -121,6 +121,26 @@
     background: var(--surface-2);
 }
 
+/* ---------------------------------------------------------------- severity
+
+   What the program called the line, not what Dray thinks of it — see LogSeverity. Tinted rather
+   than badged: a column of level chips costs more width than it repays on output that is mostly
+   unlabelled, and the tint is readable at a glance down the left of a long page.
+
+   Errors and warnings only get a colour. Debug recedes instead, because there is usually a lot of
+   it and it is not what anyone is scrolling for. */
+.log__line.is-error .log__text {
+    color: var(--danger);
+}
+
+.log__line.is-warn .log__text {
+    color: var(--warn-ink);
+}
+
+.log__line.is-debug .log__text {
+    color: var(--muted);
+}
+
 /* ---------------------------------------------------------------- ansi colour
 
    The classes ansi_up emits, mapped onto Dray's own palette rather than the sixteen literal

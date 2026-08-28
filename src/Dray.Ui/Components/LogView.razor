@@ -51,17 +51,13 @@
         {
             @foreach (var line in Filtered)
             {
-                <div class="log__line @(line.Stream == LogStream.StdErr ? "is-stderr" : null)" @key="line.Sequence">
+                <div class="log__line @LineClass(line)" @key="line.Sequence">
                     @if (_showTimestamps && line.Timestamp is { } ts)
                     {
-                        @* Empty where the line already prints its own clock — the same instant
-                           twice, in two formats, is what a redis or nginx line looked like. The
-                           span still renders so the column keeps its width and the text stays
-                           aligned with the lines above it. Nothing is hidden that was not already
-                           on screen: the program's own timestamp is right there. *@
-                        <span class="log__ts">
-                            @(LogTimestamps.CarriesItsOwn(line.Text) ? "" : ts.ToLocalTime().ToString("HH:mm:ss.fff"))
-                        </span>
+                        @* One column, always filled. Where the program printed its own clock it is
+                           lifted out of the message below and the engine's shown here instead —
+                           the same instant, rendered once, in the user's timezone. *@
+                        <span class="log__ts">@ts.ToLocalTime().ToString("HH:mm:ss.fff")</span>
                     }
                     @* Escapes become spans; everything else stays text. The converted HTML is
                        escaped by the converter, because container output is the least trusted
@@ -72,7 +68,7 @@
                     }
                     else
                     {
-                        <span class="log__text">@line.Text</span>
+                        <span class="log__text">@Message(line)</span>
                     }
                 </div>
             }
@@ -190,6 +186,38 @@
 
         _cts = new CancellationTokenSource();
         _pump = PumpAsync(Container.Id, _cts.Token);
+    }
+
+    /// <summary>
+    /// What the line says, with its own timestamp lifted out where the column is showing the
+    /// engine's. With the column off, the line is left exactly as the program wrote it — there is
+    /// then nothing duplicating it.
+    /// </summary>
+    string Message(LogLine line)
+        => _showTimestamps && line.Timestamp is not null
+            ? LogTimestamps.WithoutItsOwn(line.Text)
+            : line.Text;
+
+    /// <summary>
+    /// The row's classes: which stream it came from, and what the program called it.
+    /// <para>
+    /// stderr and severity are different questions. A program can log an error to stdout and its
+    /// ordinary progress to stderr, and plenty do.
+    /// </para>
+    /// </summary>
+    string LineClass(LogLine line)
+    {
+        var stream = line.Stream == LogStream.StdErr ? "is-stderr" : null;
+
+        var level = LogSeverity.Of(Message(line)) switch
+        {
+            LogLevel.Error => "is-error",
+            LogLevel.Warning => "is-warn",
+            LogLevel.Debug => "is-debug",
+            _ => null,
+        };
+
+        return string.Join(' ', new[] { stream, level }.Where(c => c is not null));
     }
 
     /// <summary>Sequence number to the HTML its escapes became.</summary>
