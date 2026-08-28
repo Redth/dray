@@ -1,31 +1,13 @@
-@* What the engine knows about one container.
+@* What the engine knows about one container: the facts that explain what it is and why it is
+   behaving as it is.
 
-   Two views, because they answer different questions. The summary is the ten facts that explain
-   what this container is and why it is behaving as it is; the raw JSON is everything, verbatim,
-   for the times the summary does not contain the answer. Without the second, the user leaves for a
-   terminal — and Dray exists to make that unnecessary, not to insist its own curation is complete. *@
-@inject IShellBridge Shell
+   Everything else the engine said is a menu item away, in the corner of the tab row — verbatim, in
+   a dialog. Without that the user leaves for a terminal, and Dray exists to make that unnecessary
+   rather than to insist its own curation is complete. Neither the copy nor the raw response is
+   drawn here: they belong to the tab, and the tab bar is where the tab's own controls live.
+*@
 
 <div class="page page--flush inspect__root">
-    @* One view, not two tabs. The summary is the answer nearly every time, and a tab bar made the
-       page ask a question — "which of these do you want?" — before showing either. The raw
-       response is still one click away, in a dialog, where it can use the whole window instead of
-       the column this panel sits in. *@
-    <div class="inspect__bar">
-        <span class="muted inspect__note">Ten facts about this container, from the engine.</span>
-
-        <span class="inspect__spacer"></span>
-
-        <Button Label="Copy summary" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost"
-                Tooltip="Copy these facts as text, for an issue or a message"
-                OnClick="CopySummaryAsync" />
-
-        <Button Label="Raw JSON…" Icon="IconRef.Inspect" Variant="ButtonVariant.Secondary"
-                Tooltip="Everything the engine returned, verbatim"
-                Disabled="@string.IsNullOrEmpty(Inspect.RawJson)"
-                OnClick="ShowRawAsync" />
-    </div>
-
     <div class="inspect">
             <section class="panel">
                 <div class="panel__head"><h3 class="panel__title">Identity</h3></div>
@@ -216,47 +198,4 @@
         return value[..(colon + 1)] + (hash.Length <= 12 ? hash : hash[..12]);
     }
 
-    /// <summary>The facts as text, for pasting into an issue or a message.</summary>
-    Task CopySummaryAsync() => Shell.WriteClipboardAsync(Summarise());
-
-    /// <summary>
-    /// The engine's own response, in a dialog.
-    /// <para>
-    /// Through the shell rather than as an overlay in the page, so it is a real sheet on macOS, a
-    /// ContentDialog on Windows and a &lt;dialog&gt; in a browser — docs/NATIVE-SHELL.md section 4.
-    /// The button row is one button, because there is nothing here to decide; Copy sits with the
-    /// content, where it acts on the content rather than ending the dialog.
-    /// </para>
-    /// </summary>
-    Task ShowRawAsync() => Shell.ShowDialogAsync(new DialogRequest(
-        $"Raw JSON — {Inspect.Name}",
-        typeof(JsonViewer),
-        new Dictionary<string, object?> { [nameof(JsonViewer.Json)] = Inspect.RawJson },
-        Subtitle: "Everything the engine returned for this container, exactly as it sent it.",
-        Size: DialogSize.Large));
-
-    string Summarise()
-    {
-        var lines = new List<string>
-        {
-            $"name:     {Inspect.Name}",
-
-            // The full id here: this text exists to be pasted into an issue or a command.
-            $"id:       {Inspect.Id}",
-            $"image:    {Inspect.Image}",
-            $"status:   {Inspect.Status.Label}",
-            $"command:  {Inspect.CommandLine}",
-        };
-
-        if (Inspect.OomKilled) lines.Add("killed:   out of memory");
-        if (Inspect.Error is { } error) lines.Add($"error:    {error}");
-
-        foreach (var network in Inspect.Networks)
-            lines.Add($"network:  {network.Name} {network.IpAddress}");
-
-        foreach (var mount in Inspect.Mounts)
-            lines.Add($"mount:    {mount.Source} -> {mount.Destination}");
-
-        return string.Join('\n', lines);
-    }
 }

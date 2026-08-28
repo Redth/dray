@@ -26,27 +26,9 @@
                 OnClick="() => PickAsync(captured)" />
     }
 
-    @if (Hidden.Count > 0)
-    {
-        <button type="button" class="btn btn--secondary btn--icon actions__more"
-                popovertarget="@_id" aria-label="@MenuLabel" title="@MenuLabel" @ref="_trigger">
-            <Icon Name="IconRef.More" Size="IconSize.Md" />
-        </button>
-
-        <div class="menu" id="@_id" popover="auto" @ref="_panel">
-            @foreach (var action in Hidden)
-            {
-                var captured = action;
-
-                <button type="button" class="menu__item @(action.Danger ? "is-danger" : null)"
-                        disabled="@action.Disabled" title="@action.Tooltip"
-                        @onclick="() => PickAsync(captured)">
-                    <Icon Name="action.Icon" Size="IconSize.Md" />
-                    <span>@action.Label</span>
-                </button>
-            }
-        </div>
-    }
+    @* The menu itself is OverflowMenu, which is also used on its own where a row of buttons was
+       never wanted — a tab bar's corner. This component's job is deciding what goes in it. *@
+    <OverflowMenu Actions="Hidden" Label="@MenuLabel" OnAction="OnAction" />
 </div>
 
 @code {
@@ -61,18 +43,11 @@
     /// <summary>Names the overflow control. Says what it holds, since its contents change.</summary>
     [Parameter] public string MenuLabel { get; set; } = "More actions";
 
-    readonly string _id = $"menu-{Guid.NewGuid():N}";
-
     ElementReference _row;
-    ElementReference _trigger;
-    ElementReference _panel;
 
     IJSObjectReference? _module;
     IJSObjectReference? _observer;
-    IJSObjectReference? _menu;
     DotNetObjectReference<ActionRow>? _self;
-
-    int _menuFor = -1;
 
     double _available;
     double _item;
@@ -105,40 +80,14 @@
 
     protected override async Task OnAfterRenderAsync(bool first)
     {
-        if (first)
-        {
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
-            _self = DotNetObjectReference.Create(this);
-            _observer = await _module.InvokeAsync<IJSObjectReference>("overflow.attach", _row, _self);
-        }
+        if (!first) return;
 
-        if (_module is null) return;
-
-        // The panel is a different element every time the split changes, so its placement listener
-        // is re-attached whenever that happens rather than once.
-        if (Hidden.Count > 0 && _menuFor != Hidden.Count)
-        {
-            if (_menu is not null) await _module.InvokeVoidAsync("menu.detach", _menu);
-
-            _menu = await _module.InvokeAsync<IJSObjectReference>("menu.attach", _trigger, _panel);
-            _menuFor = Hidden.Count;
-        }
-        else if (Hidden.Count == 0 && _menu is not null)
-        {
-            await _module.InvokeVoidAsync("menu.detach", _menu);
-            _menu = null;
-            _menuFor = -1;
-        }
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+        _self = DotNetObjectReference.Create(this);
+        _observer = await _module.InvokeAsync<IJSObjectReference>("overflow.attach", _row, _self);
     }
 
-    async Task PickAsync(RowAction action)
-    {
-        // Closing first: the action may navigate, and a popover left open across a navigation stays
-        // in the top layer over the next page.
-        if (_module is not null && _menu is not null) await _module.InvokeVoidAsync("menu.close", _panel);
-
-        await OnAction.InvokeAsync(action.Id);
-    }
+    Task PickAsync(RowAction action) => OnAction.InvokeAsync(action.Id);
 
     public async ValueTask DisposeAsync()
     {
@@ -147,7 +96,6 @@
             if (_module is not null)
             {
                 if (_observer is not null) await _module.InvokeVoidAsync("overflow.detach", _observer);
-                if (_menu is not null) await _module.InvokeVoidAsync("menu.detach", _menu);
 
                 await _module.DisposeAsync();
             }

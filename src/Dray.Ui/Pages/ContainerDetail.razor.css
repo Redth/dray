@@ -5,3 +5,9 @@
     border-bottom: 1px solid var(--line);
     flex: 0 0 auto;
 }
+
+/* Pushes the tab row's own menu to the far corner. The tabs keep their natural width; the space
+   between them and the menu is what is left over. */
+.detail__tabs-spacer {
+    flex: 1 1 auto;
+}

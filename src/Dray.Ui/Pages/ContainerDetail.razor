@@ -81,6 +81,14 @@
                             @tab
                         </button>
                     }
+
+                    @* What the tab on screen can do, in the corner of the row that names it. A tab
+                       whose actions were a second bar underneath would put two rows of chrome above
+                       every panel, for the one or two tabs that have any. *@
+                    <span class="detail__tabs-spacer"></span>
+
+                    <OverflowMenu Actions="TabActions" Label="@($"More for {ActiveTab}")"
+                                  TriggerClass="btn--ghost" OnAction="RunTabActionAsync" />
                 </div>
 
                 <div class="detail__body">
@@ -206,6 +214,51 @@
         if (!Engine.Store.WasRecentlyChanged(container.Id)) return;
 
         _ = InvokeAsync(LoadInspectAsync);
+    }
+
+    /// <summary>
+    /// What the tab currently on screen can do, beyond what its own content offers.
+    /// <para>
+    /// Empty for most of them, which is the point: the menu only appears where there is something
+    /// in it, so six of the seven tabs get a bare tab row.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<RowAction> TabActions => ActiveTab switch
+    {
+        "Inspect" when _inspect is not null =>
+        [
+            new RowAction("copy-summary", "Copy summary", IconRef.Copy,
+                "The facts on screen as text, for an issue or a message"),
+
+            new RowAction("raw-json", "Raw JSON…", IconRef.Inspect,
+                "Everything the engine returned, verbatim",
+                Disabled: string.IsNullOrEmpty(_inspect.RawJson)),
+        ],
+
+        _ => [],
+    };
+
+    async Task RunTabActionAsync(string id)
+    {
+        if (_inspect is not { } inspect) return;
+
+        switch (id)
+        {
+            case "copy-summary":
+                await ShellBridge.WriteClipboardAsync(ContainerInspectSummary.ToText(inspect));
+                break;
+
+            // Through the shell, so it is a real sheet on macOS and a <dialog> in a browser —
+            // docs/NATIVE-SHELL.md section 4. One button, because there is nothing here to decide.
+            case "raw-json":
+                await ShellBridge.ShowDialogAsync(new DialogRequest(
+                    $"Raw JSON — {inspect.Name}",
+                    typeof(JsonViewer),
+                    new Dictionary<string, object?> { [nameof(JsonViewer.Json)] = inspect.RawJson },
+                    Subtitle: "Everything the engine returned for this container, exactly as it sent it.",
+                    Size: DialogSize.Large));
+                break;
+        }
     }
 
     void SelectTab(string tab)

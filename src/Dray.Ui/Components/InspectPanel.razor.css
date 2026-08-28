@@ -1,35 +1,8 @@
-/* The rule under this row runs the full width of the panel, like the tab bar above it, rather than
-   stopping short at the content inset — a divider that ends before the edge reads as a border
-   round a box that is not there. The controls keep the inset, so they line up with the tabs above
-   and with the panels below. */
-/* The bar and the grid measure themselves against this, not against the window: the panel is a
-   column inside a card and its width has little to do with the window's. */
+/* The grid measures itself against this, not against the window: the panel is a column inside a
+   card, and its width has little to do with the window's. */
 .inspect__root {
     container-type: inline-size;
-}
-
-.inspect__bar {
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    margin: 0 0 var(--s3);
-    padding: 0 var(--s3) var(--s2);
-    border-bottom: 1px solid var(--line);
-}
-
-.inspect__note {
-    font-size: var(--text-sm);
-}
-
-/* The sentence goes before the buttons do: they are what the row is for. */
-@container (max-width: 34rem) {
-    .inspect__note {
-        display: none;
-    }
-}
-
-.inspect__spacer {
-    flex: 1 1 auto;
+    padding-top: var(--s3);
 }
 
 /* Two columns where there is room. The panels are independent facts about one container, and

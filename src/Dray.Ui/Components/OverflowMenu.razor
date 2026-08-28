@@ -1,0 +1,98 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@* A ⋯ button and the menu it opens.
+
+   A real popover, so it escapes whatever rounded, clipping box it happens to sit in — a card, a tab
+   bar — and gets light dismiss, Escape and the top layer from the platform rather than from
+   hand-rolled key handling. The top layer has no idea where the button is, and WebKit has no anchor
+   positioning, so the placement is done on each open.
+
+   This is a menu, not a dialog: it belongs to the control it came from and moves with it. See
+   docs/NATIVE-SHELL.md section 4 for why that distinction decides whether something is native. *@
+
+@if (Actions.Count > 0)
+{
+    <button type="button" class="btn @TriggerClass btn--icon"
+            popovertarget="@_id" aria-label="@Label" title="@Label" @ref="_trigger">
+        <Icon Name="IconRef.More" Size="IconSize.Md" />
+    </button>
+
+    <div class="menu" id="@_id" popover="auto" @ref="_panel">
+        @foreach (var action in Actions)
+        {
+            var captured = action;
+
+            <button type="button" class="menu__item @(action.Danger ? "is-danger" : null)"
+                    disabled="@action.Disabled" title="@action.Tooltip"
+                    @onclick="() => PickAsync(captured)">
+                <Icon Name="action.Icon" Size="IconSize.Md" />
+                <span>@action.Label</span>
+            </button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<RowAction> Actions { get; set; } = [];
+
+    [Parameter] public EventCallback<string> OnAction { get; set; }
+
+    /// <summary>Names the control. Says what it holds, since its contents change.</summary>
+    [Parameter] public string Label { get; set; } = "More actions";
+
+    /// <summary>Weight of the trigger. Ghost where it sits among other quiet controls.</summary>
+    [Parameter] public string TriggerClass { get; set; } = "btn--secondary";
+
+    readonly string _id = $"menu-{Guid.NewGuid():N}";
+
+    ElementReference _trigger;
+    ElementReference _panel;
+
+    IJSObjectReference? _module;
+    IJSObjectReference? _menu;
+
+    int _attachedFor = -1;
+
+    protected override async Task OnAfterRenderAsync(bool first)
+    {
+        if (Actions.Count == 0) return;
+
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+
+        // The panel is a different element whenever the item count changes, so its placement
+        // listener is re-attached then rather than once.
+        if (_attachedFor == Actions.Count) return;
+
+        if (_menu is not null) await _module.InvokeVoidAsync("menu.detach", _menu);
+
+        _menu = await _module.InvokeAsync<IJSObjectReference>("menu.attach", _trigger, _panel);
+        _attachedFor = Actions.Count;
+    }
+
+    async Task PickAsync(RowAction action)
+    {
+        // Closed first: the action may navigate, and a popover left open across a navigation stays
+        // in the top layer over the next page.
+        if (_module is not null && _menu is not null) await _module.InvokeVoidAsync("menu.close", _panel);
+
+        await OnAction.InvokeAsync(action.Id);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_module is not null)
+            {
+                if (_menu is not null) await _module.InvokeVoidAsync("menu.detach", _menu);
+
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit went first — nothing to detach from.
+        }
+    }
+}
