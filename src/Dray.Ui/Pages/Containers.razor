@@ -24,8 +24,7 @@
     }
 
     @* page--fill, not page--flush: the table owns its own scrolling so its header can stay put,
-       and a scrolling page gives its children no height to scroll inside. The banner and the bulk
-       bar take the side margin the page is no longer applying. *@
+       and a scrolling page gives its children no height to scroll inside. *@
     <div class="page page--fill containers__page">
         @if (_error is { } error)
         {

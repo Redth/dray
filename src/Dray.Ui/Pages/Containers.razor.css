@@ -72,17 +72,13 @@
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
-    margin: 0 var(--chrome-inset) var(--chrome-inset);
+    /* Only the top. .page already pads the sides and the bottom, and page--fill overrides nothing
+       but padding-top — which is right for a log view running under the toolbar and leaves a card
+       with no gap below it. Adding a margin on all four sides doubled the other three. */
+    margin-top: var(--chrome-inset);
 }
 
 .containers__grid:focus-visible {
     outline: none;
 }
 
-/* The page no longer pads its sides, so what sits on it takes that margin itself. */
-.containers__page > .banner,
-.containers__page > .bulkbar,
-.containers__page ::deep .empty {
-    margin-left: var(--chrome-inset);
-    margin-right: var(--chrome-inset);
-}

@@ -218,12 +218,17 @@ textarea,
   padding: calc(var(--chrome-top) + var(--s4)) var(--chrome-inset) var(--chrome-inset);
 }
 
+/* A page whose content is one surface — a table, a card — sits in the window the way the sidebar
+   does: the same gap on every side. The sidebar's inlay is inset by --chrome-inset, measured from
+   AppKit rather than chosen, so using it here makes the two line up on any version of macOS
+   instead of only on the one this was looked at on. */
+.page--flush {
+  padding: calc(var(--chrome-top) + var(--chrome-inset)) var(--chrome-inset) var(--chrome-inset);
+}
+
 /* Full-bleed content — the container and image tables. Still reserves the chrome, and still gets
    breathing room at the sides: a table jammed against the sidebar divider and the window edge
    reads as unfinished, however dense the design is meant to be. */
-.page--flush {
-  padding: calc(var(--chrome-top) + var(--s3)) var(--chrome-inset) var(--chrome-inset);
-}
 
 /* Content that owns its own scrolling — the log view — cannot use padding, because the toolbar
    region must stay clear while the inner surface scrolls independently. */
