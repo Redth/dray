@@ -5,6 +5,7 @@
    a bug rather than as progress. *@
 @implements IAsyncDisposable
 @inject EngineManager Engine
+@inject IShellBridge Shell
 
 <Dialog Title="Pull an image" Open="Open" OpenChanged="OnOpenChanged">
     <ChildContent>
@@ -262,7 +263,16 @@
             if (_error is null)
             {
                 _done = $"Pulled {reference}.";
+
+                // Only lands if the window is not in front — see WebShellBridge.NotifyAsync. A pull
+                // is the archetypal "started it and went to do something else" operation.
+                await Shell.NotifyAsync("Pull finished", $"{reference} is on {Engine.Selected?.Name}.", NoticeKind.Success);
+
                 await OnPulled.InvokeAsync();
+            }
+            else
+            {
+                await Shell.NotifyAsync("Pull failed", $"{reference}: {_error}", NoticeKind.Error);
             }
         }
         catch (OperationCanceledException)

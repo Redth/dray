@@ -145,7 +145,16 @@
             if (_error is null)
             {
                 _done = request.Tag is null ? "Built." : $"Built {request.Tag}.";
+
+                await Shell.NotifyAsync(
+                    "Build finished", request.Tag is null ? "The image was built." : $"{request.Tag} was built.",
+                    NoticeKind.Success);
+
                 await OnBuilt.InvokeAsync();
+            }
+            else
+            {
+                await Shell.NotifyAsync("Build failed", _error, NoticeKind.Error);
             }
         }
         catch (OperationCanceledException)

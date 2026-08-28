@@ -347,6 +347,10 @@
             }
 
             Notify($"{label} finished for {stack.Name}.", ok: true);
+
+            // A compose up that pulls images runs for minutes. Only lands when the window is not
+            // in front, so watching it work is not reported twice.
+            await Shell.NotifyAsync($"{label} finished", $"{stack.Name} on {Engine.Selected?.Name}.", NoticeKind.Success);
         }
         catch (OperationCanceledException)
         {
@@ -354,6 +358,7 @@
         catch (Exception ex)
         {
             Notify(ex.Message, ok: false);
+            await Shell.NotifyAsync($"{label} failed", $"{stack.Name}: {ex.Message}", NoticeKind.Error);
         }
         finally
         {

@@ -43,8 +43,43 @@ public sealed class WebShellBridge(WebConfirmService confirms, IJSRuntime js) : 
         await module.InvokeAsync<bool>("clipboard.write", ct, text);
     }
 
-    public Task NotifyAsync(string title, string? body, NoticeKind kind = NoticeKind.Info, CancellationToken ct = default)
-        => Task.CompletedTask;
+    /// <summary>
+    /// A system notification, but only when the window is not in front.
+    /// <para>
+    /// The rule is the same on every head: a notification about something the user is watching is
+    /// noise. A pull that finishes while its progress bar is on screen has already reported
+    /// itself, and telling them twice trains them to dismiss the ones that matter.
+    /// </para>
+    /// <para>
+    /// A browser that refuses permission is a preference, not a failure, so nothing is raised and
+    /// nothing is logged.
+    /// </para>
+    /// </summary>
+    public async Task NotifyAsync(
+        string title, string? body, NoticeKind kind = NoticeKind.Info, CancellationToken ct = default)
+    {
+        try
+        {
+            var module = await js.InvokeAsync<IJSObjectReference>("import", ct, "./_content/Dray.Ui/js/dray.js");
+
+            await using (module.ConfigureAwait(false))
+            {
+                if (await module.InvokeAsync<bool>("notify.focused", ct)) return;
+
+                await module.InvokeAsync<bool>("notify.show", ct, title, body);
+            }
+        }
+        catch (JSException)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit went while the operation was finishing. Nothing to notify.
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
 
     public void SetBadge(int? count)
     {

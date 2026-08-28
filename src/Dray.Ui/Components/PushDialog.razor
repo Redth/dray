@@ -8,6 +8,7 @@
    docs/CREDENTIALS.md. Dray does not ask for a password here, because it has nowhere to put one. *@
 @implements IAsyncDisposable
 @inject EngineManager Engine
+@inject IShellBridge Shell
 @inject RegistryReader Registries
 
 <Dialog Title="Push an image" Open="Open" OpenChanged="OnOpenChanged">
@@ -148,7 +149,15 @@
                 StateHasChanged();
             }
 
-            if (_error is null) _done = $"Pushed {reference}.";
+            if (_error is null)
+            {
+                _done = $"Pushed {reference}.";
+                await Shell.NotifyAsync("Push finished", $"{reference} is on its registry.", NoticeKind.Success);
+            }
+            else
+            {
+                await Shell.NotifyAsync("Push failed", $"{reference}: {_error}", NoticeKind.Error);
+            }
         }
         catch (OperationCanceledException)
         {

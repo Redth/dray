@@ -154,10 +154,24 @@ public sealed class MacShellBridge : IShellBridge
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// A system notification, when the app is not the one in front.
+    /// <para>
+    /// The focus check is the part that works today and the part that matters: a notification
+    /// about something the user is watching is noise, and the rule is the same on every head.
+    /// </para>
+    /// <para>
+    /// Posting it is not. <c>UNUserNotificationCenter</c> needs a signed, notification-entitled
+    /// bundle, and asking an unsigned one for the notification centre raises rather than returning
+    /// a refusal — which is why this is still a no-op here and not a try/catch around a call that
+    /// cannot work yet. Phase 7 signs the bundle; the call site, the seam and the focus rule are
+    /// all in place for it, so what is left is the entitlement rather than the design.
+    /// </para>
+    /// </summary>
     public Task NotifyAsync(string title, string? body, NoticeKind kind = NoticeKind.Info, CancellationToken ct = default)
     {
-        // UNUserNotificationCenter needs a signed, notification-entitled bundle. Wired up in
-        // phase 7 alongside signing; until then this is a no-op rather than a crash on launch.
+        if (NSApplication.SharedApplication.Active) return Task.CompletedTask;
+
         return Task.CompletedTask;
     }
 
