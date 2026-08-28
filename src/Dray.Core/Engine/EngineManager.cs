@@ -330,6 +330,33 @@ public sealed class EngineManager : IAsyncDisposable
     public Task<string?> TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default)
         => TryAsync(runtime => runtime.TagImageAsync(imageId, repository, tag, ct));
 
+    /// <returns>Null on success, or a sentence explaining what went wrong.</returns>
+    public Task<string?> SaveImageAsync(
+        string reference, string destinationPath, IProgress<long>? progress = null, CancellationToken ct = default)
+        => TryAsync(runtime => runtime.SaveImageAsync(reference, destinationPath, progress, ct));
+
+    /// <summary>
+    /// Load an archive, returning what the engine says it loaded and whatever went wrong.
+    /// <para>
+    /// Both are returned because both are worth reporting: an archive can load and name nothing,
+    /// which is not a failure and not something to claim an image for.
+    /// </para>
+    /// </summary>
+    public async Task<(IReadOnlyList<string> Loaded, string? Error)> LoadImageAsync(
+        string archivePath, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return ([], "Not connected to an engine.");
+
+        try
+        {
+            return (await runtime.LoadImageAsync(archivePath, ct).ConfigureAwait(false), null);
+        }
+        catch (Exception ex)
+        {
+            return ([], RuntimeEventPump.Describe(ex));
+        }
+    }
+
     /// <summary>
     /// Create a container from an image and start it.
     /// <para>

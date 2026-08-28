@@ -131,6 +131,13 @@ public sealed record RuntimeCapabilities
     /// </summary>
     public bool SupportsLogMetadata { get; init; } = true;
 
+    /// <summary>
+    /// Whether images can be written to and read from a tar archive. Both engines Dray speaks to
+    /// can; a remote host reached over a socket still can, because the archive is streamed rather
+    /// than written by the engine to a path it can see.
+    /// </summary>
+    public bool SupportsImageArchive { get; init; } = true;
+
     /// <summary>The daemon is running rootless, which changes what ports and mounts are possible.</summary>
     public bool IsRootless { get; init; }
 

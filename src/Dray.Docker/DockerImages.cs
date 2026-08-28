@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Docker.DotNet;
@@ -180,6 +181,99 @@ public static class DockerImages
     /// that would need a second progress component to render it.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Write an image to a tar archive, streamed straight to the file.
+    /// <para>
+    /// Over the raw API rather than the typed client, because this is a bare tar body and the
+    /// typed client models it as a Stream it has already buffered.
+    /// </para>
+    /// </summary>
+    public static async Task SaveAsync(
+        DockerRawApi raw,
+        string reference,
+        string destinationPath,
+        IProgress<long>? progress = null,
+        CancellationToken ct = default)
+    {
+        // Written beside the destination and moved into place, so an interrupted save cannot leave
+        // a half-written file where a whole one is expected.
+        var temporary = destinationPath + ".part";
+
+        try
+        {
+            await raw
+                .DownloadAsync($"/images/{Uri.EscapeDataString(reference)}/get", temporary, progress, ct)
+                .ConfigureAwait(false);
+
+            File.Move(temporary, destinationPath, overwrite: true);
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
+            catch (IOException)
+            {
+                // Nothing useful to do about a temp file that will not delete; the real error is
+                // the one being thrown.
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Load images from a tar archive, returning what the engine says it loaded.
+    /// <para>
+    /// The response is a stream of JSON objects with a <c>stream</c> field carrying the same
+    /// "Loaded image: …" lines the CLI prints, so the text is pulled out and read by
+    /// <see cref="ImageArchive.LoadedNames"/> — the same reader the CLI-based engine uses.
+    /// </para>
+    /// </summary>
+    public static async Task<IReadOnlyList<string>> LoadAsync(
+        DockerRawApi raw, string archivePath, CancellationToken ct = default)
+    {
+        var lines = new List<string>();
+
+        await foreach (var line in raw
+            .UploadAsync("/images/load", archivePath, "application/x-tar", ct)
+            .ConfigureAwait(false))
+        {
+            lines.Add(Text(line));
+        }
+
+        return ImageArchive.LoadedNames(lines);
+    }
+
+    /// <summary>
+    /// The human half of one line of the engine's load response, or the line itself when it is not
+    /// the JSON the API documents.
+    /// </summary>
+    static string Text(string line)
+    {
+        if (!line.TrimStart().StartsWith('{')) return line;
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(line);
+
+            if (document.RootElement.TryGetProperty("stream", out var stream))
+                return stream.GetString()?.Trim() ?? "";
+
+            // The API reports a refusal in an `error` field with a 200 status, so a load that did
+            // not happen looks like one that did unless this is read.
+            if (document.RootElement.TryGetProperty("error", out var error))
+                throw new InvalidOperationException(error.GetString() ?? "The engine refused the archive.");
+
+            return "";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return line;
+        }
+    }
+
     public static async IAsyncEnumerable<PullProgress> PushAsync(
         DockerClient client,
         string reference,

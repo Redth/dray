@@ -2,6 +2,7 @@
 @inject EngineManager Engine
 @inject IShellBridge Shell
 @inject PruneService Prune
+@inject ShellCapabilities Caps
 
 <PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="s => _search = s" OnFilter="HandleFilter" />
 
@@ -133,6 +134,17 @@
                                             <Button Label="@($"Push {image.DisplayName}")" Icon="IconRef.Push"
                                                     IconOnly="true" Variant="ButtonVariant.Ghost"
                                                     OnClick="() => _pushing = image.Tags[0].Display" />
+                                        }
+
+                                        @* Saving an untagged image works — the archive just has
+                                           nothing to name it by, which is why the file is named
+                                           after its id. *@
+                                        @if (Archives)
+                                        {
+                                            <Button Label="@($"Save {image.DisplayName} to a file")" Icon="IconRef.Save"
+                                                    IconOnly="true" Variant="ButtonVariant.Ghost" Class="act-low"
+                                                    Disabled="@(_saving is not null)"
+                                                    OnClick="() => SaveAsync(image)" />
                                         }
 
                                         <Button Label="@($"Copy ID of {image.DisplayName}")" Icon="IconRef.Copy"
@@ -281,6 +293,92 @@
         _noticeOk = ok;
     }
 
+    /// <summary>
+    /// Whether saving and loading archives is offered at all.
+    /// <para>
+    /// Two conditions, and the second is about the head rather than the engine: an archive is a
+    /// file on this machine, and choosing where it goes needs a file dialog. A browser has none,
+    /// so the web head does not offer either — a Save button that silently does nothing is worse
+    /// than no Save button.
+    /// </para>
+    /// </summary>
+    bool Archives => (Engine.Selected?.Capabilities.SupportsImageArchive ?? false) && Caps.HasNativeDialogs;
+
+    /// <summary>The image being written out, and how far it has got. Null when nothing is saving.</summary>
+    string? _saving;
+    long _savedBytes;
+
+    /// <summary>
+    /// Write one image to a file the user picks.
+    /// <para>
+    /// The archive is the engine's own format and the two engines disagree about it — Docker
+    /// writes a docker-archive, Apple's writes an OCI layout — so the notice says which engine
+    /// wrote it rather than implying it will load anywhere.
+    /// </para>
+    /// </summary>
+    async Task SaveAsync(ImageSummary image)
+    {
+        if (_saving is not null) return;
+
+        var reference = image.Tags.FirstOrDefault()?.Display ?? image.Id;
+
+        var path = await Shell.SaveFileAsync(new FilePickerOptions(
+            $"Save {image.DisplayName}",
+            ImageArchive.SuggestedFileName(reference),
+            ["tar"]));
+
+        if (path is null) return;
+
+        _saving = reference;
+        _savedBytes = 0;
+
+        var progress = new Progress<long>(bytes =>
+        {
+            _savedBytes = bytes;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            if (await Engine.SaveImageAsync(reference, path, progress) is { } error)
+                Notify(error, ok: false);
+            else
+                Notify($"Saved {reference} to {System.IO.Path.GetFileName(path)} — {Humanize.Bytes(_savedBytes)}.", ok: true);
+        }
+        finally
+        {
+            _saving = null;
+        }
+    }
+
+    /// <summary>Load images from an archive the user picks, and say what arrived.</summary>
+    async Task LoadFromFileAsync()
+    {
+        var path = await Shell.PickFileAsync(new FilePickerOptions("Load images from an archive", Extensions: ["tar"]));
+        if (path is null) return;
+
+        var (loaded, error) = await Engine.LoadImageAsync(path);
+
+        if (error is not null)
+        {
+            Notify(error, ok: false);
+            return;
+        }
+
+        // An archive with no tags in it loads successfully and names nothing. Reporting that
+        // honestly beats claiming an image by name that the engine never mentioned.
+        Notify(
+            loaded.Count switch
+            {
+                0 => "The archive loaded. The engine did not name anything in it — an archive with no tags reads this way.",
+                1 => $"Loaded {loaded[0]}.",
+                _ => $"Loaded {loaded.Count} images: {string.Join(", ", loaded)}.",
+            },
+            ok: true);
+
+        await LoadAsync();
+    }
+
     PageChrome Chrome => new(
         "Images",
         Subtitle: _images is null
@@ -295,6 +393,9 @@
         [
             ChromeAction.Primary("pull", "Pull…", IconRef.Pull),
             ChromeAction.Secondary("build", "Build…", IconRef.Build),
+            .. Archives
+                ? new[] { ChromeAction.Secondary("load", "Load from file…", IconRef.Files) }
+                : [],
             ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh),
             ChromeAction.Destructive("prune", "Prune dangling", IconRef.Trash),
         ],
@@ -322,6 +423,10 @@
 
             case "build":
                 _buildDialog = true;
+                break;
+
+            case "load":
+                await LoadFromFileAsync();
                 break;
 
             case "prune":

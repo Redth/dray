@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
+using System.IO;
 using System.Text.Json;
 using Dray.Core.Engine;
 
@@ -179,6 +180,76 @@ public sealed class DockerRawApi : IDisposable
         response.EnsureSuccessStatusCode();
 
         return await response.Content.ReadFromJsonAsync<T>(CaseInsensitiveJson, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// GET a path and write the body to a file, reporting bytes as they arrive.
+    /// <para>
+    /// Streamed to disk rather than buffered: an image archive is routinely a gigabyte, and
+    /// reading one into memory to write it out again is the difference between saving an image and
+    /// running out of it.
+    /// </para>
+    /// </summary>
+    public async Task DownloadAsync(
+        string path, string destinationPath, IProgress<long>? progress = null, CancellationToken ct = default)
+    {
+        using var response = await _http
+            .GetAsync(_prefix + path, HttpCompletionOption.ResponseHeadersRead, ct)
+            .ConfigureAwait(false);
+
+        response.EnsureSuccessStatusCode();
+
+        await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        await using var file = File.Create(destinationPath);
+
+        var buffer = new byte[81920];
+        long total = 0;
+
+        while (true)
+        {
+            var read = await source.ReadAsync(buffer, ct).ConfigureAwait(false);
+            if (read == 0) break;
+
+            await file.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+
+            total += read;
+            progress?.Report(total);
+        }
+    }
+
+    /// <summary>
+    /// POST a file as the request body, returning the engine's response lines as they arrive.
+    /// <para>
+    /// The same reasoning in the other direction — the file is opened and streamed, never read
+    /// into memory first.
+    /// </para>
+    /// </summary>
+    public async IAsyncEnumerable<string> UploadAsync(
+        string path,
+        string sourcePath,
+        string contentType,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await using var file = File.OpenRead(sourcePath);
+
+        using var content = new StreamContent(file);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, _prefix + path) { Content = content };
+
+        using var response = await _http
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            .ConfigureAwait(false);
+
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var reader = new StreamReader(stream);
+
+        while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+        {
+            if (line.Length > 0) yield return line;
+        }
     }
 
     static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };

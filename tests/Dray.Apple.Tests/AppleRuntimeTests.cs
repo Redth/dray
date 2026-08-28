@@ -591,4 +591,39 @@ public class AppleRuntimeTests
         // The endpoint's path reaches the runtime, rather than being discovered and then discarded.
         Assert.Equal("/opt/homebrew/bin/container", Assert.IsType<AppleRuntime>(factory.Create(apple)).Executable);
     }
+
+    // ---------------------------------------------------------------- archives
+
+    [Fact]
+    public async Task SavingAlwaysAsksForAPlatform()
+    {
+        // Measured against container 1.3.0: a pulled image is a multi-platform index and only the
+        // variant that was pulled has its content locally, so `save alpine:latest` fails with
+        // "content with digest sha256:…" while `save --platform linux/arm64 alpine:latest`
+        // succeeds on the same image. The flag is not a nicety.
+        var runner = Connected().Returns("image save", "alpine:latest\n");
+        var (runtime, _) = await ConnectAsync(runner);
+
+        await runtime.SaveImageAsync("alpine:latest", "/tmp/out.tar", null, Ct);
+
+        var command = runner.Invocations.Last();
+
+        Assert.Contains("--platform", command);
+        Assert.Contains("--output", command);
+        Assert.Contains("/tmp/out.tar", command);
+        Assert.EndsWith("alpine:latest", command, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LoadingReadsTheBareReferenceThisEnginePrints()
+    {
+        // `container image load` prints the reference on its own line, unlike Docker's
+        // "Loaded image: …". Both forms go through the same reader.
+        var runner = Connected().Returns("image load", "docker.io/library/alpine:latest\n");
+        var (runtime, _) = await ConnectAsync(runner);
+
+        var loaded = await runtime.LoadImageAsync("/tmp/in.tar", Ct);
+
+        Assert.Equal(["docker.io/library/alpine:latest"], loaded);
+    }
 }

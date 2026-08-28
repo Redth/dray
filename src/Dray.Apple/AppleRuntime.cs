@@ -550,6 +550,64 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
         if (result.ExitCode != 0) throw Failure("remove image", result);
     }
 
+    /// <summary>
+    /// <c>container image save</c>. The engine writes the file itself, so nothing is streamed
+    /// through here and there is no byte count to report — the progress callback is called once,
+    /// with the finished size, rather than being left silent.
+    /// <para>
+    /// The platform is always passed, and it has to be. A pulled image is a multi-platform index,
+    /// and only the variant that was actually pulled has its content in the local store — asking
+    /// for the index fails with <c>content with digest sha256:… </c> and no explanation. Measured
+    /// against container 1.3.0: <c>save alpine:latest</c> fails, <c>save --platform linux/arm64
+    /// alpine:latest</c> succeeds on the same image.
+    /// </para>
+    /// </summary>
+    public async Task SaveImageAsync(
+        string reference, string destinationPath, IProgress<long>? progress = null, CancellationToken ct = default)
+    {
+        var result = await RunAsync(
+                ["image", "save", "--platform", HostPlatform, "--output", destinationPath, reference], ct)
+            .ConfigureAwait(false);
+
+        if (result.ExitCode != 0) throw Failure("save image", result);
+
+        try
+        {
+            if (System.IO.File.Exists(destinationPath))
+                progress?.Report(new System.IO.FileInfo(destinationPath).Length);
+        }
+        catch (System.IO.IOException)
+        {
+            // The archive is written; not being able to measure it afterwards is not a failure.
+        }
+    }
+
+    /// <summary>
+    /// <c>container image load</c>. The archive it accepts is an OCI layout — the one this engine
+    /// writes — and not a docker-archive, so an archive saved from a Docker host is refused here
+    /// by the engine rather than converted.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> LoadImageAsync(string archivePath, CancellationToken ct = default)
+    {
+        var result = await RunAsync(["image", "load", "--input", archivePath], ct).ConfigureAwait(false);
+
+        if (result.ExitCode != 0) throw Failure("load image", result);
+
+        return ImageArchive.LoadedNames(
+            result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    /// <summary>
+    /// The platform this engine runs containers for. Always Linux — that is what this engine does —
+    /// with the architecture of the machine underneath it.
+    /// </summary>
+    static string HostPlatform => System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+    {
+        System.Runtime.InteropServices.Architecture.Arm64 => "linux/arm64",
+        System.Runtime.InteropServices.Architecture.X64 => "linux/amd64",
+        var other => $"linux/{other.ToString().ToLowerInvariant()}",
+    };
+
     public async IAsyncEnumerable<PullProgress> PullImageAsync(
         string reference, [EnumeratorCancellation] CancellationToken ct = default)
     {

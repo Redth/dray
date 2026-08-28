@@ -194,6 +194,29 @@ public interface IContainerRuntime : IAsyncDisposable
         string reference, RegistryCredential? credential, CancellationToken ct = default);
 
     /// <summary>
+    /// Write an image to a tar archive on this machine.
+    /// <para>
+    /// The archive is the engine's own format, and the two engines do not agree on it: Docker
+    /// writes a docker-archive and Apple's <c>container</c> writes an OCI layout. Dray does not
+    /// convert between them, so an archive is reliably loadable by the kind of engine that wrote
+    /// it and not promised anywhere else.
+    /// </para>
+    /// </summary>
+    /// <param name="progress">Bytes written so far, for an image that takes a while.</param>
+    Task SaveImageAsync(
+        string reference, string destinationPath, IProgress<long>? progress = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Load images from a tar archive, returning what the engine says it loaded.
+    /// <para>
+    /// An empty list means the engine accepted the archive and named nothing — usually an archive
+    /// with no tags in it. It is not an error, and it is not success worth reporting as "loaded
+    /// nginx".
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<string>> LoadImageAsync(string archivePath, CancellationToken ct = default);
+
+    /// <summary>
     /// Build an image from a directory containing a Dockerfile, streaming the engine's output.
     /// <para>
     /// The context is tarred and sent to the engine, which is why this takes a directory rather

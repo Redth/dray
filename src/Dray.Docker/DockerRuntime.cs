@@ -358,6 +358,17 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public Task TagImageAsync(string imageId, string repository, string tag, CancellationToken ct = default)
         => DockerImages.TagAsync(Client, imageId, repository, tag, ct);
 
+    public Task SaveImageAsync(
+        string reference, string destinationPath, IProgress<long>? progress = null, CancellationToken ct = default)
+        => _raw is null
+            ? throw new InvalidOperationException("Not connected to an engine.")
+            : DockerImages.SaveAsync(_raw, reference, destinationPath, progress, ct);
+
+    public Task<IReadOnlyList<string>> LoadImageAsync(string archivePath, CancellationToken ct = default)
+        => _raw is null
+            ? throw new InvalidOperationException("Not connected to an engine.")
+            : DockerImages.LoadAsync(_raw, archivePath, ct);
+
     public IAsyncEnumerable<PullProgress> PushImageAsync(
         string reference, RegistryCredential? credential, CancellationToken ct = default)
         => DockerImages.PushAsync(Client, reference, credential, ct);
