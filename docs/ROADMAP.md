@@ -309,11 +309,21 @@ service's logs in the aggregated view, fix the compose file, recreate just that 
   and Restart. It reads the same store the UI does, so it follows the event stream rather than
   polling.
 
-**Still open: buildx builder selection.** Deliberately not written blind. Dray's build goes through
-the Engine API rather than the buildx CLI, so selecting a builder means shelling out to
-`docker buildx build` — and there is no `docker` CLI on the development machine to check any of it
-against. Every engine claim in this project that was written from documentation rather than
-measurement turned out wrong; this one waits for a machine with buildx on it.
+- **Buildx builder selection** appears in the build dialog only when there is a choice to make —
+  buildx installed, and a builder beyond the engine's own. Two genuinely different paths rather
+  than a flag on one: the Engine API build needs nothing installed and streams the engine's own
+  output, while buildx is a separate program with its own builders and its own cache, so choosing
+  one means running it. A builder whose node reports an error is listed and disabled with the
+  reason, because a builder pointing at an endpoint that no longer exists fails in a way nothing on
+  screen otherwise explains.
+
+  Two things here are measured rather than assumed. `docker buildx` answers "unknown command" on
+  this machine while `docker-buildx` works — Homebrew installs the binary without wiring it into
+  that Docker's plugin directory — so detection tries both. And `--load` is not optional: a buildx
+  build with a container driver leaves its result in the build cache and nowhere else, so without
+  it the build succeeds and the image never appears in the list, which reads as Dray losing it.
+
+**Phase 6 is complete.**
 
 **Demo:** ⌘K → "restart api" → Enter, without the window ever being focused on a list.
 **Exit:** credentials never touch `config.json` in plaintext · palette covers 100% of commands.

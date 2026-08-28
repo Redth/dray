@@ -32,6 +32,40 @@
                    @bind="_tag" @bind:event="oninput" spellcheck="false" disabled="@_building" />
         </div>
 
+        @* Only when there is a choice to make. A machine without buildx, or with nothing but the
+           default builder, is not offered a picker that can only say one thing. *@
+        @if (_builders.Count > 0)
+        {
+            <div class="field">
+                <label class="field__label" for="build-builder">
+                    Builder
+                    <span class="muted">— buildx, for cross-platform builds and shared cache</span>
+                </label>
+
+                <select id="build-builder" class="input" @bind="_builder" disabled="@_building">
+                    <option value="">This engine</option>
+
+                    @foreach (var builder in _builders)
+                    {
+                        <option value="@builder.Name" disabled="@(!builder.IsUsable)">
+                            @builder.Name@(builder.IsCurrent ? " (current)" : "")@(builder.IsUsable ? "" : " — unavailable")
+                        </option>
+                    }
+                </select>
+
+                @if (_builders.FirstOrDefault(b => b.Name == _builder) is { Problem: { } problem })
+                {
+                    @* Said before the build rather than after: a builder configured against an
+                       endpoint that no longer exists fails in a way nothing on screen explains. *@
+                    <p class="build__hint muted">@problem</p>
+                }
+                else if (_builders.FirstOrDefault(b => b.Name == _builder) is { Platforms.Count: > 0 } chosen)
+                {
+                    <p class="build__hint muted">Builds for @string.Join(", ", chosen.Platforms).</p>
+                }
+            </div>
+        }
+
         <div class="build__options">
             <label class="toggle">
                 <input type="checkbox" @bind="_noCache" disabled="@_building" />
@@ -86,6 +120,35 @@
     string _tag = "";
     bool _noCache;
     bool _pull;
+
+    /// <summary>
+    /// The buildx builder to build on, or the empty string for the engine's own builder.
+    /// <para>
+    /// Empty by default even when buildx has a current builder. Dray's build goes through the
+    /// Engine API, which needs nothing installed and streams the engine's own output; switching to
+    /// a separate program with its own cache and its own way to fail is a choice someone makes,
+    /// not one made for them.
+    /// </para>
+    /// </summary>
+    string _builder = "";
+
+    IReadOnlyList<BuildxBuilder> _builders = [];
+
+    string? Builder => _builder.Length == 0 ? null : _builder;
+
+    /// <summary>
+    /// Asked for once, when the dialog first opens rather than when the page loads: this shells
+    /// out to a program that may not be installed, and most sessions never build anything.
+    /// </summary>
+    bool _askedForBuilders;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Open || _askedForBuilders) return;
+
+        _askedForBuilders = true;
+        _builders = await Engine.ListBuildersAsync();
+    }
     bool _building;
     string? _error;
     string? _done;
@@ -124,7 +187,7 @@
 
         try
         {
-            await foreach (var step in Engine.BuildImageAsync(request, _cts.Token))
+            await foreach (var step in Engine.BuildImageAsync(request, Builder, _cts.Token))
             {
                 if (step.IsError)
                 {

@@ -267,6 +267,7 @@ public sealed class EngineManager : IAsyncDisposable
     // ---------------------------------------------------------------- compose
 
     readonly ComposeCli _compose = new();
+    readonly BuildxCli _buildx = new();
 
     /// <summary>
     /// How compose is invoked here, or null when it is not installed.
@@ -412,14 +413,67 @@ public sealed class EngineManager : IAsyncDisposable
     }
 
     /// <summary>Build an image, streaming the engine's output.</summary>
+    /// <summary>
+    /// Build an image, through the engine or through a named buildx builder.
+    /// </summary>
+    /// <param name="builder">
+    /// A buildx builder to build on, or null for the engine's own builder.
+    /// <para>
+    /// Two genuinely different paths, not a flag on one. The engine API build is what Dray uses by
+    /// default because it needs nothing installed and streams the engine's own output; buildx is a
+    /// separate program with its own builders, and choosing one means running it.
+    /// </para>
+    /// </param>
     public async IAsyncEnumerable<BuildProgress> BuildImageAsync(
         BuildRequest request,
+        string? builder = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
+        if (builder is { Length: > 0 })
+        {
+            if (await _buildx.DetectAsync(ct).ConfigureAwait(false) is not { } command)
+            {
+                yield return new BuildProgress("", "buildx is not installed on this machine.");
+                yield break;
+            }
+
+            await foreach (var line in _buildx.BuildAsync(command, request, builder, ct).ConfigureAwait(false))
+            {
+                // buildx writes its progress to stderr — every line of it, not just failures — so
+                // a stream marked as error is not one. The exit code is what says whether it
+                // worked, and the runner reports that as a final error line.
+                yield return new BuildProgress(line.Text);
+            }
+
+            yield break;
+        }
+
         if (_runtime is not { } runtime) yield break;
 
         await foreach (var step in runtime.BuildImageAsync(request, ct).ConfigureAwait(false))
             yield return step;
+    }
+
+    /// <summary>buildx, if this machine has it. Probed once.</summary>
+    public Task<BuildxCommand?> DetectBuildxAsync(CancellationToken ct = default)
+        => _buildx.DetectAsync(ct);
+
+    /// <summary>
+    /// The builders buildx has configured, or nothing when it is not installed.
+    /// </summary>
+    public async Task<IReadOnlyList<BuildxBuilder>> ListBuildersAsync(CancellationToken ct = default)
+    {
+        if (await _buildx.DetectAsync(ct).ConfigureAwait(false) is not { } command) return [];
+
+        try
+        {
+            return await _buildx.ListAsync(command, ct).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // buildx is present but would not answer. The picker simply does not appear.
+            return [];
+        }
     }
 
     // ---------------------------------------------------------------- networks
