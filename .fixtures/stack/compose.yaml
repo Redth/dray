@@ -10,6 +10,14 @@ services:
     depends_on:
       - cache
 
+    # Here so Dray's watch control has something real to be enabled by. Sync only — no rebuild —
+    # so nothing here burns CPU when a file changes.
+    develop:
+      watch:
+        - action: sync
+          path: ./site
+          target: /usr/share/nginx/html
+
   cache:
     image: redis:7-alpine
     command: ["redis-server", "--save", ""]

@@ -72,12 +72,36 @@ export function contrastRatio(a, b) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-/** Mix `amount` of `a` into `b`, in OKLCH. Used for the dark-mode pill tints. */
+/**
+ * Mix `amount` of `a` into `b`, in OKLCH. Used for the dark-mode pill tints.
+ *
+ * Hue is an angle, and it needs two things lightness and chroma do not.
+ *
+ * A grey has no hue. Its H is written as 0 because the field has to hold something, not because
+ * the colour is red — so interpolating towards it drags the result round the wheel towards red.
+ * That is how the dark `--ok-tint` ended up at hue 27: 18% of moss's 152, mixed with a grey whose
+ * hue meant nothing. A green pill on a red ground, and a success banner that looked like a
+ * failure. So a chroma-free end contributes no hue at all; the other end's is kept.
+ *
+ * And where both ends do have a hue, the mix takes the short way round the wheel. Straight
+ * interpolation from 350 to 10 passes through every hue in between — the long way, through green.
+ */
 export function mix(a, b, amount) {
+  const grey = 0.002;
+
+  const hue = () => {
+    if (a[1] < grey && b[1] < grey) return b[2];
+    if (a[1] < grey) return b[2];
+    if (b[1] < grey) return a[2];
+
+    let delta = ((a[2] - b[2] + 540) % 360) - 180;
+    return (b[2] + delta * amount + 360) % 360;
+  };
+
   return [
     b[0] + (a[0] - b[0]) * amount,
     b[1] + (a[1] - b[1]) * amount,
-    b[2] + (a[2] - b[2]) * amount,
+    hue(),
   ];
 }
 

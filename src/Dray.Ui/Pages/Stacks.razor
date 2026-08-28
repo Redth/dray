@@ -144,10 +144,21 @@
         {
             <section class="stacks__output card">
                 <div class="panel__head">
-                    <h3 class="panel__title">@(_running ?? "Finished")</h3>
+                    <h3 class="panel__title">
+                        @(_watching is { } watched ? $"Watching {watched}" : _running ?? "Finished")
+                    </h3>
                     <span class="stacks__spacer"></span>
-                    <Button Label="Clear" Icon="IconRef.Close" Variant="ButtonVariant.Ghost"
-                            Disabled="@(_running is not null)" OnClick="() => _output.Clear()" />
+
+                    @if (_watching is { } stopping)
+                    {
+                        <Button Label="Stop watching" Icon="IconRef.Stop" Variant="ButtonVariant.Ghost"
+                                OnClick="() => _watchCts?.Cancel()" />
+                    }
+                    else
+                    {
+                        <Button Label="Clear" Icon="IconRef.Close" Variant="ButtonVariant.Ghost"
+                                Disabled="@(_running is not null)" OnClick="() => _output.Clear()" />
+                    }
                 </div>
 
                 <pre class="stacks__log mono"><code>@string.Join('\n', _output)</code></pre>
@@ -172,6 +183,13 @@
 
     string _search = "";
     string? _notice;
+
+    /// <summary>The compose that was found, or null. Its version decides whether watch is offered.</summary>
+    ComposeCommand? _compose;
+
+    /// <summary>The stack being watched, and the token that stops it. Watch does not end on its own.</summary>
+    string? _watching;
+    CancellationTokenSource? _watchCts;
 
     /// <summary>
     /// Which stacks are showing their services.
@@ -200,7 +218,8 @@
 
         // Probed once. A machine either has compose or it does not, and asking again per render
         // would shell out on every keystroke in the filter.
-        _composeMissing = await Engine.DetectComposeAsync() is null;
+        _compose = await Engine.DetectComposeAsync();
+        _composeMissing = _compose is null;
     }
 
     void OnEngineChanged() => InvokeAsync(StateHasChanged);
@@ -223,18 +242,62 @@
         }
     }
 
-    IReadOnlyList<RowAction> CommandsFor(StackSummary stack) =>
-    [
-        .. StackCommands.Select(c => new RowAction(
+    IReadOnlyList<RowAction> CommandsFor(StackSummary stack)
+    {
+        var commands = StackCommands.Select(c => new RowAction(
             c.Id,
             $"{c.Label} {stack.Name}",
             c.Icon,
             c.Hint,
             c.Danger,
-            Disabled: _running is not null)),
-    ];
+            Disabled: _running is not null || _watching is not null)).ToList();
 
-    static string LabelFor(string id) => StackCommands.First(c => c.Id == id).Label;
+        // Watch is offered only where it would do something: compose has to be new enough to have
+        // the subcommand, and the file has to say what to watch. Without both, `compose watch`
+        // exits with a message, which is a worse answer than not offering it.
+        if (WatchedServices(stack) is { Count: > 0 } services)
+        {
+            var on = _watching == stack.Name;
+
+            commands.Add(new RowAction(
+                "watch",
+                on ? $"Stop watching {stack.Name}" : $"Watch {stack.Name}",
+                on ? IconRef.Stop : IconRef.Refresh,
+                on
+                    ? "Stop rebuilding and syncing on file changes"
+                    : $"Rebuild and sync {string.Join(", ", services)} as their files change",
+                Disabled: _running is not null && !on));
+        }
+
+        return commands;
+    }
+
+    /// <summary>
+    /// The services this stack's file declares something to watch for, or nothing.
+    /// <para>
+    /// Read from the file on every render, which is cheap and always current — the alternative is
+    /// caching it and offering a stale answer after someone edits the compose file in the tab next
+    /// to this one.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<string> WatchedServices(StackSummary stack)
+    {
+        if (!ComposeWatch.IsSupported(_compose?.Version)) return [];
+        if (stack.ConfigFiles.FirstOrDefault() is not { } path) return [];
+
+        try
+        {
+            return System.IO.File.Exists(path) ? ComposeWatch.Declares(System.IO.File.ReadAllText(path)) : [];
+        }
+        catch (Exception)
+        {
+            // The file is on another machine, or unreadable. Either way there is nothing to offer.
+            return [];
+        }
+    }
+
+    static string LabelFor(string id)
+        => StackCommands.FirstOrDefault(c => c.Id == id).Label ?? "Watch";
 
     bool IsOpen(StackSummary stack)
         => _open.TryGetValue(stack.Name, out var open) ? open : stack.Status.Tone is not StateTone.Ok;
@@ -243,7 +306,13 @@
 
     async Task RunAsync(StackSummary stack, string command, string label)
     {
-        if (_running is not null) return;
+        if (command == "watch")
+        {
+            await WatchAsync(stack);
+            return;
+        }
+
+        if (_running is not null || _watching is not null) return;
 
         if (command == "down")
         {
@@ -294,6 +363,62 @@
         }
     }
 
+    /// <summary>
+    /// Start or stop <c>compose watch</c>.
+    /// <para>
+    /// Unlike every other command here, watch does not finish — it runs until it is stopped, which
+    /// is why it has its own token rather than sharing the one that guards a command in flight. The
+    /// output panel stays open while it runs and its Clear button becomes the way to stop it.
+    /// </para>
+    /// </summary>
+    async Task WatchAsync(StackSummary stack)
+    {
+        if (_watching == stack.Name)
+        {
+            await _watchCts!.CancelAsync();
+            return;
+        }
+
+        if (_running is not null || _watching is not null) return;
+
+        _watching = stack.Name;
+        _output.Clear();
+        _watchCts = new CancellationTokenSource();
+
+        Notify($"Watching {stack.Name}. Saving a watched file rebuilds or syncs its service.", ok: true);
+
+        try
+        {
+            await foreach (var line in Engine.RunComposeAsync(stack, ["watch"], _watchCts.Token))
+            {
+                _output.Add(line.Text);
+
+                if (_output.Count > 500) _output.RemoveRange(0, _output.Count - 500);
+
+                StateHasChanged();
+            }
+
+            // Falling out without being cancelled means compose gave up — usually because the
+            // stack is not up. Saying so beats a panel that simply stops producing lines.
+            if (!_watchCts.IsCancellationRequested)
+                Notify($"Watch ended for {stack.Name}. Compose stops watching when the stack is not up.", ok: false);
+        }
+        catch (OperationCanceledException)
+        {
+            Notify($"Stopped watching {stack.Name}.", ok: true);
+        }
+        catch (Exception ex)
+        {
+            Notify(ex.Message, ok: false);
+        }
+        finally
+        {
+            _watching = null;
+            _watchCts?.Dispose();
+            _watchCts = null;
+        }
+    }
+
     void OpenLogs(StackSummary stack, StackService service)
     {
         // One replica goes straight to its container's own log view rather than to an aggregated
@@ -340,5 +465,10 @@
         Engine.Changed -= OnEngineChanged;
         _cts?.Cancel();
         _cts?.Dispose();
+
+        // Leaving the page stops the watch. A compose process that outlived the window it was
+        // started from would keep rebuilding with nothing on screen to say so.
+        _watchCts?.Cancel();
+        _watchCts?.Dispose();
     }
 }

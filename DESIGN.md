@@ -104,11 +104,11 @@ fallbacks, not the truth.
 | `--warn` | `oklch(0.800 0.145 82)` | `#ecb33c` | 9.86:1 vs bg |
 | `--danger` | `oklch(0.625 0.215 12)` | `#eb3764` | 4.67:1 vs bg |
 | `--on-danger` | `oklch(0.185 0.000 0)` | `#131313` | 1.00:1 vs bg |
-| `--ok-tint` | `oklch(0.285 0.026 27.36)` | `#362523` | 1.29:1 vs bg |
+| `--ok-tint` | `oklch(0.285 0.026 152)` | `#202e24` | 1.31:1 vs bg |
 | `--ok-ink` | `oklch(0.740 0.145 152)` | `#59c47c` | 8.57:1 vs bg |
-| `--warn-tint` | `oklch(0.296 0.026 14.76)` | `#392729` | 1.33:1 vs bg |
+| `--warn-tint` | `oklch(0.296 0.026 82)` | `#332c1e` | 1.34:1 vs bg |
 | `--warn-ink` | `oklch(0.800 0.145 82)` | `#ecb33c` | 9.86:1 vs bg |
-| `--danger-tint` | `oklch(0.264 0.039 2.16)` | `#351d23` | 1.20:1 vs bg |
+| `--danger-tint` | `oklch(0.264 0.039 12)` | `#351d20` | 1.20:1 vs bg |
 | `--danger-ink` | `oklch(0.700 0.170 14)` | `#f56a7e` | 6.44:1 vs bg |
 | `--neutral-tint` | `oklch(0.275 0.005 41)` | `#2a2726` | 1.26:1 vs bg |
 | `--neutral-ink` | `oklch(0.700 0.010 41)` | `#a49c9a` | 6.95:1 vs bg |
