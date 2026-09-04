@@ -107,9 +107,17 @@ the ambiguity is not cosmetic — the two answers do not share images, container
 networks.
 
 **Windows containers** run on this machine's own kernel through the Host Compute Service. They need
-neither WSL2 nor Docker Desktop: the `Containers` optional feature plus `dockerd.exe` is a complete
-install, and Docker Desktop's Windows-container mode is the same engine with a switch in front of
-it. Hyper-V is required only for `--isolation=hyperv`; process isolation needs the feature alone.
+no WSL2 and no Linux VM — but Windows ships the platform, not a daemon. The `Containers` optional
+feature is what makes containers possible; `dockerd.exe` is a separate install, and has been since
+Microsoft retired the `DockerMsftProvider` package in 2023. The documented routes now are Docker
+Desktop in Windows-container mode, Microsoft's `install-docker-ce.ps1` (which enables the feature and
+installs Moby in one step), Mirantis Container Runtime, or containerd.
+
+Isolation differs by SKU, which matters because it decides whether pause works. On Windows Server,
+process isolation is the default and Hyper-V is needed only for `--isolation=hyperv`. On Windows 10
+and 11 — Pro or Enterprise, never Home — Hyper-V is a prerequisite and containers get Hyper-V
+isolation by default. Dray does not encode any of this: it reads `/info`'s `Isolation` and lets the
+answer decide.
 
 **Linux containers** need a Linux kernel, so they run in a virtual machine. Every product does the
 same thing here and there is no clever alternative to copy: Docker Desktop uses WSL2, Rancher

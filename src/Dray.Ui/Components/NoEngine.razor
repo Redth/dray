@@ -32,11 +32,13 @@
 
                 <dt>Windows containers</dt>
                 <dd>
-                    Run directly on this machine's own kernel — no WSL2 and no virtual machine.
-                    Enable the <span class="mono">Containers</span> Windows feature and run
-                    <span class="mono">dockerd</span>, or switch Docker Desktop into Windows-container
-                    mode. This is what the images Microsoft publishes need — Nano Server, Server Core,
-                    and the .NET Framework images built on them.
+                    Run directly on this machine's own kernel — no WSL2 and no Linux virtual machine.
+                    Windows ships the <span class="mono">Containers</span> feature that makes them
+                    possible, but not an engine to drive it, so one still has to be installed: Docker
+                    Desktop switched into Windows-container mode, or on Windows Server, Microsoft's
+                    <span class="mono">install-docker-ce.ps1</span> script. On Windows 11 this needs
+                    Pro or Enterprise with Hyper-V enabled. These are the images Microsoft publishes
+                    — Nano Server, Server Core, and the .NET Framework images built on them.
                 </dd>
             </dl>
 
