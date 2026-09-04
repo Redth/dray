@@ -16,6 +16,18 @@ public enum EndpointScheme
     Ssh,
 
     /// <summary>
+    /// A WSL2 distribution's own engine, reached by relaying its socket through <c>wsl.exe</c>.
+    /// <para>
+    /// Dray's own scheme rather than one the Docker CLI knows, because the CLI has no way to
+    /// address this at all: a distro running its own <c>dockerd</c> publishes a Unix socket that
+    /// exists only inside that distro, and Windows has no path to it. Docker Desktop solves this
+    /// by publishing a pipe on the Windows side; a plain <c>apt install docker.io</c> in Ubuntu
+    /// does not, and that is the case this scheme exists for.
+    /// </para>
+    /// </summary>
+    Wsl,
+
+    /// <summary>
     /// Apple's <c>container</c> runtime, driven through its CLI.
     /// <para>
     /// Not a socket at all: it has no Docker-compatible endpoint and no HTTP API Dray can reach.
@@ -59,7 +71,22 @@ public sealed record DockerEndpoint
 
     public EndpointTls? Tls { get; init; }
 
-    /// <summary>True when reaching this endpoint leaves the machine.</summary>
+    /// <summary>
+    /// The WSL distribution this endpoint names, for <see cref="EndpointScheme.Wsl"/>.
+    /// <para>
+    /// Held in <see cref="Host"/> rather than a field of its own: a distribution is what this
+    /// endpoint's authority component is, exactly as a hostname is for SSH.
+    /// </para>
+    /// </summary>
+    public string? Distro => Scheme == EndpointScheme.Wsl ? Host : null;
+
+    /// <summary>
+    /// True when reaching this endpoint leaves the machine.
+    /// <para>
+    /// A WSL distribution does not: it is a virtual machine on this hardware, sharing this
+    /// machine's loopback and reached without touching a network Dray can be cut off from.
+    /// </para>
+    /// </summary>
     public bool IsRemote => Scheme is EndpointScheme.Ssh or EndpointScheme.Tcp;
 
     /// <summary>
@@ -73,6 +100,7 @@ public sealed record DockerEndpoint
         EndpointScheme.NamedPipe =>
             System.IO.Path.GetFileName(Path?.TrimEnd('/')) is { Length: > 0 } name ? name : Raw,
         EndpointScheme.Ssh => $"ssh://{(User is null ? "" : User + "@")}{Host}{(Port is null ? "" : ":" + Port)}",
+        EndpointScheme.Wsl => $"wsl://{Host}",
         EndpointScheme.Tcp => $"tcp://{Host}{(Port is null ? "" : ":" + Port)}",
 
         // The CLI's own path, so a Homebrew install and a hand-built one are distinguishable in
@@ -122,6 +150,18 @@ public sealed record DockerEndpoint
                 // 2376 is the TLS port by convention; 2375 is plaintext.
                 var effectiveTls = tls ?? (scheme == "https" ? new EndpointTls(null, null, null, false) : null);
                 return new() { Scheme = EndpointScheme.Tcp, Raw = raw, Host = host, Port = port ?? (effectiveTls is null ? 2375 : 2376), Tls = effectiveTls };
+            }
+
+            // Dray's own. A distribution name is the whole authority: no user, no port, no path.
+            // WSL forbids "/" and ":" in one, so anything carrying either is not a distro name and
+            // is rejected rather than truncated into a plausible-looking one.
+            case "wsl":
+            {
+                var distro = rest.Trim();
+
+                return distro.Length == 0 || distro.Contains('/') || distro.Contains(':')
+                    ? null
+                    : new() { Scheme = EndpointScheme.Wsl, Raw = raw, Host = distro };
             }
 
             case "ssh":

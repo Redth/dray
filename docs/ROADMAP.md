@@ -105,11 +105,32 @@ one place.
 **Progress:** endpoints, context discovery, capabilities, entity store, event pump, the Docker
 transport and the host picker are done and running against a live engine. Killing a container from a
 terminal updates the UI with no refresh, and the Refresh action is disabled while the stream is
-healthy. Still outstanding: SSH tunnelling, WSL2 distro enumeration, and the disk-usage breakdown
-(`system df` is not exposed by the client and needs a direct call).
+healthy.
+
+**SSH and WSL2 both landed, as one piece of work.** Neither has an address on this machine, so both
+are reached by running a program that already has the socket and speaking HTTP over its stdio —
+`docker system dial-stdio`, which is the Docker CLI's own hidden subcommand for exactly this. One
+transport serves both, which is why `ssh://` arrived alongside WSL rather than as a project of its
+own (docs/ARCHITECTURE.md §2.4a).
+
+The transport was **verified end to end against a live engine** with `dial-stdio` standing in for
+the WSL launcher — the mechanism is identical and only the program differs. Version and info probes,
+container and image lists, a hijacked exec with its exit code, the archive endpoint streaming a tar,
+and a held-open stats stream all work through it. What stays unverified until there is a Windows
+machine is `wsl.exe` itself.
+
+Distro enumeration handles the two traps in `wsl --list --verbose`: it is UTF-16LE unless
+`WSL_UTF8=1` is honoured, and the table is localised in both its header and its state word. The
+parser matches on shape rather than words — and a test written from the French output caught a real
+bug, because "En cours" is two words and reading the name backwards from the version made every
+distro on a French machine parse as `Ubuntu En`.
+
+Still outstanding for this phase: showing which distro a container's bind mounts live in (`/mnt/c`
+versus the native filesystem, the top cause of "why is this so slow" on Windows).
 
 **Demo:** connect to local Docker, a WSL2 distro, and a remote host over SSH; kill a container from a
-terminal and watch the dashboard update with no refresh.
+terminal and watch the dashboard update with no refresh. *(The first is verified live; the relay the
+other two use is verified live, but against a stand-in launcher rather than `wsl.exe` or `ssh`.)*
 **Exit:** an unreachable host degrades one sidebar entry and nothing else · reconnect survives a
 daemon restart · zero polling in the code path.
 
@@ -532,6 +553,50 @@ unset, which is exactly the state the annotation calls "will not run".
 **Exit:** nobody has to know a mapping syntax to publish a port · a variable marked secret is masked
 everywhere without exception · a `${VAR}` with nothing behind it is visible before deploy, not after.
 **All three met.**
+
+---
+
+**Windows containers.** Done at the runtime layer, unverified until there is a machine to run it on.
+
+Windows is the only platform where "the local engine" is ambiguous, and the ambiguity is not
+cosmetic: Windows containers and Linux containers are separate engines that share no images,
+containers, volumes or networks. Windows containers need neither WSL2 nor Docker Desktop — the
+`Containers` feature and `dockerd.exe` are a complete install — while Linux containers need a Linux
+kernel and therefore a VM, which is WSL2 for Docker Desktop, Rancher Desktop and `podman machine`
+alike.
+
+**The endpoint cannot be asked which it is.** `//./pipe/docker_engine` is served by a native Windows
+daemon, by Docker Desktop in either mode, *and* by podman's machine, which forwards its Linux API to
+that same name. So `ContainerOs` is probed from `/info`'s `OSType`, `Unknown` is a real value that
+never collapses into Linux, and the Hosts page says which kind of container the selected engine runs
+before it says anything else about it.
+
+Ten things branch on it, each of which fails quietly rather than loudly if missed — paths, shells,
+directory listing, exit codes, CPU units, memory field, process count, block I/O, network driver,
+pause. The full table is in docs/ARCHITECTURE.md §2.4. Two are worth naming here:
+
+- **CPU is reported in 100-nanosecond intervals**, in the same field Linux uses for nanoseconds,
+  with nothing in the payload marking the difference. Read as nanoseconds it under-reports by a
+  factor of a hundred — a pegged container draws as a flat 1% rather than visibly failing. The
+  decision in §2.9 to divide by elapsed wall time rather than Docker's published formula paid for
+  itself a third time here: the fix is a scale factor and nothing else.
+- **Absences stay absent**, as they did for Apple. There is no process count on Windows —
+  `num_procs` is the host's CPU count, not a process count — so `ContainerStats.ProcessCount` became
+  nullable and the panel draws a dash. Zero would have described an empty container that is in fact
+  running normally.
+
+Pause follows isolation rather than being assumed: Windows can only freeze a container that has its
+own utility VM, so it is offered under Hyper-V isolation and hidden under process isolation. An
+engine that did not report its default is treated as unable, because a Pause button that always
+fails is the outcome `ContainerAction.cs` calls worse than no button.
+
+**Exit codes are the clearest case of why this could not be one shared table.** 137 is `128 +
+SIGKILL` on Linux and almost always the OOM killer; on Windows it means nothing at all, and Windows
+reports an NTSTATUS instead — which arrives signed through some paths and unsigned through others,
+so both spellings of `0xC0000005` reach the same sentence.
+
+**What is not done:** the WinUI head. The engine layer is head-agnostic and every part of it above
+is covered by tests that run on any platform, but Dray still has no window on Windows.
 
 ---
 

@@ -88,7 +88,7 @@ public sealed class EngineManager : IAsyncDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var discovered = _reader.Discover();
+            var discovered = await _reader.DiscoverAsync(ct: ct).ConfigureAwait(false);
 
             // Preserve what is already known about a host that survived re-discovery, so a
             // refresh does not visually reset every row to Disconnected.

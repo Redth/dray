@@ -68,7 +68,18 @@
 
             <div class="stats__card">
                 <div class="stats__label">Processes</div>
-                <div class="stats__value">@latest.ProcessCount</div>
+                @* A Windows engine reports no process count. "0" would read as a measurement of
+                   an empty container rather than as the absence of one. *@
+                <div class="stats__value">
+                    @if (latest.ProcessCount is { } processes)
+                    {
+                        @processes
+                    }
+                    else
+                    {
+                        <span class="muted">—</span>
+                    }
+                </div>
                 <div class="stats__detail muted">
                     @if (_reportsBlockIo)
                     {

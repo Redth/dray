@@ -120,6 +120,13 @@ message if either is absent.
   implementations of `IContainerRuntime`; a composite factory in the composition root dispatches on
   the endpoint's scheme. Adding an engine must not change a page — if it does, the seam is in the
   wrong place.
+- **A container's OS is measured, never inferred.** `RuntimeCapabilities.ContainerOs` comes from
+  `/info`'s `OSType` and from nothing else — not from the endpoint, which cannot answer it: on
+  Windows a native `dockerd`, Docker Desktop and podman's machine all serve `//./pipe/docker_engine`
+  and only one of them runs Windows containers. `Unknown` is a real value and must not be treated as
+  Linux. Paths, shells, exit codes, stats units, the default network driver and pause all branch on
+  it (`docs/ARCHITECTURE.md` §2.4), and every one of them fails quietly rather than loudly when the
+  branch is wrong.
 - **Engines differ, and the difference is data, not an exception.** When an engine cannot do
   something, add a `RuntimeCapabilities` flag set from something you measured against the running
   engine, and have the UI hide the control (DESIGN.md §8.1). Never catch the refusal and show an

@@ -144,6 +144,21 @@
                 <div class="panel" style="margin-top: var(--s4)">
                     <div class="panel__head"><span class="panel__title">What @selected.Name supports</span></div>
                     <div class="panel__body">
+                        @* Which kind of container this engine runs is the first thing to say about
+                           it on Windows, and it cannot be read off the endpoint: Docker Desktop,
+                           a native dockerd and podman's machine all answer on the same pipe name,
+                           and only one of the three runs Windows containers. *@
+                        @if (selected.Capabilities.ContainerOs is not ContainerOs.Unknown)
+                        {
+                            <p class="hosts__mode">
+                                Runs <strong>@ContainerOsLabel(selected.Capabilities.ContainerOs)</strong>
+                                @if (selected.Capabilities.DefaultIsolation is { Length: > 0 } isolation)
+                                {
+                                    <span class="muted"> · @isolation isolation by default</span>
+                                }
+                            </p>
+                        }
+
                         <div class="caps">
                             <Capability Name="Event stream" Supported="selected.Capabilities.SupportsEvents"
                                         Absent="Dray checks this engine every couple of seconds instead, so a change can be that late — and something that appears and disappears between checks is never seen." />
@@ -189,6 +204,17 @@
         isAppleSilicon: System.Runtime.InteropServices.RuntimeInformation.OSArchitecture
             is System.Runtime.InteropServices.Architecture.Arm64,
         macOSMajor: Environment.OSVersion.Version.Major);
+
+    /// <summary>
+    /// What to call an engine's containers. Spelled out rather than shown as "linux"/"windows",
+    /// because the question a user is answering here is "is this the mode I meant to be in".
+    /// </summary>
+    static string ContainerOsLabel(ContainerOs os) => os switch
+    {
+        ContainerOs.Windows => "Windows containers",
+        ContainerOs.Linux => "Linux containers",
+        _ => "containers of an unreported kind",
+    };
 
     EngineServiceState? _service;
     bool _working;

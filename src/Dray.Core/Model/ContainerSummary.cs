@@ -75,7 +75,21 @@ public sealed record ContainerSummary
     /// </summary>
     public long? DiskBytes { get; init; }
 
-    public ContainerStatus Status => ContainerStatusVocabulary.Resolve(State, Health, ExitCode);
+    /// <summary>
+    /// What this container runs, stamped by the runtime from the engine's own <c>OSType</c>.
+    /// <para>
+    /// Carried on the row rather than looked up, because <see cref="Status"/> needs it and is a
+    /// computed property on a DTO that reaches the UI long after the engine is out of scope. It
+    /// decides what an exit code means, and nothing else on this record.
+    /// </para>
+    /// <para>
+    /// Defaults to Linux, which is what a summary built without an engine — a fixture, a test —
+    /// is. Every summary that came from a real engine is stamped explicitly.
+    /// </para>
+    /// </summary>
+    public ContainerOs Os { get; init; } = ContainerOs.Linux;
+
+    public ContainerStatus Status => ContainerStatusVocabulary.Resolve(State, Health, ExitCode, Os);
 
     /// <summary>The short id users actually recognise.</summary>
     public string ShortId => Id.Length <= 12 ? Id : Id[..12];

@@ -19,7 +19,8 @@ namespace Dray.Docker;
 /// </summary>
 public static class DockerInspect
 {
-    public static ContainerInspect Map(ContainerInspectResponse c, string rawJson)
+    public static ContainerInspect Map(
+        ContainerInspectResponse c, string rawJson, ContainerOs os = ContainerOs.Linux)
     {
         var state = c.State;
         var config = c.Config;
@@ -27,6 +28,7 @@ public static class DockerInspect
         return new ContainerInspect
         {
             Id = c.ID,
+            Os = os,
             Name = c.Name?.TrimStart('/') ?? c.ID,
             Image = config?.Image ?? c.Image,
             ImageId = c.Image,

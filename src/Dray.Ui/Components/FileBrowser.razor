@@ -10,14 +10,14 @@
 <div class="fb">
     <div class="fb__bar chrome">
         <Button Label="Up" Icon="IconRef.FolderUp" Variant="ButtonVariant.Ghost" IconOnly="true"
-                Disabled="@(FileEntry.ParentOf(_path) is null)" OnClick="GoUpAsync" />
+                Disabled="@(ContainerPath.ParentOf(_path, Os) is null)" OnClick="GoUpAsync" />
 
         @* Two ways to move: click a crumb, or type the path. Clicking is faster for going up and
            useless for going somewhere deep — /var/lib/postgresql/data is four clicks and a lot of
            guessing if it is not on screen, and one paste if it is a path you already have. *@
         @if (_typing)
         {
-            <input class="input fb__path mono" @ref="_pathBox" placeholder="/path/to/somewhere"
+            <input class="input fb__path mono" @ref="_pathBox" placeholder="@ContainerPath.Root(Os)"
                    @bind="_typed" @bind:event="oninput"
                    @onkeydown="OnPathKeyAsync" @onblur="() => _typing = false" />
         }
@@ -89,7 +89,7 @@
                 <EmptyState Icon="IconRef.Warning" Title="Cannot read that folder" Body="@error">
                     <Actions>
                         <Button Label="Go up" Icon="IconRef.FolderUp" OnClick="GoUpAsync"
-                                Disabled="@(FileEntry.ParentOf(_path) is null)" />
+                                Disabled="@(ContainerPath.ParentOf(_path, Os) is null)" />
                     </Actions>
                 </EmptyState>
             }
@@ -181,8 +181,21 @@
     /// <summary>Write one file back. Returns null on success, or a sentence for the user.</summary>
     [Parameter] public Func<string, byte[], CancellationToken, Task<string?>>? WriteAsync { get; set; }
 
-    /// <summary>Where to start.</summary>
-    [Parameter] public string RootPath { get; set; } = "/";
+    /// <summary>
+    /// Which shape the paths in here are.
+    /// <para>
+    /// A Windows container's paths are <c>C:\inetpub\wwwroot</c>, and every piece of navigation
+    /// on this component — the parent, the crumbs, what a child path joins to — is separator
+    /// arithmetic that gets the wrong answer on the wrong shape. Passed in rather than sensed,
+    /// because only the engine knows.
+    /// </para>
+    /// </summary>
+    [Parameter] public ContainerOs Os { get; set; } = ContainerOs.Linux;
+
+    /// <summary>Where to start. Defaults to the root of whichever shape <see cref="Os"/> names.</summary>
+    [Parameter] public string? RootPath { get; set; }
+
+    string EffectiveRoot => RootPath ?? ContainerPath.Root(Os);
 
     /// <summary>
     /// Identifies what is being browsed. Changing it resets the view — otherwise switching
@@ -213,21 +226,29 @@
         _open = null;
         _dirty = false;
 
-        await LoadAsync(RootPath, force: true);
+        await LoadAsync(EffectiveRoot, force: true);
     }
 
     IEnumerable<(string Label, string Path)> Crumbs
     {
         get
         {
-            // The root is labelled with a slash rather than the empty string a split would give.
-            yield return ("/", "/");
+            var root = ContainerPath.Root(Os);
+            var separator = ContainerPath.Separator(Os);
 
-            var built = "";
+            // The root is labelled with itself rather than the empty string a split would give:
+            // "/" on Linux, "C:\" on Windows, where the drive is part of what the user is
+            // looking at rather than a prefix to hide.
+            yield return (root, root);
 
-            foreach (var segment in _path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+            var built = root;
+
+            foreach (var segment in _path.Split(separator, StringSplitOptions.RemoveEmptyEntries))
             {
-                built += "/" + segment;
+                // The drive is already in the root crumb; splitting "C:\a\b" yields "C:" first.
+                if (Os == ContainerOs.Windows && segment.EndsWith(':')) continue;
+
+                built = ContainerPath.Combine(built, segment, Os);
                 yield return (segment, built);
             }
         }
@@ -244,7 +265,7 @@
 
         try
         {
-            _listing = await ListAsync(FileEntry.Normalize(path), _cts.Token);
+            _listing = await ListAsync(ContainerPath.Normalize(path, Os), _cts.Token);
             _path = _listing.Path;
         }
         catch (OperationCanceledException)
@@ -255,7 +276,7 @@
         {
             _listing = null;
             _error = ex.Message;
-            _path = FileEntry.Normalize(path);
+            _path = ContainerPath.Normalize(path, Os);
         }
         finally
         {
@@ -310,7 +331,7 @@
 
     Task NavigateAsync(string path) => Guarded(() => LoadAsync(path));
 
-    Task GoUpAsync() => FileEntry.ParentOf(_path) is { } parent ? Guarded(() => LoadAsync(parent)) : Task.CompletedTask;
+    Task GoUpAsync() => ContainerPath.ParentOf(_path, Os) is { } parent ? Guarded(() => LoadAsync(parent)) : Task.CompletedTask;
 
     /// <summary>The open file, as the table's selection — one row, or none.</summary>
     IReadOnlyCollection<string> Chosen => _open is { } open ? [open.Path] : [];
@@ -431,7 +452,7 @@
         if (source is null) return;
 
         var name = System.IO.Path.GetFileName(source);
-        var destination = FileEntry.Combine(_path, name);
+        var destination = ContainerPath.Combine(_path, name, Os);
 
         try
         {

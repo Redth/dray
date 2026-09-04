@@ -127,11 +127,80 @@ public sealed class DockerContextReader(IDockerConfigSource source)
         ("Podman", ".local/share/containers/podman/machine/podman.sock"),
     ];
 
-    static readonly string[] WellKnownNamedPipes =
+    /// <summary>
+    /// The pipes worth trying on Windows, in the order they should appear.
+    /// <para>
+    /// <c>docker_engine</c> is deliberately ambiguous and cannot be resolved from here. Docker
+    /// Desktop points it at whichever mode is switched on; a native <c>dockerd.exe</c> installed
+    /// without Docker Desktop serves Windows containers on it; and podman's machine forwards its
+    /// Linux API to the same name. The picker labels it for what it is — an engine — and
+    /// <c>/info</c>'s <c>OSType</c> says what it turned out to be once connected.
+    /// </para>
+    /// </summary>
+    static readonly (string Name, string Pipe)[] WellKnownNamedPipes =
     [
-        "//./pipe/dockerDesktopLinuxEngine",
-        "//./pipe/docker_engine",
+        // Docker Desktop's Linux engine, which it publishes under this name whichever mode the
+        // switch is in. Named unambiguously, so it is first.
+        ("Docker Desktop", "//./pipe/dockerDesktopLinuxEngine"),
+
+        ("Docker Engine", "//./pipe/docker_engine"),
+
+        // Podman's own name for a machine's API. Offered as well as docker_engine because podman
+        // only forwards to that one for its default rootful machine, and a second machine is
+        // reachable under this name alone.
+        ("Podman", "//./pipe/podman-machine-default"),
     ];
+
+    /// <summary>
+    /// Everything <see cref="Discover"/> finds, plus the WSL distributions that could be hosting
+    /// an engine of their own.
+    /// <para>
+    /// Async and separate because reaching WSL means running <c>wsl.exe</c>, and the rest of
+    /// discovery is filesystem reads that must not be made to wait on a subprocess. A machine
+    /// without WSL — which is every machine that is not Windows — gets the synchronous answer and
+    /// no process launch at all.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<DockerHost>> DiscoverAsync(
+        WslDistroReader? wsl = null, CancellationToken ct = default)
+    {
+        var hosts = Discover();
+
+        if (!OperatingSystem.IsWindows()) return hosts;
+
+        var distros = await (wsl ?? new WslDistroReader()).ListAsync(ct).ConfigureAwait(false);
+
+        var combined = new List<DockerHost>(hosts);
+        var seen = new HashSet<string>(hosts.Select(h => h.Endpoint.Raw), StringComparer.OrdinalIgnoreCase);
+
+        // After the pipes, and never claiming the current slot. A machine with Docker Desktop and
+        // three distros should open on Docker Desktop, which is where its containers are; a distro
+        // costs a relay process per connection and is the deliberate choice, not the default.
+        //
+        // Running distros first, because a running one is far more likely to be the one with an
+        // engine in it — it is running for a reason.
+        foreach (var distro in distros
+            .Where(d => d.CanHostAnEngine)
+            .OrderByDescending(d => d.IsRunning)
+            .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (DockerEndpoint.Parse("wsl://" + distro.Name) is not { } endpoint) continue;
+            if (!seen.Add(endpoint.Raw)) continue;
+
+            combined.Add(new DockerHost
+            {
+                Id = "wsl:" + distro.Name,
+                Name = distro.Name,
+                Description = distro.IsRunning
+                    ? "WSL2 distribution, running"
+                    : "WSL2 distribution, stopped — connecting will start it",
+                Endpoint = endpoint,
+                Origin = HostOrigin.WslDistro,
+            });
+        }
+
+        return combined;
+    }
 
     public IReadOnlyList<DockerHost> Discover()
     {
@@ -367,7 +436,7 @@ public sealed class DockerContextReader(IDockerConfigSource source)
     {
         if (OperatingSystem.IsWindows())
         {
-            foreach (var pipe in WellKnownNamedPipes)
+            foreach (var (name, pipe) in WellKnownNamedPipes)
             {
                 // Named pipes are not files; existence is decided by connecting, so these are
                 // always offered and the connection attempt decides.
@@ -376,7 +445,7 @@ public sealed class DockerContextReader(IDockerConfigSource source)
                     yield return new DockerHost
                     {
                         Id = "discovered:" + pipe,
-                        Name = pipe.Contains("DesktopLinux", StringComparison.Ordinal) ? "Docker Desktop" : "Docker Engine",
+                        Name = name,
                         Endpoint = endpoint,
                         Origin = HostOrigin.Discovered,
                     };

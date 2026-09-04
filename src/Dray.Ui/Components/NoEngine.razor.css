@@ -1,0 +1,30 @@
+/* Sits under the empty state rather than inside it: the empty state says what is missing, and this
+   says what the two ways of fixing it are. Folding it in would make one long paragraph out of a
+   choice the user has to make. */
+.noengine__windows {
+    max-width: 72ch;
+    margin: var(--s5) auto 0;
+}
+
+.noengine__options {
+    margin: 0;
+}
+
+.noengine__options dt {
+    font-weight: var(--weight-medium);
+}
+
+.noengine__options dd {
+    margin: var(--s1) 0 var(--s4);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.noengine__options dd:last-of-type {
+    margin-bottom: var(--s2);
+}
+
+.noengine__note {
+    margin: 0;
+    font-size: var(--text-sm);
+}

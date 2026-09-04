@@ -1,3 +1,4 @@
+using Dray.Core.Model;
 using Docker.DotNet.Models;
 
 using Xunit;
@@ -58,20 +59,20 @@ public class VolumePathMappingTests
     [InlineData("/conf/app.conf", "/dray-volume/conf/app.conf")]
     [InlineData("//conf//", "/dray-volume/conf")]
     public void VolumePathsMapOntoTheMountPoint(string input, string expected)
-        => Assert.Equal(expected, DockerVolumeSession.ToHelperPath(input));
+        => Assert.Equal(expected, DockerVolumeSession.ToHelperPath(input, ContainerOs.Linux));
 
     [Theory]
     [InlineData("/dray-volume", "/")]
     [InlineData("/dray-volume/conf", "/conf")]
     [InlineData("/dray-volume/conf/app.conf", "/conf/app.conf")]
     public void HelperPathsMapBack(string input, string expected)
-        => Assert.Equal(expected, DockerVolumeSession.ToVolumePath(input));
+        => Assert.Equal(expected, DockerVolumeSession.ToVolumePath(input, ContainerOs.Linux));
 
     [Fact]
     public void MappingRoundTripsForEveryShape()
     {
         foreach (var path in new[] { "/", "/a", "/a/b", "/a/b/c.txt" })
-            Assert.Equal(path, DockerVolumeSession.ToVolumePath(DockerVolumeSession.ToHelperPath(path)));
+            Assert.Equal(path, DockerVolumeSession.ToVolumePath(DockerVolumeSession.ToHelperPath(path, ContainerOs.Linux), ContainerOs.Linux));
     }
 
     [Fact]
@@ -79,13 +80,13 @@ public class VolumePathMappingTests
     {
         // Defensive: rewriting an unexpected path would be worse than passing it through, because
         // it would silently point somewhere real.
-        Assert.Equal("/etc/hosts", DockerVolumeSession.ToVolumePath("/etc/hosts"));
+        Assert.Equal("/etc/hosts", DockerVolumeSession.ToVolumePath("/etc/hosts", ContainerOs.Linux));
     }
 
     [Fact]
     public void AVolumeDirectoryNamedLikeTheMountPointIsNotConfusedWithIt()
     {
         // "/dray-volumes" shares a prefix with "/dray-volume" but is not inside it.
-        Assert.Equal("/dray-volumes", DockerVolumeSession.ToVolumePath("/dray-volumes"));
+        Assert.Equal("/dray-volumes", DockerVolumeSession.ToVolumePath("/dray-volumes", ContainerOs.Linux));
     }
 }
