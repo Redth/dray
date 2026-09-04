@@ -139,9 +139,18 @@ public sealed class DockerContextReader(IDockerConfigSource source)
     /// </summary>
     static readonly (string Name, string Pipe)[] WellKnownNamedPipes =
     [
-        // Docker Desktop's Linux engine, which it publishes under this name whichever mode the
-        // switch is in. Named unambiguously, so it is first.
-        ("Docker Desktop", "//./pipe/dockerDesktopLinuxEngine"),
+        // Docker Desktop publishes each engine under its own name, and both are live at once —
+        // switching modes changes which one the default pipe points at, not which daemons are
+        // running. Containers started in either mode keep running across a switch. So Dray offers
+        // both and needs no mode of its own: the host picker is the switch, and unlike Docker
+        // Desktop's it does not have to stop anything.
+        //
+        // Docker Desktop normally registers these as the `desktop-linux` and `desktop-windows`
+        // contexts, which discovery reads first. They are probed anyway because it does not always
+        // manage it — desktop-windows in particular is missing on some installs — and a pipe that
+        // is not there simply fails to connect.
+        ("Docker Desktop (Linux containers)", "//./pipe/dockerDesktopLinuxEngine"),
+        ("Docker Desktop (Windows containers)", "//./pipe/dockerDesktopWindowsEngine"),
 
         ("Docker Engine", "//./pipe/docker_engine"),
 

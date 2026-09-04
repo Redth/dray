@@ -51,9 +51,13 @@ element with focus trap, restore, and `Escape` built in, styled globally.
 
 ### 2.1 Client, not host
 
-Dray drives an engine that is already running. It does not ship a runtime, provision a VM, or manage a
-WSL2 distro's lifecycle. It connects to Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman's
-Docker-compatible socket, a bare `dockerd`, a WSL2 distro, or a remote host — through the same API.
+Dray drives an engine that is already running. It does not ship a runtime or provision a VM. It
+connects to Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman's Docker-compatible socket, a
+bare `dockerd`, a WSL2 distro, or a remote host — through the same API.
+
+The one place it touches the machine rather than the engine is Windows setup (§2.4b), where it will
+run a documented command — after showing it — to enable a Windows feature or install WSL. It still
+does not install an engine.
 
 ```csharp
 public interface IContainerRuntime
@@ -221,6 +225,50 @@ say which engine you are looking at.
 > **Still to do.** Show which distro a container's bind mounts actually live in. The `/mnt/c` versus
 > native-filesystem distinction is the top cause of "why is this so slow" on Windows and no GUI
 > surfaces it today.
+
+### 2.4b Windows setup, and the one switch worth having
+
+**Dray has no Windows-container mode, and should not grow one.** Both of Docker Desktop's engines
+run at once, each on its own pipe — `dockerDesktopLinuxEngine` and `dockerDesktopWindowsEngine` —
+and containers started in either keep running across a switch. Switching only changes which engine
+the *default* pipe and CLI context resolve to. Since Dray addresses engines by endpoint and its host
+picker is the first control in the sidebar, both simply appear as two hosts. The picker is the
+switch, and unlike Docker Desktop's it stops nothing.
+
+Docker Desktop normally registers both as the `desktop-linux` and `desktop-windows` contexts, which
+discovery reads. Both pipes are probed anyway, because it does not always manage to create
+`desktop-windows`, and a pipe that is not there just fails to connect.
+
+**What the user still needs is for their terminal to agree with the screen**, and that is a Docker
+context rather than a mode. `DockerCliContext` creates one if there is not one already, and points
+the CLI at it. A context and not `DOCKER_HOST`: compose, buildx and everything else resolve their
+endpoint the same way `docker` does, so a context covers the whole toolchain where an exported
+variable covers one shell. An existing context whose endpoint matches is reused rather than
+duplicated — the comparison normalises pipe spellings, because `npipe:////./pipe/x`,
+`npipe://./pipe/x` and `//./pipe/x` are one engine, and treating them as three would create a
+duplicate context on every press.
+
+A `wsl://` host is the exception and is offered no button at all. Its socket has no Windows-side
+address — the reason Dray relays into it in the first place — so there is nothing to put in a
+context. The panel says where the command already works instead.
+
+**Guided setup** (`WindowsSetupPlan`) is two independent tracks, because they are two independent
+engines: someone who only wants Linux containers is never shown a Windows feature to enable.
+
+Every check is non-elevated. The authoritative reads need administrator, and prompting on every
+launch to answer a question nobody has asked yet is worse than not knowing — so `SetupFact.Unknown`
+is common and is not a failure. What makes that safe is that every command offered is idempotent:
+DISM against an already-enabled feature reports exactly that and changes nothing. Dray therefore
+never has to guess in order to offer a step.
+
+The signal that overrides all inference is an engine answering. A machine where both kinds of
+container already work is shown no checklist, whatever the feature probes concluded.
+
+Elevation means `UseShellExecute`, which means the child's output cannot be redirected — so each
+step runs in its own visible window. A platform constraint that happens to be the right behaviour:
+the command is shown before it runs, and its output is visible while it does. DISM's 3010 is treated
+as success-plus-restart rather than as failure, and a dismissed UAC prompt is a decision rather than
+an error.
 
 ### 2.5 Compose
 

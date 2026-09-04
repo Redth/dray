@@ -595,8 +595,36 @@ SIGKILL` on Linux and almost always the OOM killer; on Windows it means nothing 
 reports an NTSTATUS instead — which arrives signed through some paths and unsigned through others,
 so both spellings of `0xC0000005` reach the same sentence.
 
+**Both kinds at once, with no mode.** Docker Desktop's switch is not a mode of the machine: both
+daemons run simultaneously on their own pipes, and containers started in either keep running across
+a switch. It only changes which engine the default pipe and CLI context resolve to. Since Dray
+addresses engines by endpoint, both appear as two hosts and Dray needs no mode of its own — the host
+picker is the switch, and unlike Docker Desktop's it stops nothing.
+
+**Guided setup, and where the line is.** Windows is the one platform where a developer can be left
+with no engine and no idea which of two unrelated things to install. Dray names exactly what is
+missing and offers to run the documented command — shown first, run only when asked, elevated in the
+open, in its own visible window. It stops short of installing an engine, and PRODUCT.md now says so
+explicitly rather than leaving the exception unstated.
+
+Every check is non-elevated, so `Unknown` is a common answer rather than a failure. What makes that
+safe is that every offered command is idempotent — DISM against an enabled feature says so and
+changes nothing — so Dray never has to guess in order to offer a step. An engine answering overrides
+every inference: a machine where both kinds already work is shown no checklist at all.
+
+**The CLI follows the picker.** "Use this host in my terminal" writes or reuses a Docker context and
+switches to it, which covers `docker compose`, buildx and everything else for free — they resolve
+their endpoint the same way `docker` does, where `DOCKER_HOST` would only cover one shell. Verified
+against the live CLI on this machine: it reused the existing `desktop-linux` context rather than
+creating a duplicate, which is the behaviour that would otherwise litter `docker context ls` with a
+Dray-prefixed twin of every engine.
+
+A `wsl://` host gets no button, because its socket has no Windows-side address — the panel says
+where the command already works instead of offering one that cannot.
+
 **What is not done:** the WinUI head. The engine layer is head-agnostic and every part of it above
-is covered by tests that run on any platform, but Dray still has no window on Windows.
+is covered by tests that run on any platform, but Dray still has no window on Windows. Nor does
+Dray install an engine, which is deliberate rather than pending.
 
 ---
 

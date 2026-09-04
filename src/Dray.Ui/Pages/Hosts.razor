@@ -181,7 +181,17 @@
                         </div>
                     </div>
                 </div>
+
+                <CliTarget Host="selected" />
             }
+        }
+
+        @* Outside the branch above, and deliberately: a machine with nothing to connect to is the
+           one that most needs this, and it is the branch where Dray otherwise has nothing to say
+           beyond what it looked for. It hides itself once both engines answer. *@
+        @if (OperatingSystem.IsWindows())
+        {
+            <WindowsSetup />
         }
     </div>
 </EngineScope>

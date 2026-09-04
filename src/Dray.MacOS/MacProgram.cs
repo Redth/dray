@@ -52,6 +52,13 @@ public static class MacProgram
         // The engine layer, same registrations as the dev host.
         builder.Services.AddSingleton<IDockerConfigSource, SystemDockerConfigSource>();
         builder.Services.AddSingleton<DockerContextReader>();
+
+        // Windows setup and CLI-context help. Registered here too, and not because this head needs
+        // it: the pages are shared, so a service missing on one head is a DI failure on that head
+        // rather than a hidden panel. Each reports "not applicable" off Windows.
+        builder.Services.AddSingleton<WindowsSetupReader>();
+        builder.Services.AddSingleton<SetupStepRunner>();
+        builder.Services.AddSingleton<DockerCliContext>();
         builder.Services.AddSingleton<IContainerRuntimeFactory>(
             new CompositeRuntimeFactory(new AppleRuntimeFactory(), new DockerRuntimeFactory()));
         builder.Services.AddSingleton<EngineManager>();

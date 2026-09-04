@@ -1,0 +1,34 @@
+.cli {
+    margin-top: var(--s4);
+}
+
+.cli__note {
+    margin: 0 0 var(--s3);
+    max-width: 72ch;
+    font-size: var(--text-sm);
+}
+
+/* Selectable, because a command is worth copying — one of the cases DESIGN.md 2.6 keeps
+   selection on, where a range is the unit of interest. */
+.cli__cmd {
+    padding: var(--s2) var(--s3);
+    background: var(--surface-sunken);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    user-select: text;
+}
+
+.cli__actions {
+    display: flex;
+    gap: var(--s3);
+}
+
+.cli__error {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin: var(--s3) 0 0;
+    font-size: var(--text-sm);
+    color: var(--danger);
+}
