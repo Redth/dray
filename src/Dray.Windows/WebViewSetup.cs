@@ -67,13 +67,23 @@ public static class WebViewSetup
     /// document is created does what <c>theme.apply</c> does, with the values as they are now;
     /// <c>PlatformThemeSync</c> then re-applies the same values and handles every later change.
     /// </para>
+    /// <para>
+    /// <paramref name="extra"/> is set the same way and at the same moment: properties the host
+    /// owns that are not tokens, such as the insets a dialog body pads its scroller by.
+    /// </para>
     /// </summary>
-    public static void SeedTheme(BlazorWebView view, IPlatformTheme theme)
+    public static void SeedTheme(BlazorWebView view, IPlatformTheme theme, IReadOnlyDictionary<string, string>? extra = null)
     {
         view.BlazorWebViewInitialized += (_, e) =>
         {
             var mode = theme.Current == DrayTheme.Dark ? "dark" : "light";
-            var overrides = JsonSerializer.Serialize(theme.TokenOverrides());
+            var properties = new Dictionary<string, string>(theme.TokenOverrides());
+            if (extra is not null)
+            {
+                foreach (var (name, value) in extra) properties[name] = value;
+            }
+
+            var overrides = JsonSerializer.Serialize(properties);
 
             // documentElement does not exist yet when a document-created script runs.
             var script = $$"""

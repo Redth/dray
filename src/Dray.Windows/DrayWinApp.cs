@@ -18,6 +18,10 @@ public sealed class DrayWinApp(IServiceProvider services) : Application
 
     protected override Window CreateWindow(IActivationState? activationState)
     {
+        // Before any control exists: a template resolves its colours as it is applied, and WinUI's
+        // own resources are in place by now, so Dray's are searched ahead of them.
+        if (services.GetRequiredService<IPlatformTheme>() is WinTheme theme) WinPalette.Install(theme);
+
         var shell = new NativeShell();
         var page = new ContentPage
         {

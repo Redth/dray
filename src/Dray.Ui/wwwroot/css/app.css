@@ -25,6 +25,12 @@ body {
   height: 100%;
 }
 
+/* A native dialog's body document mounts here, and its surface is what scrolls: without a height
+   the surface grows to its content and the document scrolls instead, past the body's insets. */
+#dialog {
+  height: 100%;
+}
+
 body {
   /* The platform's own UI face. A shared webfont is the single loudest tell that the content
      area is a website embedded in a native window (DESIGN.md section 3). Nothing is downloaded. */

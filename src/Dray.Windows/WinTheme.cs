@@ -80,64 +80,23 @@ public sealed class WinTheme : IPlatformTheme
     public IReadOnlyDictionary<string, string> TokenOverrides()
     {
         var theme = Current;
-        var dictionary = theme == DrayTheme.Dark ? "Default" : "Light";
-        var overrides = new Dictionary<string, string>();
+        var dictionary = DictionaryName(theme);
+        var overrides = Resolve(theme).ToDictionary(kv => kv.Key, kv => Css(kv.Value));
 
-        // The ground. Natively, the content area is the NavigationView's content layer: a
-        // translucent fill over the window's base. --bg is that composite, because it is what
-        // color-mix() blends against.
-        //
-        // With Mica the WebView is transparent, but not onto that layer: a transparent pixel in
-        // WinUI's WebView2 shows the window's backdrop directly, never the XAML beneath the control
-        // (docs/NATIVE-SHELL.md section 5.3). So the page paints the layer itself, as the same
-        // translucent colour, and it composites over Mica exactly as the native layer does under
-        // the toolbar row: one surface, no seam where the toolbar row meets the page.
-        var baseFill = ThemeColor(dictionary, "SolidBackgroundFillColorBase");
-        var layer = ThemeColor(dictionary, "LayerFillColorDefault");
-
-        if (baseFill is { } ground)
+        // With Mica the WebView is transparent, but not onto the content layer: a transparent pixel
+        // in WinUI's WebView2 shows the window's backdrop directly, never the XAML beneath the
+        // control (docs/NATIVE-SHELL.md section 5.3). So the page paints the layer itself, as the
+        // same translucent colour, and it composites over Mica exactly as the native layer does
+        // under the toolbar row: one surface, no seam where the toolbar row meets the page.
+        if (overrides.TryGetValue("bg", out var bg))
         {
-            var bg = layer is { } l ? Over(l, ground) : ground;
-            overrides["bg"] = Css(bg);
-            overrides["ground"] = !WinBackdrop.IsMica ? Css(bg) : layer is { } fill ? Css(fill) : "transparent";
-
-            // Cards above the layer. Composited to opaque: a translucent --surface would let
-            // scrolled rows show through every sticky header drawn with it.
-            var card = ThemeColor(dictionary, "CardBackgroundFillColorDefault");
-            var cardHigh = ThemeColor(dictionary, "CardBackgroundFillColorSecondary");
-            var muted = ThemeColor(dictionary, "TextFillColorSecondary");
-
-            if (card is { } c && cardHigh is { } c2 && muted is { } m)
-            {
-                var surface = Over(c, bg);
-                var surface2 = Over(c2, bg);
-                var quiet = Over(m, surface2);
-                var ink = Rgb(DrayTokens.Get(theme, DrayColor.Ink));
-
-                // Verified, not assumed. The contrast gate checks the generated palette and cannot
-                // see a value resolved at runtime, so the check runs here: if Windows' surfaces
-                // would put Dray's text below AA, all three stay on the generated palette together
-                // rather than shipping a pairing nobody measured.
-                if (Contrast(ink, surface) >= 4.5 && Contrast(ink, surface2) >= 4.5
-                    && Contrast(quiet, surface2) >= 4.5 && Contrast(Over(m, surface), surface) >= 4.5)
-                {
-                    overrides["surface"] = Css(surface);
-                    overrides["surface-2"] = Css(surface2);
-                    overrides["muted"] = Css(quiet);
-                }
-            }
+            overrides["ground"] = !WinBackdrop.IsMica ? bg
+                : ThemeColor(dictionary, "LayerFillColorDefault") is { } layer ? Css(layer) : "transparent";
         }
 
-        if (ThemeColor(dictionary, "DividerStrokeColorDefault") is { } divider)
-            overrides["line"] = Css(divider);
-
-        if (ThemeColor(dictionary, "ControlStrongStrokeColorDefault") is { } strong)
-            overrides["line-strong"] = Css(strong);
-
-        // Focus follows the user's accent, at the shade WinUI's own accent fill uses for the theme:
-        // the darker step on light, the lighter on dark, which is what keeps it legible on both.
-        var accent = _settings.GetColorValue(theme == DrayTheme.Dark ? UIColorType.AccentLight2 : UIColorType.AccentDark1);
-        overrides["focus"] = Css(accent);
+        // --focus is not taken from the user's accent. WinPalette gives WinUI Dray's brand as its
+        // accent, so the generated --focus, which is the brand, is already what a native control
+        // is drawn in.
 
         // The toolbar row is a native sibling above the WebView, not an overlay on it, so there is
         // nothing to reserve. The inset is the shell's own, shared with that row.
@@ -161,6 +120,89 @@ public sealed class WinTheme : IPlatformTheme
     }
 
     /// <summary>
+    /// A colour role as the page draws it in <paramref name="theme"/>: the Windows value where
+    /// <see cref="TokenOverrides"/> takes one, the generated palette's otherwise. What a native
+    /// control has to be painted in to match the page beside it (<see cref="WinPalette"/>).
+    /// </summary>
+    public WinColor Token(DrayTheme theme, DrayColor role)
+    {
+        var name = role switch
+        {
+            DrayColor.Bg => "bg",
+            DrayColor.Surface => "surface",
+            DrayColor.Surface2 => "surface-2",
+            DrayColor.Muted => "muted",
+            DrayColor.Line => "line",
+            DrayColor.LineStrong => "line-strong",
+            _ => null,
+        };
+
+        if (name is not null && Resolve(theme).TryGetValue(name, out var resolved)) return resolved;
+
+        var rgb = DrayTokens.Get(theme, role);
+        return WinColor.FromArgb(255, rgb.R, rgb.G, rgb.B);
+    }
+
+    /// <summary>
+    /// The colour tokens Windows supplies for <paramref name="theme"/>, by token name. A token
+    /// whose resources cannot be found, or whose result fails the contrast check, is absent.
+    /// </summary>
+    Dictionary<string, WinColor> Resolve(DrayTheme theme)
+    {
+        var dictionary = DictionaryName(theme);
+        var tokens = new Dictionary<string, WinColor>();
+
+        // The ground. Natively, the content area is the NavigationView's content layer: a
+        // translucent fill over the window's base. --bg is that composite, because it is what
+        // color-mix() blends against.
+        var baseFill = ThemeColor(dictionary, "SolidBackgroundFillColorBase");
+        var layer = ThemeColor(dictionary, "LayerFillColorDefault");
+
+        if (baseFill is { } ground)
+        {
+            var bg = layer is { } l ? Over(l, ground) : ground;
+            tokens["bg"] = bg;
+
+            // Cards above the layer. Composited to opaque: a translucent --surface would let
+            // scrolled rows show through every sticky header drawn with it.
+            var card = ThemeColor(dictionary, "CardBackgroundFillColorDefault");
+            var cardHigh = ThemeColor(dictionary, "CardBackgroundFillColorSecondary");
+            var muted = ThemeColor(dictionary, "TextFillColorSecondary");
+
+            if (card is { } c && cardHigh is { } c2 && muted is { } m)
+            {
+                var surface = Over(c, bg);
+                var surface2 = Over(c2, bg);
+                var quiet = Over(m, surface2);
+                var ink = Rgb(DrayTokens.Get(theme, DrayColor.Ink));
+
+                // Verified, not assumed. The contrast gate checks the generated palette and cannot
+                // see a value resolved at runtime, so the check runs here: if Windows' surfaces
+                // would put Dray's text below AA, all three stay on the generated palette together
+                // rather than shipping a pairing nobody measured.
+                if (Contrast(ink, surface) >= 4.5 && Contrast(ink, surface2) >= 4.5
+                    && Contrast(quiet, surface2) >= 4.5 && Contrast(Over(m, surface), surface) >= 4.5)
+                {
+                    tokens["surface"] = surface;
+                    tokens["surface-2"] = surface2;
+                    tokens["muted"] = quiet;
+                }
+            }
+        }
+
+        if (ThemeColor(dictionary, "DividerStrokeColorDefault") is { } divider)
+            tokens["line"] = divider;
+
+        if (ThemeColor(dictionary, "ControlStrongStrokeColorDefault") is { } strong)
+            tokens["line-strong"] = strong;
+
+        return tokens;
+    }
+
+    /// <summary>WinUI's name for a theme's dictionary. "Default" is dark.</summary>
+    internal static string DictionaryName(DrayTheme theme) => theme == DrayTheme.Dark ? "Default" : "Light";
+
+    /// <summary>
     /// The colour of a <c>ContentDialog</c>'s content section in the current theme:
     /// <c>ContentDialogTopOverlay</c> (<c>LayerFillColorAlt</c>) over <c>ContentDialogBackground</c>
     /// (<c>SolidBackgroundFillColorBase</c>), composited to opaque. What a dialog body's WebView has
@@ -168,7 +210,7 @@ public sealed class WinTheme : IPlatformTheme
     /// </summary>
     public WinColor? DialogBodyGround()
     {
-        var dictionary = Current == DrayTheme.Dark ? "Default" : "Light";
+        var dictionary = DictionaryName(Current);
         if (ThemeColor(dictionary, "SolidBackgroundFillColorBase") is not { } ground) return null;
         return ThemeColor(dictionary, "LayerFillColorAlt") is { } top ? Over(top, ground) : ground;
     }

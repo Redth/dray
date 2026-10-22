@@ -455,7 +455,7 @@ assets), so it stays a MAUI element and is converted with `ToPlatform`.
 | `Back` | WinUI's back button, in its own style, at the leading edge of the title bar beside the pane toggle, as in Settings and File Explorer. Shown only when the page declares one, its tooltip names the destination (`ChromeBack.Label`), and it invokes through `IShellState.InvokeAction`. The `NavigationView`'s own back and toggle are hidden: in the pane they took a row that came and went with the page and moved every sidebar item under the pointer |
 | `Filters` | `DropDownButton` with radio menu items |
 | `Search` | `AutoSuggestBox` |
-| Primary action | Accent button, text only (the accent fill is the system's, and an ink-stroked icon would match neither it nor its text) |
+| Primary action | Accent button, text only (the accent fill is `--brand` through `WinPalette`, and an ink-stroked icon would match neither it nor its text) |
 | Other actions | `AppBarButton`s in a `CommandBar`, which folds them into overflow when the window is narrow |
 
 The rebuild rule is the one `MacToolbarProjector` uses: rebuild only when `PageChrome.Signature`
@@ -530,6 +530,22 @@ applies all of the following to every WebView2, including the dialog bodies:
   buttons and a gutter that takes width from every scroller. Edge's own
   `msOverlayScrollbarWinStyle` changed nothing on runtime 155. With the overlay, a scroller's
   `clientWidth` equals its `offsetWidth`.
+
+- **Native controls in Dray's colours.** `WinPalette` installs, after WinUI's own resources, the
+  accent ramp (`SystemAccentColor` and its six steps) as `--brand` and `--brand-hi` for both
+  themes, and per theme the lightweight-styling keys of the controls Dray shows: the accent button
+  as the page's primary, every other button as its secondary (`--surface-2`, `--line-strong`),
+  `AppBarButton` hover as its ghost, and the sidebar's selected item as a table's selected row,
+  `--brand` at 14%. The surfaces and lines are `WinTheme.Token`, the same resolved values the page
+  is given, so a native Cancel and a page's Cancel are the same button. The high-contrast
+  dictionary is present and empty, so WinUI does not fall back to the dark one.
+- **A dialog body runs edge to edge.** The `ContentDialog`'s content section pads its title and
+  content alike, so the WebView is pulled back out through that padding with a negative margin to
+  the dialog's sides and the separator above the button row, and the title's bottom margin is set
+  to zero. The padding goes into the page instead: `WinDialog` seeds `--dialog-inset-*` from
+  `ContentDialogPadding` and `ContentDialogTitleMargin`, and `DialogSurface` pads its scroller by
+  them. Content scrolls under the whole width, up to the title, with the scrollbar at the dialog's
+  edge.
 
 `WinTheme` reads WinUI's theme dictionaries by name for an explicit theme (`"Default"` is WinUI's
 name for dark), not through `Application.Resources[key]`: that answers for the theme the app

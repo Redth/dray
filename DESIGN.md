@@ -474,8 +474,12 @@ The Blazor content sits inside a native window. At the boundary, these must matc
   This does not take the choice away from the user, because of how macOS resolves it: an app accent
   applies only while the system Appearance accent is **Multicolor** (the default). A user who has
   picked a specific accent still gets theirs everywhere, Dray included — which is the right
-  precedence. Windows behaves the same way through its own accent, and GTK has no equivalent
-  mechanism at all, so on Linux this reduces to styling selection with `--brand` directly.
+  precedence. Windows has no Multicolor: every user has an accent, blue unless they changed it, and
+  nothing tells a chosen one from the default. So the Windows head replaces WinUI's accent ramp with
+  `--brand` outright (`WinPalette`), and gives its buttons and sidebar selection the page's own
+  treatments, from the same resolved tokens the page uses. High contrast stays the system's. GTK
+  has no equivalent mechanism at all, so on Linux this reduces to styling selection with `--brand`
+  directly.
 
   The colorset is generated, never hand-edited: AppKit reads it at launch with no runtime API, so a
   hand-written copy would be the one place the brand could silently drift from the token file.

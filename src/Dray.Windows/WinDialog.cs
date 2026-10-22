@@ -1,3 +1,4 @@
+using System.Globalization;
 using Dray.Core.Shell;
 using Dray.Ui.Services;
 using Microsoft.AspNetCore.Components.WebView.Maui;
@@ -129,10 +130,16 @@ public sealed class WinDialog(IServiceProvider services)
         });
         WebViewSetup.Apply(webView);
 
+        // The body runs edge to edge between the title and the button row, and the dialog's own
+        // margins become the scroller's padding inside it (BodyInsets).
+        var (width, height) = SizeOf(request.Size);
+        var pad = ThicknessResource("ContentDialogPadding") ?? new Xaml.Thickness(24);
+        var titleGap = ThicknessResource("ContentDialogTitleMargin")?.Bottom ?? 12;
+
         // The dialog's document has no PlatformThemeSync of its own, so without this the body
         // renders in the generated palette rather than the Windows one around it.
         var theme = services.GetRequiredService<IPlatformTheme>();
-        WebViewSetup.SeedTheme(webView, theme);
+        WebViewSetup.SeedTheme(webView, theme, BodyInsets(pad, titleGap));
 
         Xaml.Controls.ContentDialog? shown = null;
         webView.BlazorWebViewInitialized += (_, e) =>
@@ -145,7 +152,6 @@ public sealed class WinDialog(IServiceProvider services)
             };
         };
 
-        var (width, height) = SizeOf(request.Size);
         var body = (Xaml.FrameworkElement)webView.ToPlatform(context);
 
         // A transparent WebView inside a dialog would show the window behind the dialog, and the
@@ -154,16 +160,23 @@ public sealed class WinDialog(IServiceProvider services)
         // resource as the browser's base when the controller is created, which is still to come.
         if (theme is WinTheme win && win.DialogBodyGround() is { } ground && body is Xaml.Controls.WebView2 platform)
             platform.Resources["SolidBackgroundFillColorBase"] = ground;
-        body.Width = width;
-        body.Height = height;
 
-        var content = new Xaml.Controls.StackPanel { Spacing = 12 };
+        // Out through the section's padding to its edges: the dialog's sides, and the separator
+        // above the button row. The section keeps its padding for the title, so the body is
+        // pulled out by the same amount rather than the padding being taken away. Measured in the
+        // same terms as before, so a size's content area is the width it always was.
+        body.Width = width + pad.Left + pad.Right;
+        body.Height = height + titleGap + pad.Bottom;
+        body.Margin = new Xaml.Thickness(-pad.Left, 0, -pad.Right, -pad.Bottom);
+
+        var content = new Xaml.Controls.StackPanel();
         if (!string.IsNullOrEmpty(request.Subtitle))
         {
             content.Children.Add(new Xaml.Controls.TextBlock
             {
                 Text = request.Subtitle,
                 TextWrapping = Xaml.TextWrapping.Wrap,
+                Margin = new Xaml.Thickness(0, titleGap, 0, 0),
             });
         }
         content.Children.Add(body);
@@ -178,8 +191,12 @@ public sealed class WinDialog(IServiceProvider services)
         };
 
         // ContentDialog caps its width well under a Large body; lifted for this dialog only.
-        dialog.Resources["ContentDialogMaxWidth"] = width + 48;
+        dialog.Resources["ContentDialogMaxWidth"] = body.Width;
         dialog.Resources["ContentDialogMaxHeight"] = height + 240;
+
+        // The gap under the title is the body's top inset now, inside the scroller: content
+        // scrolls up to the title rather than stopping a gap short of it.
+        dialog.Resources["ContentDialogTitleMargin"] = new Xaml.Thickness(0);
 
         shown = dialog;
 
@@ -404,6 +421,27 @@ public sealed class WinDialog(IServiceProvider services)
     static Xaml.ElementTheme ShellTheme =>
         (WinWindow.Current?.Content as Xaml.FrameworkElement)?.ActualTheme ?? Xaml.ElementTheme.Default;
 
+    /// <summary>
+    /// The dialog's margins, as the properties <c>DialogSurface</c> pads its scroller by. Top is
+    /// the gap the title keeps above its content, moved inside the scroller.
+    /// </summary>
+    static Dictionary<string, string> BodyInsets(Xaml.Thickness pad, double titleGap) => new()
+    {
+        ["dialog-inset-top"] = Px(titleGap),
+        ["dialog-inset-right"] = Px(pad.Right),
+        ["dialog-inset-bottom"] = Px(pad.Bottom),
+        ["dialog-inset-left"] = Px(pad.Left),
+    };
+
+    static string Px(double value) => string.Create(CultureInfo.InvariantCulture, $"{value:0.##}px");
+
     static Xaml.Style? Resource(string key)
         => Xaml.Application.Current.Resources.TryGetValue(key, out var value) ? value as Xaml.Style : null;
+
+    /// <summary>
+    /// A margin WinUI's theme defines, read rather than written down here, so the body follows a
+    /// ContentDialog whose padding changes. Null if the resource is missing.
+    /// </summary>
+    static Xaml.Thickness? ThicknessResource(string key)
+        => Xaml.Application.Current.Resources.TryGetValue(key, out var value) && value is Xaml.Thickness t ? t : null;
 }

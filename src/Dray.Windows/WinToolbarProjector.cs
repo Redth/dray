@@ -208,8 +208,8 @@ public sealed class WinToolbarProjector : IDisposable
     /// <summary>
     /// The page's main action, as Windows draws a main action: an accent button.
     /// <para>
-    /// Text only. The accent fill is the system's colour and its text is the system's on-accent
-    /// colour; an icon stroked in Dray's ink would be the one thing on the button in neither.
+    /// Text only. The accent fill is the brand and its text on-brand (<see cref="WinPalette"/>); an
+    /// icon stroked in Dray's ink would be the one thing on the button in neither.
     /// </para>
     /// </summary>
     Xaml.Controls.Button BuildPrimary(ChromeAction action)
