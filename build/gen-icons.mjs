@@ -125,17 +125,21 @@ ${names.map((n) => `        [IconRef.${pascal(n)}] = ${JSON.stringify(n)},`).joi
 
 // ------------------------------------------------------------------ write / check
 
+// `ignored` marks the outputs that are gitignored. A fresh checkout has none of them, which is not
+// staleness — CI's design job checks before anything has generated them, and the build job
+// generates them before compiling. A tracked output is checked whether or not it exists.
 const outputs = [
-  [join(repoRoot, 'src/Dray.Ui/wwwroot/icons/sprite.svg'), sprite],
-  [join(repoRoot, 'src/Dray.Ui/Components/IconSprite.razor'), spriteRazor],
-  [join(repoRoot, 'src/Dray.Core/Shell/Icons.g.cs'), cs],
+  [join(repoRoot, 'src/Dray.Ui/wwwroot/icons/sprite.svg'), sprite, { ignored: true }],
+  [join(repoRoot, 'src/Dray.Ui/Components/IconSprite.razor'), spriteRazor, { ignored: false }],
+  [join(repoRoot, 'src/Dray.Core/Shell/Icons.g.cs'), cs, { ignored: true }],
 ];
 
 let stale = 0;
-for (const [path, content] of outputs) {
+for (const [path, content, { ignored }] of outputs) {
   const rel = path.slice(repoRoot.length + 1);
   const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
   if (current === content) continue;
+  if (check && current === null && ignored) continue;
   if (check) {
     console.error(`  \x1b[31mSTALE\x1b[0m ${rel}`);
     stale++;
