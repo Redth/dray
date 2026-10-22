@@ -36,6 +36,9 @@ public sealed class SetupStepRunner
     /// <summary>What Windows returns when the user dismissed the User Account Control prompt.</summary>
     const int ElevationCancelled = 1223;
 
+    /// <summary>What <c>pkexec</c> returns when the user dismissed polkit's password dialog.</summary>
+    const int PolkitDismissed = 126;
+
     /// <summary>
     /// Run a step inside Dray, handing each line of its output to <paramref name="output"/> as it
     /// arrives.
@@ -49,9 +52,6 @@ public sealed class SetupStepRunner
     /// </summary>
     public async Task<SetupStepResult> RunInAppAsync(SetupStep step, Action<string> output, CancellationToken ct = default)
     {
-        if (!OperatingSystem.IsWindows())
-            return new SetupStepResult(false, false, "This step only applies to Windows.");
-
         var info = new ProcessStartInfo(step.FileName)
         {
             RedirectStandardOutput = true,
@@ -64,6 +64,8 @@ public sealed class SetupStepRunner
 
         // wsl.exe writes UTF-16 without it. Harmless to everything else, which ignores it.
         info.Environment["WSL_UTF8"] = "1";
+
+        foreach (var (key, value) in step.Environment ?? new Dictionary<string, string>()) info.Environment[key] = value;
 
         var restartDistro = false;
 
@@ -113,6 +115,11 @@ public sealed class SetupStepRunner
                 return new SetupStepResult(false, false, "Stopped. Whatever it had finished stays done; running it again picks up from there.");
             }
 
+            // pkexec's code for a dismissed password dialog: a decision, said as one, like a
+            // declined User Account Control prompt.
+            if (process.ExitCode == PolkitDismissed && step.FileName.EndsWith("pkexec", StringComparison.Ordinal))
+                return SetupStepResult.Cancelled;
+
             if (process.ExitCode != 0)
                 return new SetupStepResult(false, false, $"{Path.GetFileNameWithoutExtension(step.FileName)} exited with code {process.ExitCode}. Its output is above.");
         }
@@ -132,6 +139,46 @@ public sealed class SetupStepRunner
         }
 
         return new SetupStepResult(true, step.NeedsRestart, step.NeedsRestart ? "Done. Restart Windows to finish it." : "Done.");
+    }
+
+    /// <summary>
+    /// Open a new Terminal window on macOS running <see cref="SetupStep.Script"/>.
+    /// <para>
+    /// For an installer that prompts for a password. The prompt is the installer's and the system's,
+    /// in a terminal the user can see — never a field in Dray. Terminal gives no exit code back to
+    /// the app that asked, so this cannot report success; it says where the step is running, and
+    /// Look again finds out what it did.
+    /// </para>
+    /// </summary>
+    public async Task<SetupStepResult> RunInTerminalAsync(SetupStep step, CancellationToken ct = default)
+    {
+        if (!OperatingSystem.IsMacOS() || step.Script is not { } script)
+            return new SetupStepResult(false, false, "This step runs in macOS's Terminal.");
+
+        var info = new ProcessStartInfo("/usr/bin/osascript") { UseShellExecute = false, CreateNoWindow = true };
+
+        // AppleScript string literal: backslashes and quotes escaped, nothing else interpreted.
+        var quoted = script.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        info.ArgumentList.Add("-e");
+        info.ArgumentList.Add("tell application \"Terminal\" to activate");
+        info.ArgumentList.Add("-e");
+        info.ArgumentList.Add($"tell application \"Terminal\" to do script \"{quoted}\"");
+
+        try
+        {
+            using var process = Process.Start(info);
+            if (process is null) return new SetupStepResult(false, false, "Could not open Terminal.");
+
+            await process.WaitForExitAsync(ct).ConfigureAwait(false);
+
+            return process.ExitCode == 0
+                ? new SetupStepResult(true, false, "Running in Terminal. Follow its prompts, then press Look again when it has finished.")
+                : new SetupStepResult(false, false, "Could not open Terminal. The command is shown above to run yourself.");
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return new SetupStepResult(false, false, $"Could not open Terminal: {ex.Message}");
+        }
     }
 
     public async Task<SetupStepResult> RunAsync(SetupStep step, CancellationToken ct = default)

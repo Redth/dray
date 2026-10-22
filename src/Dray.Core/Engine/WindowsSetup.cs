@@ -42,6 +42,23 @@ public enum SetupStepKind
 
     /// <summary>Nothing to install: the engine is there and only needs choosing in the picker.</summary>
     Connect,
+
+    /// <summary>
+    /// Run in a new Terminal window on macOS. For an installer that asks for the user's password at
+    /// its own prompt — Homebrew's, a cask with a privileged helper — which needs a terminal to ask
+    /// in, and which Dray must never be the one to collect.
+    /// </summary>
+    Terminal,
+
+    /// <summary>Open a download page in the browser. For an installer only its vendor's site provides.</summary>
+    OpenUrl,
+
+    /// <summary>
+    /// Shown for the user to run themselves, with a copy button. Where Dray has no way to ask for
+    /// privileges it would need — a Linux desktop without polkit — and guessing at one would be worse
+    /// than saying so.
+    /// </summary>
+    Manual,
 }
 
 /// <summary>
@@ -85,6 +102,12 @@ public sealed record SetupStep(
     public string? Script { get; init; }
 
     /// <summary>
+    /// Where and as whom <see cref="Script"/> runs, said above it: "As root inside Ubuntu", "In a new
+    /// Terminal window". What a script does depends on both, so neither is left to be inferred.
+    /// </summary>
+    public string? ScriptContext { get; init; }
+
+    /// <summary>
     /// How long it takes, when that is long enough to be worth saying. A step that runs for eight
     /// minutes with three lines of output looks hung unless it was said beforehand.
     /// </summary>
@@ -92,6 +115,26 @@ public sealed record SetupStep(
 
     /// <summary>A step that helps but is not needed for an engine to work.</summary>
     public bool Optional { get; init; }
+
+    /// <summary>
+    /// What the privilege prompt is, in this platform's words. Defaults to Windows': a Mac's or a
+    /// Linux desktop's asks for the user's own password, not for "administrator".
+    /// </summary>
+    public string ElevationNote { get; init; } = "Asks for administrator.";
+
+    /// <summary>What finishing the change takes. A restart on Windows; signing in again for a Linux group.</summary>
+    public string RestartNote { get; init; } = "Needs a restart to take effect.";
+
+    /// <summary>The page to open, for <see cref="SetupStepKind.OpenUrl"/>.</summary>
+    public string? Url { get; init; }
+
+    /// <summary>
+    /// Variables to set for this step alone. On macOS an app opened from the Finder has a PATH
+    /// without Homebrew's directory in it, so <c>colima start</c> — which runs <c>limactl</c> by name —
+    /// would fail to find its own dependency. The step carries the PATH it needs rather than Dray
+    /// changing its own.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Environment { get; init; }
 
     /// <summary>The command as the user would type it, for the confirmation and for copying.</summary>
     public string CommandLine => Arguments.Count == 0
@@ -408,6 +451,7 @@ public static class WindowsSetupPlan
                     Kind = SetupStepKind.InApp,
                     Distro = distro.Name,
                     Script = StartEngineScript,
+                    ScriptContext = $"As root inside {distro.Name}:",
                 });
                 break;
 
@@ -429,6 +473,7 @@ public static class WindowsSetupPlan
                     Kind = SetupStepKind.InApp,
                     Distro = distro.Name,
                     Script = InstallEngineScript,
+                    ScriptContext = $"As root inside {distro.Name}:",
                     Duration = "Takes a minute or two, including a twenty-second pause in which Docker's script suggests Docker Desktop. It carries on by itself.",
                 });
                 break;

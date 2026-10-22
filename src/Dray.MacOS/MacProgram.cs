@@ -57,6 +57,8 @@ public static class MacProgram
         // it: the pages are shared, so a service missing on one head is a DI failure on that head
         // rather than a hidden panel. Each reports "not applicable" off Windows.
         builder.Services.AddSingleton<WindowsSetupReader>();
+        builder.Services.AddSingleton<MacSetupReader>();
+        builder.Services.AddSingleton<LinuxSetupReader>();
         builder.Services.AddSingleton<SetupStepRunner>();
         builder.Services.AddSingleton<WslAccount>();
         builder.Services.AddSingleton<DockerCliContext>();

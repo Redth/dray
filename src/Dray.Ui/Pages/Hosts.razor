@@ -206,11 +206,9 @@
 
         @* Outside the branch above, and deliberately: a machine with nothing to connect to is the
            one that most needs this, and it is the branch where Dray otherwise has nothing to say
-           beyond what it looked for. It hides itself once both engines answer. *@
-        @if (OperatingSystem.IsWindows())
-        {
-            <WindowsSetup @ref="_setup" />
-        }
+           beyond what it looked for. On every platform; it hides itself once an engine answers —
+           on Windows, once both kinds do. *@
+        <EngineSetup @ref="_setup" />
     </div>
 </EngineScope>
 
@@ -278,7 +276,7 @@
         if (_setup is not null) await _setup.RefreshAsync();
     }
 
-    WindowsSetup? _setup;
+    EngineSetup? _setup;
 
     async Task RefreshServiceAsync()
     {

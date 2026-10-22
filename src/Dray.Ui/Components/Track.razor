@@ -45,12 +45,21 @@
             @* The command is shown before it is run, every time. It is what makes this a suggestion
                rather than Dray quietly reconfiguring someone's machine — and it means they can run
                it themselves, or decide Dray is wrong about it. A script run as root is shown whole. *@
-            @if (step.Kind is not (SetupStepKind.CreateLinuxUser or SetupStepKind.Connect))
+            @if (step.Kind is SetupStepKind.OpenUrl && step.Url is { } url)
+            {
+                <div class="track__cmd">
+                    <code class="mono">@url</code>
+                </div>
+            }
+            else if (step.Kind is not (SetupStepKind.CreateLinuxUser or SetupStepKind.Connect))
             {
                 <div class="track__cmd">
                     @if (step.Script is { } script)
                     {
-                        <p class="track__cmdnote muted">As root inside @step.Distro:</p>
+                        @if (step.ScriptContext is { } context)
+                        {
+                            <p class="track__cmdnote muted">@context</p>
+                        }
                         <pre class="mono">@script</pre>
                     }
                     else
@@ -60,29 +69,7 @@
                 </div>
             }
 
-            <p class="track__cost muted">
-                @if (step.NeedsElevation)
-                {
-                    <span>Asks for administrator.</span>
-                }
-                @if (step.NeedsRestart)
-                {
-                    <span> Needs a restart to take effect.</span>
-                }
-                @switch (step.Kind)
-                {
-                    case SetupStepKind.Window:
-                        <span> Runs in its own window, so you can see what it does.</span>
-                        break;
-                    case SetupStepKind.InApp:
-                        <span> Its output appears here as it runs.</span>
-                        break;
-                }
-                @if (step.Duration is { } duration)
-                {
-                    <span> @duration</span>
-                }
-            </p>
+            <p class="track__cost muted">@string.Join(' ', Costs(step))</p>
 
             @* The output belongs to the step that produced it, and stays after it finishes: a failed
                install's last lines are the explanation. Selectable, because it is a log
@@ -167,12 +154,39 @@
            && step == Route.Steps.FirstOrDefault(s => !s.Optional)
            && step.Id is not ("desktop.linux" or "desktop.windows");
 
+    /// <summary>
+    /// What running a step costs, as sentences: the prompt it raises, what finishing it takes, where
+    /// it runs, how long. Joined in code rather than as adjacent elements, which Razor renders with
+    /// the spaces between them trimmed away — "as it runs.Takes a minute or two."
+    /// </summary>
+    static IEnumerable<string> Costs(SetupStep step)
+    {
+        if (step.NeedsElevation) yield return step.ElevationNote;
+        if (step.NeedsRestart) yield return step.RestartNote;
+
+        var where = step.Kind switch
+        {
+            SetupStepKind.Window => "Runs in its own window, so you can see what it does.",
+            SetupStepKind.InApp => "Its output appears here as it runs.",
+            SetupStepKind.Terminal => "Opens in Terminal, which asks for what it needs there.",
+            SetupStepKind.OpenUrl => "Opens in your browser.",
+            _ => null,
+        };
+
+        if (where is not null) yield return where;
+        if (step.Duration is { } duration) yield return duration;
+    }
+
     static string ActionLabel(SetupStep step) => step.Kind switch
     {
         SetupStepKind.CreateLinuxUser => "Create account…",
         SetupStepKind.Connect => "Use it",
         SetupStepKind.DockerDesktop when step.Id == "desktop.start" => "Start",
         SetupStepKind.DockerDesktop => "Switch",
+        SetupStepKind.Terminal => "Open in Terminal",
+        SetupStepKind.OpenUrl => "Download",
+        SetupStepKind.Manual => "Copy",
+        _ when step.Id.EndsWith(".start", StringComparison.Ordinal) || step.Id.EndsWith(".open", StringComparison.Ordinal) => "Start",
         _ => step.Id.EndsWith(".install", StringComparison.Ordinal) || step.Id == "wsl.distro" ? "Install" : "Run",
     };
 
@@ -180,6 +194,9 @@
     {
         SetupStepKind.CreateLinuxUser => IconRef.Plus,
         SetupStepKind.Connect => IconRef.Check,
+        SetupStepKind.Terminal => IconRef.Terminal,
+        SetupStepKind.OpenUrl => IconRef.External,
+        SetupStepKind.Manual => IconRef.Copy,
         _ => IconRef.Play,
     };
 

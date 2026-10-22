@@ -1,16 +1,58 @@
-@* Getting an engine on Windows, all the way to one Dray is connected to.
+@* Getting an engine, all the way to one Dray is connected to, on whichever platform this is.
 
    PRODUCT.md: Dray helps install what it drives. Every step is shown before it runs and runs only
-   when asked. The ones that need Dray itself elevated run in their own window; the rest — a
-   distribution, an engine inside one, Docker Desktop's installer — run here, with their output
-   on screen, because an eight-minute install with nothing to watch looks like a hang. *@
+   when asked. The ones that need Dray itself elevated run in their own window, and the ones whose
+   installer asks for a password run where that installer can ask — Terminal on a Mac, polkit's
+   dialog on Linux. The rest run here, with their output on screen, because an eight-minute install
+   with nothing to watch looks like a hang. *@
 @implements IDisposable
 @inject WindowsSetupReader Reader
+@inject MacSetupReader MacReader
+@inject LinuxSetupReader LinuxReader
 @inject SetupStepRunner Runner
 @inject EngineManager Engine
 @inject IShellBridge Shell
 
-@if (_state is { } state && !state.IsComplete)
+@if (UnixRoutes is { Count: > 0 } unixRoutes)
+{
+    <div class="panel setup">
+        <div class="panel__head">
+            <span class="panel__title">Set up a container engine</span>
+        </div>
+        <div class="panel__body">
+            <p class="setup__intro muted">
+                @if (OperatingSystem.IsMacOS())
+                {
+                    <span>
+                        Containers run on Linux, so a Mac runs them in a small virtual machine. Each of these
+                        provides one and an engine inside it. Dray drives whichever you choose, and they can be
+                        installed side by side.
+                    </span>
+                }
+                else
+                {
+                    <span>Docker's engine runs directly on this machine's own kernel — no virtual machine needed.</span>
+                }
+            </p>
+
+            @foreach (var route in unixRoutes)
+            {
+                <Track @key="route.Id" Route="route" Alternatives="@(unixRoutes.Count > 1)"
+                       Running="@_running" OutputFor="@_outputFor" Output="_output" StartedAt="_startedAt"
+                       OnRun="RunAsync" />
+            }
+
+            @if (_result is { } result)
+            {
+                <p class="setup__result @(result.Succeeded ? "is-ok" : "is-bad")">
+                    <Icon Name="@(result.Succeeded ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                    @result.Detail
+                </p>
+            }
+        </div>
+    </div>
+}
+else if (_state is { } state && !state.IsComplete)
 {
     <div class="panel setup">
         <div class="panel__head">
@@ -89,7 +131,14 @@
 
 @code {
     WindowsSetupState? _state;
+    MacSetupState? _mac;
+    LinuxSetupState? _linux;
     SetupStepResult? _result;
+
+    /// <summary>The Mac's or the Linux machine's routes; null on Windows, which has its own two tracks.</summary>
+    IReadOnlyList<SetupRoute>? UnixRoutes => _mac is { } mac
+        ? MacSetupPlan.Routes(mac)
+        : _linux is { } linux ? LinuxSetupPlan.Routes(linux) : null;
     string? _running;
     string? _outputFor;
     DateTimeOffset? _startedAt;
@@ -114,11 +163,14 @@
     /// </summary>
     public async Task RefreshAsync()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows()) _state = await Reader.ReadAsync(Engine.Hosts);
+        else if (OperatingSystem.IsMacOS()) _mac = MacReader.Read(Engine.Hosts);
+        else if (OperatingSystem.IsLinux()) _linux = await LinuxReader.ReadAsync(Engine.Hosts);
 
-        _state = await Reader.ReadAsync(Engine.Hosts);
         await InvokeAsync(StateHasChanged);
     }
+
+    bool AnyAnswering => Engine.Hosts.Any(h => h.State == HostConnectionState.Connected);
 
     /// <summary>
     /// An engine connecting is what finishes a track, and the engine manager already knows the
@@ -127,6 +179,18 @@
     /// </summary>
     void OnEngineChanged()
     {
+        if (_mac is { } macState && macState.HasEngine != AnyAnswering)
+        {
+            _mac = macState with { HasEngine = AnyAnswering };
+            _ = InvokeAsync(StateHasChanged);
+        }
+
+        if (_linux is { } linuxState && linuxState.HasEngine != AnyAnswering)
+        {
+            _linux = linuxState with { HasEngine = AnyAnswering };
+            _ = InvokeAsync(StateHasChanged);
+        }
+
         if (_state is not { } state) return;
 
         var linux = Answering(ContainerOs.Linux) is not null;
@@ -167,6 +231,9 @@
                 SetupStepKind.CreateLinuxUser => await CreateAccountAsync(step),
                 SetupStepKind.DockerDesktop => await DesktopAsync(step),
                 SetupStepKind.Connect => await ConnectAsync(step),
+                SetupStepKind.Terminal => await Runner.RunInTerminalAsync(step),
+                SetupStepKind.OpenUrl => await OpenAsync(step),
+                SetupStepKind.Manual => await CopyAsync(step),
                 _ => null,
             };
         }
@@ -222,6 +289,20 @@
         return problem is null
             ? new SetupStepResult(true, false, step.Id == "desktop.start" ? "Docker Desktop is running." : $"Docker Desktop is running {DockerDesktop.Label(step.DesktopMode!.Value)}.")
             : new SetupStepResult(false, false, problem);
+    }
+
+    async Task<SetupStepResult> OpenAsync(SetupStep step)
+    {
+        if (step.Url is not { } url) return new SetupStepResult(false, false, "There is no page to open.");
+
+        await Shell.OpenExternalAsync(url);
+        return new SetupStepResult(true, false, "Opened in your browser. Once it is installed, press Look again.");
+    }
+
+    async Task<SetupStepResult> CopyAsync(SetupStep step)
+    {
+        await Shell.WriteClipboardAsync(step.Script ?? step.CommandLine);
+        return new SetupStepResult(true, false, "Copied. Run it in a terminal, then press Look again.");
     }
 
     async Task<SetupStepResult> ConnectAsync(SetupStep step)

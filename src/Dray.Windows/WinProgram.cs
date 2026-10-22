@@ -52,6 +52,8 @@ public static class WinProgram
         builder.Services.AddSingleton<DockerDesktop>();
         builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
         builder.Services.AddSingleton<WindowsSetupReader>();
+        builder.Services.AddSingleton<MacSetupReader>();
+        builder.Services.AddSingleton<LinuxSetupReader>();
         builder.Services.AddSingleton<SetupStepRunner>();
         builder.Services.AddSingleton<WslAccount>();
         builder.Services.AddSingleton<DockerCliContext>();
