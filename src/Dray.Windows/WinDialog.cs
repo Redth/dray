@@ -100,6 +100,7 @@ public sealed class WinDialog(IServiceProvider services)
             {
                 dialog.XamlRoot = WinWindow.XamlRoot;
                 dialog.Style = Resource("DefaultContentDialogStyle");
+                dialog.RequestedTheme = ShellTheme;
                 using var _ = ct.Register(() => dialog.DispatcherQueue.TryEnqueue(dialog.Hide));
                 return await dialog.ShowAsync();
             });
@@ -173,6 +174,7 @@ public sealed class WinDialog(IServiceProvider services)
             Content = content,
             XamlRoot = WinWindow.XamlRoot,
             Style = Resource("DefaultContentDialogStyle"),
+            RequestedTheme = ShellTheme,
         };
 
         // ContentDialog caps its width well under a Large body; lifted for this dialog only.
@@ -392,6 +394,15 @@ public sealed class WinDialog(IServiceProvider services)
             _dialog.Closing -= OnClosing;
         }
     }
+
+    /// <summary>
+    /// The theme the window is drawn in. A ContentDialog lives in the popup layer, outside the
+    /// window root that MAUI's <c>UserAppTheme</c> sets <c>RequestedTheme</c> on, so it follows the
+    /// application's theme, the system's, instead. With the app dark and the system light, every
+    /// dialog came up light over a dark window, its danger button in light colours.
+    /// </summary>
+    static Xaml.ElementTheme ShellTheme =>
+        (WinWindow.Current?.Content as Xaml.FrameworkElement)?.ActualTheme ?? Xaml.ElementTheme.Default;
 
     static Xaml.Style? Resource(string key)
         => Xaml.Application.Current.Resources.TryGetValue(key, out var value) ? value as Xaml.Style : null;
