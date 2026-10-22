@@ -100,6 +100,63 @@ public class DockerDesktopTests
         Assert.Contains("something broke", problem);
     }
 
+    const string MacApp = "/Applications/Docker.app";
+
+    static FakeConfigSource MacInstalled() => new FakeConfigSource { IsMacOS = true }
+        .WithDirectory(MacApp)
+        .WithExecutable($"{MacApp}/Contents/Resources/bin/docker");
+
+    /// <summary>
+    /// A Mac's Docker Desktop has one engine and no <c>engine</c> command; running means its Linux
+    /// engine is up. Asked through the app's own CLI, which has the desktop plugin wherever PATH
+    /// points.
+    /// </summary>
+    [Fact]
+    public async Task ARunningMacDesktopIsItsLinuxEngine()
+    {
+        var runner = new ScriptedRunner().On(["desktop", "status"], 0, Running);
+
+        var state = await new DockerDesktop(runner, MacInstalled(), MacApp).ReadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new DockerDesktopState(true, true, DesktopEngineMode.Linux), state);
+        var call = Assert.Single(runner.Calls);
+        Assert.Equal($"{MacApp}/Contents/Resources/bin/docker", call.Executable);
+    }
+
+    [Fact]
+    public async Task AStoppedMacDesktopNeedsStarting()
+    {
+        var runner = new ScriptedRunner().On(["desktop", "status"], 0, "{\"Status\":\"stopped\"}");
+
+        var state = await new DockerDesktop(runner, MacInstalled(), MacApp).ReadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new DockerDesktopState(true, false, null), state);
+    }
+
+    [Fact]
+    public async Task AMacWithoutDockerDesktopIsNotAsked()
+    {
+        var runner = new ScriptedRunner();
+
+        var state = await new DockerDesktop(runner, new FakeConfigSource { IsMacOS = true }, MacApp).ReadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DockerDesktopState.NotInstalled, state);
+        Assert.Empty(runner.Calls);
+    }
+
+    /// <summary>
+    /// Docker Desktop for Mac's socket is its engine, and the only one there is. OrbStack's and
+    /// Colima's are not Docker Desktop's, and neither is the system socket that links to it — that
+    /// one is an alias, settled by the engine's identity like every other.
+    /// </summary>
+    [Theory]
+    [InlineData("unix:///Users/jon/.docker/run/docker.sock", DesktopEngineMode.Linux)]
+    [InlineData("unix:///Users/jon/.orbstack/run/docker.sock", null)]
+    [InlineData("unix:///Users/jon/.colima/default/docker.sock", null)]
+    [InlineData("unix:///var/run/docker.sock", null)]
+    public void KnowsWhichMacSocketIsDockerDesktops(string raw, DesktopEngineMode? expected)
+        => Assert.Equal(expected, DockerDesktop.ModeOf(DockerEndpoint.Parse(raw)!));
+
     /// <summary>A Docker Desktop that has not said which mode it is in is not switched on a guess.</summary>
     [Fact]
     public void OnlySwitchesWhenTheModeIsKnownToDiffer()

@@ -93,6 +93,22 @@ public class MacSetupTests
         Assert.Contains("--cask docker-desktop", step.Script);
     }
 
+    /// <summary>
+    /// An installed Docker Desktop is started the way Windows starts it — its own CLI, which waits
+    /// for the engine — so the step ends with Dray connected rather than with the app opening.
+    /// </summary>
+    [Fact]
+    public void AnInstalledDockerDesktopIsStartedThroughItsCli()
+    {
+        var routes = MacSetupPlan.Routes(Mac(desktop: true));
+        var step = Assert.Single(routes[0].Steps);
+
+        Assert.Equal("mac.desktop", routes[0].Id);
+        Assert.Equal("desktop.start", step.Id);
+        Assert.Equal(SetupStepKind.DockerDesktop, step.Kind);
+        Assert.Equal(DesktopEngineMode.Linux, step.DesktopMode);
+    }
+
     [Fact]
     public void ReadsWhatIsInstalledFromTheFilesystemAlone()
     {

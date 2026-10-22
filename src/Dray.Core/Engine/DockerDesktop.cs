@@ -2,7 +2,10 @@ using System.Text.Json;
 
 namespace Dray.Core.Engine;
 
-/// <summary>Which of Docker Desktop's two engines is answering on Windows.</summary>
+/// <summary>
+/// Which of Docker Desktop's engines is answering. Two on Windows; on a Mac there is only ever
+/// <see cref="Linux"/>.
+/// </summary>
 public enum DesktopEngineMode
 {
     Linux,
@@ -43,6 +46,13 @@ public sealed record DockerDesktopState(bool Installed, bool Running, DesktopEng
 /// <c>docker desktop</c> (4.37 and later) is the documented, scriptable route to all of it, and its
 /// <c>--format json</c> output is what is parsed — the table form is for people.
 /// </para>
+/// <para>
+/// On a Mac the same CLI starts it and says whether it is running, and that is all there is to
+/// drive: Docker Desktop for Mac has one engine, so it has no <c>engine</c> command and nothing to
+/// switch. Starting it from Dray matters for the same reason it does on Windows — a stopped Docker
+/// Desktop leaves its context in the picker as an engine that does not answer, and the one action
+/// that fixes it is Dray's to take.
+/// </para>
 /// </summary>
 public sealed class DockerDesktop(
     IProcessRunner? runner = null,
@@ -53,11 +63,17 @@ public sealed class DockerDesktop(
     readonly IDockerConfigSource _source = source ?? new SystemDockerConfigSource();
 
     /// <summary>
-    /// Where Docker Desktop installs on Windows. A parameter so a test on a Windows machine is not
-    /// answered by that machine's real install.
+    /// Where Docker Desktop is installed: its folder in Program Files on Windows, its application
+    /// bundle on a Mac. A parameter so a test is not answered by the real install on the machine
+    /// running it.
     /// </summary>
     readonly string _installRoot = installRoot
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Docker", "Docker");
+        ?? ((source ?? new SystemDockerConfigSource()).IsMacOS
+            ? MacApplication
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Docker", "Docker"));
+
+    /// <summary>Where Docker Desktop for Mac installs. Its installer offers nowhere else.</summary>
+    public const string MacApplication = "/Applications/Docker.app";
 
     /// <summary>
     /// Long enough for a mode switch, which took eleven seconds when measured, and for a cold
@@ -65,17 +81,35 @@ public sealed class DockerDesktop(
     /// </summary>
     public static readonly TimeSpan SwitchTimeout = TimeSpan.FromMinutes(3);
 
-    /// <summary>The application itself, whose presence is what "installed" means.</summary>
-    string Application => Path.Combine(_installRoot, "Docker Desktop.exe");
+    /// <summary>Whether the application itself is there, which is what "installed" means.</summary>
+    bool IsInstalled => _source.IsMacOS
+        ? _source.DirectoryExists(_installRoot)
+        : _source.IsWindows && _source.FileExists(Path.Combine(_installRoot, "Docker Desktop.exe"));
 
     /// <summary>
     /// Docker Desktop's own copy of the CLI. Preferred to whatever <c>docker</c> is on PATH,
     /// because the <c>desktop</c> plugin ships with Docker Desktop and a different CLI earlier on
-    /// PATH — a native engine's — would not have it.
+    /// PATH — a native engine's, or Homebrew's beside Colima — would not have it.
     /// </summary>
-    string Cli => _source.FileExists(Path.Combine(_installRoot, "resources", "bin", "docker.exe"))
-        ? Path.Combine(_installRoot, "resources", "bin", "docker.exe")
-        : "docker";
+    string Cli
+    {
+        get
+        {
+            // Joined with '/' on a Mac for the reason discovery gives: Path.Combine takes its
+            // separator from the machine running the code, and the tests run on Windows too.
+            var own = _source.IsMacOS
+                ? _installRoot.TrimEnd('/') + "/Contents/Resources/bin/docker"
+                : Path.Combine(_installRoot, "resources", "bin", "docker.exe");
+
+            return _source.FileExists(own) ? own : "docker";
+        }
+    }
+
+    /// <summary>
+    /// The socket Docker Desktop for Mac serves its engine on, under the user's home. It is the
+    /// endpoint of the <c>desktop-linux</c> context, and <c>/var/run/docker.sock</c> links to it.
+    /// </summary>
+    const string MacSocket = "/.docker/run/docker.sock";
 
     /// <summary>
     /// The pipe each engine publishes under, which is how a host is matched to a mode.
@@ -87,6 +121,10 @@ public sealed class DockerDesktop(
     /// </summary>
     public static DesktopEngineMode? ModeOf(DockerEndpoint endpoint) => endpoint switch
     {
+        // A Mac's one engine. Only Docker Desktop serves this socket — OrbStack, Colima and Rancher
+        // Desktop each have their own — so it is as much a fact about the socket as a pipe name is.
+        { Scheme: EndpointScheme.Unix, Path: { } path }
+            when path.EndsWith(MacSocket, StringComparison.Ordinal) => DesktopEngineMode.Linux,
         { Scheme: EndpointScheme.NamedPipe, Path: { } path }
             when path.EndsWith("/dockerDesktopLinuxEngine", StringComparison.OrdinalIgnoreCase) => DesktopEngineMode.Linux,
         { Scheme: EndpointScheme.NamedPipe, Path: { } path }
@@ -103,13 +141,17 @@ public sealed class DockerDesktop(
     /// </summary>
     public async Task<DockerDesktopState> ReadAsync(CancellationToken ct = default)
     {
-        // The modes are a Windows concept, and so is everything this class drives.
-        if (!_source.IsWindows || !_source.FileExists(Application)) return DockerDesktopState.NotInstalled;
+        if (!IsInstalled) return DockerDesktopState.NotInstalled;
 
         try
         {
             var status = await _runner.RunAsync(Cli, ["desktop", "status", "--format", "json"], null, ct).ConfigureAwait(false);
             if (status.ExitCode != 0 || !ParseRunning(status.StandardOutput)) return new(true, false, null);
+
+            // One engine, so nothing to ask: it runs Linux containers or it is not running. The
+            // kind of container a host runs is still read from /info; this is which engine of
+            // Docker Desktop's is up, and a Mac's has only the one.
+            if (_source.IsMacOS) return new(true, true, DesktopEngineMode.Linux);
 
             var engines = await _runner.RunAsync(Cli, ["desktop", "engine", "ls", "--format", "json"], null, ct).ConfigureAwait(false);
             return new(true, true, engines.ExitCode == 0 ? ParseCurrentMode(engines.StandardOutput) : null);

@@ -362,14 +362,33 @@ they are moving.
   window, where the password prompt belongs to the system and never to Dray. Everything else runs
   in-app, by full path, with Homebrew's `bin` on `PATH`; an app opened from the Finder has neither,
   and `colima start` runs `limactl` by name. Without Homebrew, OrbStack and Docker Desktop are
-  downloads from their makers' sites.
+  downloads from their makers' sites. When a step succeeds and the selected engine is not
+  answering, Dray connects to the CLI's current context, which Colima and OrbStack set as they
+  start.
+- **Docker Desktop on a Mac** is driven through `DockerDesktop`, as on Windows, minus the modes: it
+  has one engine, so `docker desktop engine` does not exist there and there is nothing to switch.
+  Its socket, `~/.docker/run/docker.sock`, is Docker Desktop's own and maps to its Linux engine the
+  way each pipe maps to one on Windows. A stopped Docker Desktop is started with
+  `docker desktop start` — from the picker or from setup — which returns once the engine answers,
+  and Dray connects then. The CLI is the one inside `Docker.app`, which has the `desktop` plugin
+  whatever `docker` is first on `PATH`.
 - **Linux** installs Docker's engine with Docker's script through polkit (`pkexec`), whose dialog
   asks for the password and leaves the output for Dray to show. Then it starts the engine, then adds
   the user to the `docker` group. Without polkit, Dray has no honest way to ask, so it shows the
   `sudo` command to copy.
 
-Neither has run on its platform yet. The plans and readers are unit-tested, and `/gallery` renders
-every platform's routes so each can be reviewed from any machine.
+The macOS head has run on a Mac, against Docker Desktop; Linux has not run on its platform. The
+plans and readers are unit-tested, and `/gallery` renders every platform's routes so each can be
+reviewed from any machine.
+
+**A Mac app opened from the Finder has launchd's `PATH`** — `/usr/bin:/bin:/usr/sbin:/sbin` — and
+none of the commands Dray runs is on it: not `docker` or its compose and buildx plugins, not the
+credential helpers, not Apple's `container`. Measured: compose detection found nothing under that
+`PATH`. Run from a terminal, the app inherits the shell's and the problem is invisible. So the
+macOS head appends, before anything is discovered, the system's own list (`/etc/paths`,
+`/etc/paths.d`, what `path_helper` gives a login shell) and the directories the engines install
+into (`MacSearchPath`). A login shell is not asked: that would run the user's shell configuration
+inside the app's launch.
 
 Every check is non-elevated. The authoritative reads need administrator, and prompting on every
 launch to answer a question nobody has asked yet is worse than not knowing — so `SetupFact.Unknown`

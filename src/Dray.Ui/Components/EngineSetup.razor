@@ -271,6 +271,18 @@ else if (_state is { } state && !state.IsComplete)
             await Engine.ConnectNowAsync("wsl:" + distro);
         }
 
+        // On a Mac or Linux the engine a step started is the one the Docker CLI now points at —
+        // Colima and OrbStack make their context current as they start. If what is selected is not
+        // answering, that is the engine to show; leaving the selection where it was would end setup
+        // on the same unreachable host it began on. Not after starting Docker Desktop, which has
+        // already selected its own engine and may still be connecting to it.
+        if (_result.Succeeded && !OperatingSystem.IsWindows() && step.Kind != SetupStepKind.DockerDesktop
+            && Engine.Selected is not { State: HostConnectionState.Connected }
+            && Engine.Hosts.FirstOrDefault(h => h.IsCurrent) is { } current)
+        {
+            await Engine.ConnectNowAsync(current.Id);
+        }
+
         // WSL restarted under the selected engine; connect again now rather than after the pump's backoff.
         if (_result.Succeeded && step.Kind == SetupStepKind.WslSetting && Engine.Selected is { Endpoint.Scheme: EndpointScheme.Wsl } selected)
         {

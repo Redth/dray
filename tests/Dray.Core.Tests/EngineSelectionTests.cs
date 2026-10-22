@@ -154,6 +154,56 @@ public class EngineSelectionTests
         Assert.DoesNotContain(factory.Created, r => r.Endpoint == "wsl://Ubuntu");
     }
 
+    const string MacDesktopSocket = "unix:///Users/jon/.docker/run/docker.sock";
+
+    /// <summary>A Mac with Colima current and Docker Desktop installed beside it.</summary>
+    static DockerContextReader MacContexts() => new(new FakeConfigSource()
+        .WithContext("colima", "unix:///Users/jon/.colima/default/docker.sock")
+        .WithContext("desktop-linux", MacDesktopSocket)
+        .WithConfig("colima"));
+
+    static DockerDesktop MacDesktop(string status)
+    {
+        var runner = new ScriptedRunner().On(["desktop", "status"], 0, $"{{\"Status\":\"{status}\"}}");
+        return new DockerDesktop(runner, new FakeConfigSource { IsMacOS = true }.WithDirectory("/Applications/Docker.app"), "/Applications/Docker.app");
+    }
+
+    /// <summary>
+    /// A stopped Docker Desktop on a Mac is offered the way Windows offers it: choosing its engine
+    /// starts it, and the row says why it is down instead of showing a refused connection. There is
+    /// never a switch to offer — it has one engine.
+    /// </summary>
+    [Fact]
+    public async Task AStoppedMacDockerDesktopIsStartedWhenChosen()
+    {
+        var factory = new FakeRuntimeFactory();
+        factory.Failures[MacDesktopSocket] = new RuntimeConnectionException("connection refused");
+
+        await using var manager = new EngineManager(MacContexts(), factory, MacDesktop("stopped"));
+        await manager.InitializeAsync(TestContext.Current.CancellationToken);
+        await manager.ProbeOthersAsync(TestContext.Current.CancellationToken);
+
+        var desktop = manager.Hosts.Single(h => h.Id == "desktop-linux");
+        var colima = manager.Hosts.Single(h => h.Id == "colima");
+
+        Assert.True(manager.StartNeededFor(desktop));
+        Assert.Null(manager.SwitchNeededFor(desktop));
+        Assert.Equal("Docker Desktop is not running.", desktop.StateDetail);
+        Assert.False(manager.StartNeededFor(colima));
+    }
+
+    [Fact]
+    public async Task ARunningMacDockerDesktopNeedsNothing()
+    {
+        await using var manager = new EngineManager(MacContexts(), new FakeRuntimeFactory(), MacDesktop("running"));
+        await manager.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var desktop = manager.Hosts.Single(h => h.Id == "desktop-linux");
+
+        Assert.False(manager.StartNeededFor(desktop));
+        Assert.Null(manager.SwitchNeededFor(desktop));
+    }
+
     sealed class MemoryStore(string? initial) : IHostSelectionStore
     {
         public string? Saved { get; private set; }

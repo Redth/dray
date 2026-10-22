@@ -80,6 +80,31 @@ public class NavigationManifestTests
         Assert.Null(NavigationManifest.Find("/nope"));
     }
 
+    [Theory]
+    [InlineData("/containers", "Containers")]
+    [InlineData("/containers/abc123", "Containers")]
+    [InlineData("/Stacks/web/services", "Stacks")]
+    [InlineData("/", "Dashboard")]
+    public void OwnerIsTheListADetailPageBelongsTo(string route, string title)
+    {
+        Assert.Equal(title, NavigationManifest.Owner(route)?.Title);
+    }
+
+    [Fact]
+    public void OwnerNeverFallsBackToTheRoot()
+    {
+        // Dashboard is "/", and every route starts with "/". It owns itself and nothing else.
+        Assert.Null(NavigationManifest.Owner("/nope"));
+        Assert.Null(NavigationManifest.Owner("/settings"));
+    }
+
+    [Fact]
+    public void OwnerSkipsDebugOnlyEntriesInRelease()
+    {
+        Assert.NotNull(NavigationManifest.Owner("/gallery"));
+        Assert.Null(NavigationManifest.Owner("/gallery", includeDebug: false));
+    }
+
     [Fact]
     public void ReleaseBuildsHideDebugOnlyEntries()
     {

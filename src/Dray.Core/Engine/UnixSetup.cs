@@ -150,7 +150,26 @@ public static class MacSetupPlan
 
     static IReadOnlyList<SetupStep> DesktopSteps(MacSetupState state)
     {
-        if (state.DockerDesktop) return [OpenApp("desktop.open", "Start Docker Desktop", "Docker")];
+        // Through Docker Desktop's own CLI, as on Windows, rather than by opening the app: the CLI
+        // returns once the engine answers, so Dray connects then instead of when it next retries.
+        if (state.DockerDesktop)
+        {
+            return
+            [
+                new SetupStep(
+                    "desktop.start",
+                    "Start Docker Desktop",
+                    "Docker Desktop is installed but not running. It takes a moment to start; Dray connects once its engine answers.",
+                    "docker",
+                    ["desktop", "start"],
+                    NeedsElevation: false,
+                    NeedsRestart: false)
+                {
+                    Kind = SetupStepKind.DockerDesktop,
+                    DesktopMode = DesktopEngineMode.Linux,
+                },
+            ];
+        }
 
         if (state.BrewPath is not { } brew) return [Download("desktop.download", "Download Docker Desktop", DockerDesktopDownload)];
 

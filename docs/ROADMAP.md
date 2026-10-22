@@ -664,9 +664,19 @@ where the command already works instead of offering one that cannot.
 
 **What is not done:**
 
-- **Nothing here has run on a Mac or a Linux desktop.** The macOS sidebar picker has not even been
-  compiled — the head builds only on macOS. The macOS and Linux setup plans are unit-tested and
-  reviewed in `/gallery`, but no step has executed on either platform.
+- **Nothing here has run on a Linux desktop.** The Linux setup plan is unit-tested and reviewed in
+  `/gallery`, but no step has executed there.
+- **On a Mac, the head builds and runs against Docker Desktop**, and running it found two bugs in
+  the sidebar picker: the sidebar selects its first row as it loads, which is the picker, so its
+  menu's modal loop ran inside the app's launch and the window never appeared; and its title never
+  changed, because the sidebar ignores a new list once it has loaded. Both are fixed. Opening the
+  picker's menu with a click has not been driven — synthetic clicks need an Accessibility grant
+  the test machine did not have — and no Mac setup step (Colima, OrbStack, starting Docker
+  Desktop) has executed yet.
+- **A Mac app opened from the Finder could not find `docker`** — launchd's `PATH` has none of the
+  engines' commands — so compose, buildx, credential helpers and Apple's `container` were all
+  missing outside a terminal launch. Fixed in `MacSearchPath`; verified by detecting compose under
+  launchd's `PATH` before and after.
 - **The Windows head was not driven with DevFlow**, because another worktree's Debug instance held
   its port and log file. It was driven in a Release build through UI Automation and screen capture.
 - **Windows Server's engine script** (`install-docker-ce.ps1`) is the command Microsoft documents. It
