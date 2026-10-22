@@ -87,8 +87,11 @@ jobs:
           node build/gen-tokens.mjs
           node build/gen-icons.mjs
 
+      # Restored for the configuration it is built in. The app heads choose their runtime
+      # identifiers by configuration (a Release macOS build is universal, a Windows one is
+      # RID-specific), and an assets file restored for Debug has no targets for those.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore -p:Configuration=Release
 
       - name: Build
         run: dotnet build --no-restore -c Release
