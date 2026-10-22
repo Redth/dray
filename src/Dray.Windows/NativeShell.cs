@@ -109,6 +109,10 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
 
         nav.Content = content;
 
+        // Before the sidebar and toolbar draw their first icons, so they draw them in the theme
+        // the NavigationView is actually in.
+        (theme as WinTheme)?.Follow(nav);
+
         _sidebar = new WinSidebar(nav, shell, theme, debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
         _toolbar = new WinToolbarProjector(toolbarRow, nav, shell, theme);
 

@@ -24,6 +24,10 @@ public sealed class WinTheme : IPlatformTheme
 {
     readonly UISettings _settings = new();
 
+    // The theme the shell actually painted in, once Follow has an element to read it from. Null
+    // until then, and the system's app theme answers instead.
+    volatile object? _effectiveDark;
+
     public WinTheme()
     {
         // Raised on a background thread, for accent changes as well as light/dark. Consumers
@@ -36,13 +40,38 @@ public sealed class WinTheme : IPlatformTheme
     public DrayTheme Current => IsDark ? DrayTheme.Dark : DrayTheme.Light;
 
     /// <summary>
-    /// Whether apps are in dark mode. The system's own test: the foreground the shell hands apps is
-    /// light exactly when the app theme is dark. There is no direct "is dark" API for a desktop app.
+    /// Follow the theme <paramref name="root"/> is drawn in, rather than the system's.
+    /// <para>
+    /// The two differ whenever the app's theme is set apart from the system's: MAUI's
+    /// <c>UserAppTheme</c> sets <c>RequestedTheme</c> on the window's root, which turns every WinUI
+    /// control dark without raising <see cref="UISettings.ColorValuesChanged"/>. Reading the system
+    /// would then leave the icons and the WebView's tokens in the other theme from the controls
+    /// around them. <c>ActualTheme</c> is WinUI's counterpart of macOS's <c>EffectiveAppearance</c>,
+    /// which is what <c>MacTheme</c> reads. Call on the UI thread.
+    /// </para>
+    /// </summary>
+    public void Follow(Xaml.FrameworkElement root)
+    {
+        _effectiveDark = root.ActualTheme == Xaml.ElementTheme.Dark;
+        root.ActualThemeChanged += (sender, _) =>
+        {
+            _effectiveDark = sender.ActualTheme == Xaml.ElementTheme.Dark;
+            Changed?.Invoke();
+        };
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Whether the shell is dark. Before <see cref="Follow"/>, the system's own test: the foreground
+    /// the shell hands apps is light exactly when the app theme is dark. There is no direct "is
+    /// dark" API for a desktop app.
     /// </summary>
     bool IsDark
     {
         get
         {
+            if (_effectiveDark is bool dark) return dark;
+
             var foreground = _settings.GetColorValue(UIColorType.Foreground);
             return (5 * foreground.G) + (2 * foreground.R) + foreground.B > 8 * 128;
         }
