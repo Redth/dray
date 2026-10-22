@@ -1,0 +1,11 @@
+# LF in the working copy on every OS, whatever core.autocrlf says.
+#
+# The generators and vendor checks compare files byte for byte. With autocrlf, a Windows checkout
+# is CRLF while the scripts write LF, so `gen-tokens --check`, `gen-icons --check` and the vendor
+# checks failed on a clean checkout, and running a generator showed every file it touched as
+# modified with no content change.
+* text=auto eol=lf
+
+# Vendored third-party code is kept byte for byte as its package ships it: the vendor scripts hash
+# it against node_modules, and any conversion would read as a hand edit.
+src/Dray.Ui/wwwroot/lib/** -text
