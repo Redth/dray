@@ -1,4 +1,5 @@
 using Dray.Core.Engine;
+using Dray.Core.Shell;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Controls;
 using Microsoft.UI.Composition.SystemBackdrops;
@@ -13,6 +14,8 @@ namespace Dray.WinUI;
 /// </summary>
 public sealed class DrayWinApp(IServiceProvider services) : Application
 {
+    WinTray? _tray;
+
     protected override Window CreateWindow(IActivationState? activationState)
     {
         var shell = new NativeShell();
@@ -51,6 +54,23 @@ public sealed class DrayWinApp(IServiceProvider services) : Application
             WinFirstFrame.HoldUntilDrawn(native, () => shell.Handler?.PlatformView as Xaml.FrameworkElement);
             ApplyBackdrop(native);
             WinWindow.TrackActivation(native);
+
+            // Once per process: the window's handler can be replaced, the notification area icon
+            // cannot be added twice.
+            // Dray without a tray icon is still Dray; a failure here is logged, not fatal.
+            try
+            {
+                _tray ??= new WinTray(
+                    native,
+                    services.GetRequiredService<EngineManager>(),
+                    services.GetRequiredService<IShellState>(),
+                    services.GetRequiredService<IShellBridge>(),
+                    services.GetRequiredService<IPlatformTheme>());
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write($"[dray:tray] {ex}");
+            }
         };
 
         // Discover and connect in the background; the UI shows its connecting state until this

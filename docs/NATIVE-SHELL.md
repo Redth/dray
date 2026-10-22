@@ -568,8 +568,30 @@ exe, so stderr goes nowhere. `CrashLog` also writes to `%LOCALAPPDATA%\Dray\logs
 
 - **Taskbar badge.** It needs package identity. It arrives with MSIX in Phase 7, and `SetBadge` is
   a documented no-op until then.
-- **A tray icon**, the counterpart of `MacStatusItem`. Not built yet.
 - **A XAML-free `App`.** `Platforms/Windows/App.xaml` is the only XAML in Dray and contains no UI.
-  It is there so the XAML compiler generates `Main`, the metadata provider and the
-  `XamlControlsResources` hookup. Writing those by hand is possible, but it should wait until the
-  head has been proven on a machine.
+  It is there so the XAML compiler generates the metadata provider and the `XamlControlsResources`
+  hookup. `Main` is no longer generated: it is `Platforms/Windows/Program.cs` (§5.6).
+
+### 5.6 The notification area, and one instance
+
+`WinTray` is the counterpart of `MacStatusItem`, with the same menu: the running count, up to ten
+running containers with Open in Dray, Stop and Restart one level in, then All containers and Stacks.
+Windows adds Open Dray (the default, bold, and what a left click does), two remembered choices, and
+Quit Dray. A notification-area icon cannot carry text, so the count is in the tooltip and the menu's
+first line.
+
+- **Closing the window** hides it and Dray keeps running ("Keep running when the window is closed",
+  on by default). The first time, a notification says where it went. **Minimizing** does the same
+  when "Minimize to the notification area" is on (off by default).
+- **The icon** is the container glyph from the sprite, rasterized with Win2D at the notification
+  area's size for the display, in ink for the *taskbar's* light or dark (`SystemUsesLightTheme`),
+  which is set apart from the apps' one. Redrawn on `ImmersiveColorSet`, re-added on
+  `TaskbarCreated` after an Explorer restart.
+- **The menu** is a native popup menu, in Dray's light or dark through uxtheme's unnamed
+  `SetPreferredAppMode` (ordinal 135), which is undocumented but what every dark Win32 menu uses.
+  Without it, it stays light.
+- **New icons start in the overflow (^)** on Windows 11. No supported API promotes an icon; the user
+  drags it out or turns it on in Settings.
+- **One instance.** With the window able to vanish, a second launch is how people look for it.
+  `Program.Main` registers the key "Dray" with `AppInstance` before WinUI starts; a later launch
+  redirects its activation to the first, which shows its window, and exits.

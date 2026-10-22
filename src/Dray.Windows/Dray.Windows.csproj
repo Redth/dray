@@ -24,6 +24,9 @@
          Phase 7 adds the MSIX and winget packaging alongside, not instead. -->
     <WindowsPackageType>None</WindowsPackageType>
 
+    <!-- Main is Platforms/Windows/Program.cs, which keeps Dray to one instance before WinUI starts. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <ApplicationManifest>Platforms\Windows\app.manifest</ApplicationManifest>
@@ -50,6 +53,10 @@
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('windows'))">
     <PackageReference Include="Microsoft.Maui.Controls" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
+
+    <!-- Draws the notification-area icon from the sprite (WinTray). Already in the app through
+         MAUI's graphics; named here because Dray now calls it directly. -->
+    <PackageReference Include="Microsoft.Graphics.Win2D" />
 
     <!-- MAUI DevFlow: screenshots and Blazor DOM snapshots of the running app, driven by
          `dotnet maui devflow`. Debug only; never shipped. -->

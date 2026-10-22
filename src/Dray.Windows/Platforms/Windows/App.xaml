@@ -1,11 +1,10 @@
 <!--
   The one XAML file in Dray, and it holds no UI.
 
-  WinUI's application object has to be declared in XAML for the XAML compiler to generate Main,
-  the type-metadata provider WinUI controls resolve their templates through, and the hook-up of
-  XamlControlsResources. A XAML-free application can be written, but it means hand-writing all three
-  and keeping them in step with the Windows App SDK — the kind of thing to adopt once it is proven on
-  a Windows machine, not before. Everything visible is Blazor, or WinUI built in C#.
+  WinUI's application object has to be declared in XAML for the XAML compiler to generate the
+  type-metadata provider WinUI controls resolve their templates through, and the hook-up of
+  XamlControlsResources. Main is not generated: it is Program.cs, which keeps Dray to one instance
+  before WinUI starts. Everything visible is Blazor, or WinUI built in C#.
 -->
 <maui:MauiWinUIApplication
     x:Class="Dray.WinUI.App"
