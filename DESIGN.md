@@ -572,7 +572,8 @@ entirely. Both were tried. The heading stays in the content.
 **Mark.** The D-cart: a dray in profile — tow bar, deck, two wheels — whose load is the letter D.
 The bar gives it direction (a dray is pulled), and the D makes it Dray's rather than any cart. One
 stroke drawing on the 24px grid at a 2px stroke, so the same geometry is the 16pt menu-bar template
-image, the mark in the web sidebar and the artwork on the app tile. It lives once, in
+image, the Windows notification-area icon, the mark in the web sidebar and the artwork on the app
+tile. It lives once, in
 `design/icons.json` under `marks`; it has no `IconRef`, because no platform icon set has a name for
 it. In native chrome it is monochrome — a template image on macOS — and the terracotta fill
 belongs to the app tile, where the D is tinted for volume. The web sidebar, standing in for a native

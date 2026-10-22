@@ -127,6 +127,16 @@ public static class Icons
         "stroke-linecap='${geometry.linecap}' stroke-linejoin='${geometry.linejoin}'>" +
         SvgBodies[icon] + "</svg>";
 
+    /// <summary>
+    /// Dray's own mark as a standalone SVG document, for a native image that has no SF Symbol
+    /// or Adwaita name to reach for — the Windows notification area. Same contract as
+    /// <see cref="Svg"/>; DESIGN.md section 10.
+    /// </summary>
+    public static string MarkSvg(string stroke) =>
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='${geometry.viewBox}' fill='none' " +
+        "stroke='" + stroke + "' stroke-width='${geometry.strokeWidth}' " +
+        "stroke-linecap='${geometry.linecap}' stroke-linejoin='${geometry.linejoin}'>" +
+        ${JSON.stringify(marks.dray.svg)} + "</svg>";
 
     public static readonly IReadOnlyDictionary<IconRef, string> SfSymbols = new Dictionary<IconRef, string>
     {

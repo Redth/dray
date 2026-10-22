@@ -196,7 +196,7 @@ public sealed class WinTray : IDisposable
     }
 
     /// <summary>
-    /// The container glyph, drawn from the sprite at the notification area's size for this display,
+    /// The Dray mark, drawn from the sprite at the notification area's size for this display,
     /// in the ink that reads on the taskbar. The taskbar has its own light or dark setting, apart
     /// from the apps' one, and the icon sits on the taskbar.
     /// </summary>
@@ -210,7 +210,7 @@ public sealed class WinTray : IDisposable
         using (var session = target.CreateDrawingSession())
         {
             session.Clear(Microsoft.UI.Colors.Transparent);
-            using var svg = CanvasSvgDocument.LoadFromXml(device, Icons.Svg(IconRef.Container, ink));
+            using var svg = CanvasSvgDocument.LoadFromXml(device, Icons.MarkSvg(ink));
             session.DrawSvg(svg, new Windows.Foundation.Size(size, size));
         }
 

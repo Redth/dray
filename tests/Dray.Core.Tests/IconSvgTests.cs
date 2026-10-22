@@ -39,4 +39,16 @@ public class IconSvgTests
         Assert.Equal(stroke, (string?)svg.Attribute("stroke"));
         Assert.Equal("none", (string?)svg.Attribute("fill"));
     }
+
+    /// <summary>The notification area draws the mark through Win2D, which is just as quiet about a bad document.</summary>
+    [Fact]
+    public void TheMarkIsAWellFormedSvgDocumentInTheHeadsStroke()
+    {
+        var stroke = DrayTokens.Light[DrayColor.Ink].ToHex();
+        var svg = XElement.Parse(Icons.MarkSvg(stroke));
+
+        Assert.Equal("http://www.w3.org/2000/svg", svg.Name.NamespaceName);
+        Assert.Equal(stroke, (string?)svg.Attribute("stroke"));
+        Assert.NotEmpty(svg.Elements());
+    }
 }
