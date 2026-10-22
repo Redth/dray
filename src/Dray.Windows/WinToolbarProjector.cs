@@ -19,6 +19,7 @@ public sealed class WinToolbarProjector : IDisposable
 {
     readonly Xaml.Controls.Grid _host;
     readonly Xaml.Controls.NavigationView _nav;
+    readonly Xaml.UIElement _content;
     readonly IShellState _shell;
     readonly IPlatformTheme _theme;
 
@@ -38,10 +39,12 @@ public sealed class WinToolbarProjector : IDisposable
     string? _backId;
     bool _disposed;
 
-    public WinToolbarProjector(Xaml.Controls.Grid host, Xaml.Controls.NavigationView nav, IShellState shell, IPlatformTheme theme)
+    public WinToolbarProjector(
+        Xaml.Controls.Grid host, Xaml.Controls.NavigationView nav, Xaml.UIElement content, IShellState shell, IPlatformTheme theme)
     {
         _host = host;
         _nav = nav;
+        _content = content;
         _shell = shell;
         _theme = theme;
 
@@ -226,8 +229,24 @@ public sealed class WinToolbarProjector : IDisposable
         };
 
         Xaml.Controls.ToolTipService.SetToolTip(button, action.Tooltip ?? action.Label);
-        button.Click += (_, _) => _shell.InvokeAction(id);
+        button.Click += (_, _) => InvokeAction(id);
         return button;
+    }
+
+    /// <summary>
+    /// Run a toolbar action with the keyboard in the content it acts on.
+    /// <para>
+    /// A WinUI button takes focus when it is clicked, and an NSToolbar button does not. Left there,
+    /// a dialog the page opens with <c>showModal()</c> focuses its own field inside a WebView that
+    /// does not have the keyboard: typing goes nowhere and Escape does not close it. Focus moves
+    /// first, so it is already in the page when the page responds. A native dialog the action
+    /// opens still takes focus for itself when it appears.
+    /// </para>
+    /// </summary>
+    void InvokeAction(string id)
+    {
+        _content.Focus(Xaml.FocusState.Programmatic);
+        _shell.InvokeAction(id);
     }
 
     /// <summary>
@@ -246,7 +265,7 @@ public sealed class WinToolbarProjector : IDisposable
 
         Xaml.Controls.ToolTipService.SetToolTip(button, action.Tooltip ?? action.Label);
         DimWhenDisabled(button);
-        button.Click += (_, _) => _shell.InvokeAction(id);
+        button.Click += (_, _) => InvokeAction(id);
         return button;
     }
 

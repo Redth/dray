@@ -114,7 +114,7 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
         (theme as WinTheme)?.Follow(nav);
 
         _sidebar = new WinSidebar(nav, shell, theme, debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
-        _toolbar = new WinToolbarProjector(toolbarRow, nav, shell, theme);
+        _toolbar = new WinToolbarProjector(toolbarRow, nav, _webView, shell, theme);
 
         services.GetRequiredService<WinShellReadySignal>().Attach(this);
 
