@@ -36,7 +36,7 @@ public static class WinPalette
     static bool _installed;
 
     /// <summary>The page's secondary button per theme, for <see cref="SecondaryDefault"/>.</summary>
-    static readonly Dictionary<DrayTheme, (WinColor Rest, WinColor PointerOver, WinColor Border, WinColor Text)> Secondary = new();
+    static readonly Dictionary<DrayTheme, (WinColor Fill, WinColor PointerOver, WinColor Border, WinColor Text)> Secondary = new();
 
     public static void Install(WinTheme theme)
     {
@@ -135,7 +135,7 @@ public static class WinPalette
             if (!Secondary.TryGetValue(t, out var s)) continue;
 
             var d = new Xaml.ResourceDictionary();
-            States(d, "AccentButtonBackground", s.Rest, s.PointerOver, s.PointerOver);
+            States(d, "AccentButtonBackground", s.Fill, s.PointerOver, s.PointerOver);
             States(d, "AccentButtonBorderBrush", s.Border, s.Border, s.Border);
             States(d, "AccentButtonForeground", s.Text, s.Text, s.Text);
             scope.ThemeDictionaries[WinTheme.DictionaryName(t)] = d;

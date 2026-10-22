@@ -298,6 +298,13 @@ public sealed class WinDialog(IServiceProvider services)
         readonly Xaml.Controls.ContentDialog _dialog;
         readonly DialogRequest _request;
         readonly DialogController _controller;
+
+        /// <summary>The dialog's queue, taken on the UI thread rather than read off the dialog later.</summary>
+        readonly Microsoft.UI.Dispatching.DispatcherQueue _queue;
+
+        /// <summary>A button press is being answered by the body; set and read on the UI thread.</summary>
+        bool _pressing;
+
         readonly DialogButton? _commit;
         readonly DialogButton? _other;
         readonly DialogButton? _cancel;
@@ -307,6 +314,7 @@ public sealed class WinDialog(IServiceProvider services)
             _dialog = dialog;
             _request = request;
             _controller = controller;
+            _queue = dialog.DispatcherQueue;
             (_commit, _other) = Slots(request);
             _cancel = request.ButtonList.Count == 1 ? request.ButtonList[0] : request.CancelButton;
 
@@ -339,9 +347,32 @@ public sealed class WinDialog(IServiceProvider services)
             if (_cancel is not null) _dialog.CloseButtonText = _request.Current(_cancel).Label;
         }
 
-        void OnChanged() => _dialog.DispatcherQueue.TryEnqueue(Apply);
+        void OnChanged() => _queue.TryEnqueue(Apply);
 
-        void OnCloseRequested() => _dialog.DispatcherQueue.TryEnqueue(_dialog.Hide);
+        /// <summary>
+        /// The body closing the dialog itself.
+        /// <para>
+        /// During a press, the press closes the frame when it returns (<see cref="Press"/>). That is
+        /// the common case — a sign-in or a create that closes once its work has succeeded — and
+        /// it arrives on whatever thread the body's work resumed on, where queueing to the UI
+        /// thread threw: the throw went back up into the body's close, and a sign-in that had worked
+        /// stayed on screen. Outside a press, the frame is hidden through the queue, and a failure to
+        /// reach it is logged rather than thrown at the body.
+        /// </para>
+        /// </summary>
+        void OnCloseRequested()
+        {
+            if (_pressing) return;
+
+            try
+            {
+                _queue.TryEnqueue(_dialog.Hide);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write($"[dray:dialog] '{_request.Title}' close: {ex}");
+            }
+        }
 
         void OnPrimary(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _commit);
 
@@ -354,9 +385,13 @@ public sealed class WinDialog(IServiceProvider services)
             if (button is null) return;
 
             var deferral = e.GetDeferral();
+            _pressing = true;
             try
             {
-                e.Cancel = !await _controller.PressAsync(button.Id);
+                // A body that finishes its work and closes itself during the press (a sign-in, once
+                // the helper has stored it) answers "stay open", because it has already closed. A
+                // settled controller never holds the frame open: the press closes it.
+                e.Cancel = !await _controller.PressAsync(button.Id) && !_controller.IsClosed;
             }
             catch (Exception ex)
             {
@@ -367,6 +402,7 @@ public sealed class WinDialog(IServiceProvider services)
             }
             finally
             {
+                _pressing = false;
                 deferral.Complete();
             }
         }
