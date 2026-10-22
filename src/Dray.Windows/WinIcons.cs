@@ -23,8 +23,12 @@ public static class WinIcons
     /// <summary>The size WinUI's own sidebar and command bar glyphs are drawn at.</summary>
     public const double Size = 16;
 
-    public static Xaml.Controls.ImageIcon Create(IconRef icon, DrayTheme theme)
-        => FromSvg(Icons.Svg(icon, DrayTokens.Get(theme, DrayColor.Ink).ToHex()), icon.ToString());
+    /// <summary>
+    /// <paramref name="icon"/> stroked in <paramref name="stroke"/>: ink by default, on-brand on the
+    /// accent button, where ink would be the one thing on the fill in neither of its colours.
+    /// </summary>
+    public static Xaml.Controls.ImageIcon Create(IconRef icon, DrayTheme theme, DrayColor stroke = DrayColor.Ink)
+        => FromSvg(Icons.Svg(icon, DrayTokens.Get(theme, stroke).ToHex()), icon.ToString());
 
     /// <summary>
     /// The app tile, at the size of every other icon in the chrome, for the title bar. In full

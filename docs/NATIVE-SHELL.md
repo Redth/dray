@@ -435,12 +435,12 @@ not been checked is everything that happens at runtime. §5.4 lists the claims t
 DrayWinApp (MAUI Application)
 └── Window — Mica backdrop where the OS has it
     ├── TitleBar (MAUI, 48 high)
-    │   └── TitleBarNavigation ──handler──▶ Back + pane toggle   WinTitleBar
+    │   ├── TitleBarNavigation  ──handler──▶ Back + pane toggle + app icon   WinTitleBar
+    │   ├── TitleBarPageLead    ──handler──▶ title, subtitle, filters        ┐ WinToolbarProjector:
+    │   └── TitleBarPageActions ──handler──▶ search, primary, commands       ┘ PageChrome
     └── ContentPage (transparent)
         └── NativeShell ──handler──▶ NavigationView          WinSidebar: items from NavigationManifest
-                                     └── Grid
-                                         ├── toolbar row     WinToolbarProjector: PageChrome
-                                         └── WebView2        + native ProgressRing until ready
+                                     └── WebView2            + native ProgressRing until ready
 ```
 
 MAUI has no element for a `NavigationView` with real items. Its `FlyoutPage` on Windows puts a MAUI
@@ -451,12 +451,22 @@ assets), so it stays a MAUI element and is converted with `ToPlatform`.
 
 | PageChrome | Windows |
 |---|---|
-| `Title`, `Subtitle` | Title and caption text at the leading edge of the toolbar row |
+| `Title`, `Subtitle` | In the title bar, straight after the app icon and over the sidebar, as a macOS unified toolbar shows the page's title. The window's own title stays "Dray" for the taskbar and Alt+Tab |
 | `Back` | WinUI's back button, in its own style, at the leading edge of the title bar beside the pane toggle, as in Settings and File Explorer. Shown only when the page declares one, its tooltip names the destination (`ChromeBack.Label`), and it invokes through `IShellState.InvokeAction`. The `NavigationView`'s own back and toggle are hidden: in the pane they took a row that came and went with the page and moved every sidebar item under the pointer |
 | `Filters` | `DropDownButton` with radio menu items |
 | `Search` | `AutoSuggestBox` |
-| Primary action | Accent button, text only (the accent fill is `--brand` through `WinPalette`, and an ink-stroked icon would match neither it nor its text) |
-| Other actions | `AppBarButton`s in a `CommandBar`, which folds them into overflow when the window is narrow |
+| Primary action | Accent button, icon only, stroked on-brand (the fill is `--brand` through `WinPalette`); its label is the tooltip and the accessible name |
+| Other actions | Icon-only `AppBarButton`s, 40 wide, in a `CommandBar`; the label is the tooltip, the accessible name and the overflow menu's text |
+
+The toolbar is the title bar's content, in two panels (`WinTitleBarToolbar`): the page's heading
+and filters as `Content`, hugging the leading edge, and search and actions as `TrailingContent`.
+Everything MAUI's title bar is given as content is a passthrough region, so one row stretched
+across the bar would leave nothing to drag the window by; the space between the panels is still
+title bar. MAUI sizes the trailing content to whatever it asks for, so the projector gives it what
+the leading panel leaves, in order: the command bar folds into its overflow menu (keeping the
+menu's button), the search box narrows to 140, then the title truncates. That fitting runs after
+layout against widths measured when the chrome changes. Measuring inside `LayoutUpdated` caused a
+layout cycle at narrow widths that took the app down.
 
 The rebuild rule is the one `MacToolbarProjector` uses: rebuild only when `PageChrome.Signature`
 changes, and update everything else in place.

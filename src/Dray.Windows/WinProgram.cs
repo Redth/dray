@@ -27,6 +27,8 @@ public static class WinProgram
         {
             handlers.AddHandler<NativeShell, NativeShellHandler>();
             handlers.AddHandler<TitleBarNavigation, TitleBarNavigationHandler>();
+            handlers.AddHandler<TitleBarPageLead, TitleBarPageLeadHandler>();
+            handlers.AddHandler<TitleBarPageActions, TitleBarPageActionsHandler>();
         });
 
         // The Blazor services components resolve: NavigationManager, IJSRuntime and the rest.
@@ -41,6 +43,7 @@ public static class WinProgram
         builder.Services.AddSingleton<NativeDialogState>();
         builder.Services.AddSingleton<IPlatformTheme, WinTheme>();
         builder.Services.AddSingleton<WinTitleBar>();
+        builder.Services.AddSingleton<WinTitleBarToolbar>();
 
         // The engine layer, same registrations as the other heads — less Apple's runtime, which has
         // no engine to find on this OS.

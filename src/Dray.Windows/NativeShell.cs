@@ -50,8 +50,8 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
 
     /// <summary>
     /// The margin content keeps from the edges of its pane. Pushed into CSS as
-    /// <c>--chrome-inset</c>, so the toolbar row above the WebView and the content inside it start
-    /// at the same x — one number, owned here, rather than two that happen to agree.
+    /// <c>--chrome-inset</c>, and followed by the page's title in the title bar, so the two start at
+    /// the same x — one number, owned here, rather than two that happen to agree.
     /// </summary>
     public const double ContentInset = 16;
 
@@ -87,11 +87,6 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
         var shell = services.GetRequiredService<IShellState>();
         var theme = services.GetRequiredService<IPlatformTheme>();
 
-        var toolbarRow = new Xaml.Controls.Grid
-        {
-            Padding = new Xaml.Thickness(ContentInset, 8, ContentInset - 8, 8),
-            MinHeight = 56,
-        };
 
         // Before ToPlatform, which is what starts the WebView initialising.
         WebViewSetup.SeedTheme(VirtualView.Body, theme);
@@ -106,23 +101,18 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
 
         // Clear of the pane's resize grip, which has to be beside the WebView to own the cursor.
         // The page's inset is the same amount smaller (WinTheme), so its content still starts
-        // where the toolbar row's does.
+        // where the page's title in the title bar does.
         var body = new Xaml.Controls.Grid { Margin = new Xaml.Thickness(WinPaneResizer.GripWidth, 0, 0, 0) };
         body.Children.Add(_webView);
         body.Children.Add(_loadingOverlay);
 
+        // The page's toolbar is in the title bar (WinTitleBarToolbar), so the WebView has the whole
+        // content area.
         var content = new Xaml.Controls.Grid();
-        content.RowDefinitions.Add(new Xaml.Controls.RowDefinition { Height = Xaml.GridLength.Auto });
-        content.RowDefinitions.Add(new Xaml.Controls.RowDefinition { Height = new Xaml.GridLength(1, Xaml.GridUnitType.Star) });
-        Xaml.Controls.Grid.SetRow(toolbarRow, 0);
-        Xaml.Controls.Grid.SetRow(body, 1);
-        content.Children.Add(toolbarRow);
         content.Children.Add(body);
 
         // Last, so it is above the WebView: the pane's edge is the content area's leading edge.
-        var resizer = new WinPaneResizer(nav);
-        Xaml.Controls.Grid.SetRowSpan(resizer, 2);
-        content.Children.Add(resizer);
+        content.Children.Add(new WinPaneResizer(nav));
 
         nav.Content = content;
         nav.Loaded += (_, _) =>
@@ -142,7 +132,7 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
         titleBar.Attach(nav);
 
         _sidebar = new WinSidebar(nav, shell, theme, debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
-        _toolbar = new WinToolbarProjector(toolbarRow, titleBar, _webView, shell, theme);
+        _toolbar = new WinToolbarProjector(services.GetRequiredService<WinTitleBarToolbar>(), titleBar, _webView, shell, theme);
 
         services.GetRequiredService<WinShellReadySignal>().Attach(this);
 
@@ -206,7 +196,7 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
     /// it is drawn under the title bar, and re-pads it whenever that height changes, even with
     /// <c>IsTitleBarAutoPaddingEnabled</c> off. MAUI already lays the page out below its title bar,
     /// so the padding left the content area a title bar's height lower than the sidebar beside it.
-    /// Held at zero, so the toolbar row starts where the sidebar does.
+    /// Held at zero, so the content area starts where the sidebar does.
     /// </summary>
     static void KeepContentUnderTitleBar(Xaml.FrameworkElement content)
     {
