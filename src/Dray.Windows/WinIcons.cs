@@ -24,6 +24,23 @@ public static class WinIcons
     public const double Size = 16;
 
     public static Xaml.Controls.ImageIcon Create(IconRef icon, DrayTheme theme)
+        => FromSvg(Icons.Svg(icon, DrayTokens.Get(theme, DrayColor.Ink).ToHex()), icon.ToString());
+
+    /// <summary>
+    /// The app tile, at the size of every other icon in the chrome, for the title bar. In full
+    /// colour, as the taskbar shows it, so it is the same in both themes. Drawn by
+    /// <c>build/gen-app-icon.mjs</c> and embedded rather than shipped as a file, so there is no path
+    /// for an unpackaged app to get wrong.
+    /// </summary>
+    public static Xaml.Controls.ImageIcon AppTile()
+    {
+        using var stream = typeof(WinIcons).Assembly.GetManifestResourceStream("TitleBarIcon.svg")
+            ?? throw new InvalidOperationException("TitleBarIcon.svg is not embedded. Run: node build/gen-app-icon.mjs");
+        using var reader = new StreamReader(stream);
+        return FromSvg(reader.ReadToEnd(), "app tile");
+    }
+
+    static Xaml.Controls.ImageIcon FromSvg(string svg, string name)
     {
         var source = new SvgImageSource();
         var image = new Xaml.Controls.ImageIcon
@@ -57,14 +74,12 @@ public static class WinIcons
             if (image.XamlRoot is { } root) root.Changed -= OnRootChanged;
         };
 
-        _ = LoadAsync(source, icon, theme);
+        _ = LoadAsync(source, svg, name);
         return image;
     }
 
-    static async Task LoadAsync(SvgImageSource source, IconRef icon, DrayTheme theme)
+    static async Task LoadAsync(SvgImageSource source, string svg, string name)
     {
-        var svg = Icons.Svg(icon, DrayTokens.Get(theme, DrayColor.Ink).ToHex());
-
         try
         {
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(svg));
@@ -73,11 +88,11 @@ public static class WinIcons
             // SvgImageSource reports a document it cannot draw as a status, not an exception — and
             // draws nothing. Logged so a blank icon has a cause somewhere.
             if (status != SvgImageSourceLoadStatus.Success)
-                CrashLog.Write($"[dray:icon] {icon} did not render: {status}");
+                CrashLog.Write($"[dray:icon] {name} did not render: {status}");
         }
         catch (Exception ex)
         {
-            CrashLog.Write($"[dray:icon] {icon} failed: {ex.Message}");
+            CrashLog.Write($"[dray:icon] {name} failed: {ex.Message}");
         }
     }
 }

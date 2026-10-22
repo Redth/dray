@@ -586,6 +586,14 @@ stroke falls under a pixel and the mark dissolves. The PNGs are committed and st
 what drew them; `--check` fails when the mark or the palette moves on without them. A dark master
 (`design/brand/app-icon-dark.svg`) is drawn for the first head that takes an appearance variant.
 
+Windows gets the same tile in its own frame: no shadow and no margin, because Windows icons fill
+their square. It is packed into `Dray.ico`, the exe's icon, which the taskbar, Alt+Tab and toasts
+all read, and MAUI sets the window's icon from it. The title bar shows the tile at 16 effective
+pixels before the name, where Windows draws an app's icon until the app takes its title bar over.
+That copy is an SVG, so it stays sharp at any scale, and the DevHost uses the same file as its
+favicon. The tile is in full colour in both themes, as it is on the taskbar. Only the
+notification-area icon is drawn as a monochrome mark.
+
 **Anti-brief, stated plainly:** no whale, no shipping container, no cargo ship, no hexagon-and-node
 network diagram, no blue. The category reflex is Docker-blue-and-whale; the reflex one tier down is
 terminal-black-and-phosphor-green. Both are refused, on purpose.

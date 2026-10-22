@@ -74,10 +74,24 @@ public sealed class WinTitleBar(IShellState shell)
         };
         row.Children.Add(_back);
         row.Children.Add(_toggle);
+        row.Children.Add(BuildAppIcon());
 
         ApplyBack();
         ApplyToggle();
         return row;
+    }
+
+    /// <summary>
+    /// The app's icon before its name, where every Windows title bar has one — the system draws it
+    /// there itself until an app takes the title bar over, as this one does. Decorative: "Dray" is
+    /// beside it, so a screen reader is not told twice.
+    /// </summary>
+    static Xaml.FrameworkElement BuildAppIcon()
+    {
+        var icon = WinIcons.AppTile();
+        icon.VerticalAlignment = Xaml.VerticalAlignment.Center;
+        Xaml.Automation.AutomationProperties.SetAccessibilityView(icon, Xaml.Automation.Peers.AccessibilityView.Raw);
+        return icon;
     }
 
     void ApplyBack()

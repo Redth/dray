@@ -31,6 +31,10 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <ApplicationManifest>Platforms\Windows\app.manifest</ApplicationManifest>
 
+    <!-- The exe's Win32 icon: Explorer, the taskbar, Alt+Tab and toasts read it from here, and MAUI
+         gives the window the exe's icon. Drawn by build/gen-app-icon.mjs; DESIGN.md section 10. -->
+    <ApplicationIcon>Platforms\Windows\Dray.ico</ApplicationIcon>
+
     <ApplicationTitle>Dray</ApplicationTitle>
     <ApplicationId>codes.redth.dray</ApplicationId>
     <ApplicationDisplayVersion>$(AppVersion)</ApplicationDisplayVersion>
@@ -63,6 +67,9 @@
     <PackageReference Include="Microsoft.Maui.DevFlow.Agent" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="Microsoft.Maui.DevFlow.Blazor" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Condition="'$(Configuration)' == 'Debug'" />
+
+    <!-- The same tile at title-bar size (WinIcons.AppTile), as an SVG so it is sharp at any scale. -->
+    <EmbeddedResource Include="Platforms\Windows\TitleBarIcon.svg" LogicalName="TitleBarIcon.svg" />
 
     <ProjectReference Include="../Dray.Ui/Dray.Ui.csproj" />
     <ProjectReference Include="../Dray.Docker/Dray.Docker.csproj" />
