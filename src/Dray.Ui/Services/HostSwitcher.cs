@@ -42,4 +42,34 @@ public sealed class HostSwitcher(EngineManager engine, IShellBridge shell)
         await engine.SelectAsync(hostId);
         return null;
     }
+
+    /// <summary>
+    /// What an engine is, in the words that decide whether it is the one wanted: the kind of
+    /// container it runs, then its state when that is anything but connected — or what choosing it
+    /// will do, when that is switch or start Docker Desktop. Words throughout, never a colour, so
+    /// every picker reads the same in greyscale and high contrast (DESIGN.md 2.4). One sentence for
+    /// every head's picker, so they cannot describe one engine two ways.
+    /// </summary>
+    public string Describe(DockerHost host)
+    {
+        if (engine.SwitchNeededFor(host) is { } mode) return $"Switch Docker Desktop to {DockerDesktop.Label(mode)}";
+        if (engine.StartNeededFor(host)) return "Docker Desktop is not running";
+
+        var kind = host.Capabilities.ContainerOs switch
+        {
+            Dray.Core.Model.ContainerOs.Linux => "Linux containers",
+            Dray.Core.Model.ContainerOs.Windows => "Windows containers",
+            _ => host.DesktopMode is { } desktop ? DockerDesktop.Label(desktop) : host.Endpoint.Display,
+        };
+
+        return host.State switch
+        {
+            HostConnectionState.Connected => kind,
+            HostConnectionState.Connecting => $"{kind} · connecting",
+            HostConnectionState.Degraded => $"{kind} · degraded",
+            HostConnectionState.Unreachable => $"{kind} · unreachable",
+            _ when host.StartsOnConnect => $"{kind} · starts when chosen",
+            _ => kind,
+        };
+    }
 }

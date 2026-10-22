@@ -42,7 +42,7 @@
                     @foreach (var route in routes)
                     {
                         <Track @key="route.Id" Route="route" Alternatives="@(routes.Count > 1)"
-                               Running="_running" OutputFor="_outputFor" Output="_output" StartedAt="_startedAt"
+                               Running="@_running" OutputFor="@_outputFor" Output="_output" StartedAt="_startedAt"
                                OnRun="RunAsync" />
                     }
                 }
@@ -70,7 +70,7 @@
                     @foreach (var route in WindowsSetupPlan.WindowsRoutes(state))
                     {
                         <Track @key="route.Id" Route="route"
-                               Running="_running" OutputFor="_outputFor" Output="_output" StartedAt="_startedAt"
+                               Running="@_running" OutputFor="@_outputFor" Output="_output" StartedAt="_startedAt"
                                OnRun="RunAsync" />
                     }
                 }
@@ -190,7 +190,7 @@
 
         if (_result.Succeeded && step.Distro is { } distro && step.Id.StartsWith("engine.", StringComparison.Ordinal))
         {
-            await Engine.SelectAsync("wsl:" + distro);
+            await Engine.ConnectNowAsync("wsl:" + distro);
         }
 
         // Re-read rather than assume the step worked. A step needing a restart has changed nothing
@@ -226,7 +226,7 @@
 
     async Task<SetupStepResult> ConnectAsync(SetupStep step)
     {
-        await Engine.SelectAsync("wsl:" + step.Distro);
+        await Engine.ConnectNowAsync("wsl:" + step.Distro);
         return new SetupStepResult(true, false, $"Connecting to the engine in {step.Distro}.");
     }
 

@@ -97,3 +97,30 @@
         text-indent: -100em;
     }
 }
+
+.sidebar__picker {
+    padding: 0 var(--s2) var(--s2);
+    margin-bottom: var(--s1);
+    border-bottom: 1px solid var(--line);
+}
+
+/* In the rail the picker is its icon, like every item below it; which engine moves to the tooltip
+   and stays in the accessible name. */
+@media (max-width: 52rem) {
+    .sidebar__picker {
+        padding: 0 0 var(--s2);
+    }
+
+    ::deep .picker {
+        justify-content: center;
+    }
+
+    ::deep .picker__text {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+    }
+}

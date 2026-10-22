@@ -214,6 +214,17 @@ public sealed class EngineManager : IAsyncDisposable
     public Task SelectAsync(string hostId, CancellationToken ct = default)
         => SelectCoreAsync(hostId, remember: true, force: false, ct);
 
+    /// <summary>
+    /// Select a host and connect to it now, even if it is already selected.
+    /// <para>
+    /// For when something has just made it reachable — setup started the engine in a distribution,
+    /// say. Selecting an already-selected host is otherwise a no-op, and the screen would stay
+    /// "unreachable" until the pump's backoff came round to trying again.
+    /// </para>
+    /// </summary>
+    public Task ConnectNowAsync(string hostId, CancellationToken ct = default)
+        => SelectCoreAsync(hostId, remember: true, force: true, ct);
+
     /// <param name="remember">Whether this was the user's choice, as opposed to Dray's fallback.</param>
     /// <param name="force">
     /// Reconnect even if this host is already selected. After Docker Desktop switches mode, the

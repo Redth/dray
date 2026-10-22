@@ -1,5 +1,4 @@
 using Dray.Core.Engine;
-using Dray.Core.Model;
 using Dray.Core.Navigation;
 using Dray.Core.Shell;
 using Dray.Ui.Services;
@@ -116,33 +115,7 @@ public sealed class WinSidebar : IDisposable
         Xaml.Controls.ToolTipService.SetToolTip(_picker, selected is null ? "Choose an engine" : $"{selected.Name} — {Describe(selected)}");
     }
 
-    /// <summary>
-    /// What an engine is, in the words that decide whether it is the one wanted: the kind of
-    /// container it runs, then its state when that is anything but connected. Words throughout,
-    /// never a colour, so the picker reads the same in high contrast (DESIGN.md 2.4).
-    /// </summary>
-    string Describe(DockerHost host)
-    {
-        if (_engine.SwitchNeededFor(host) is { } mode) return $"Switch Docker Desktop to {DockerDesktop.Label(mode)}";
-        if (_engine.StartNeededFor(host)) return "Docker Desktop is not running";
-
-        var kind = host.Capabilities.ContainerOs switch
-        {
-            ContainerOs.Linux => "Linux containers",
-            ContainerOs.Windows => "Windows containers",
-            _ => host.DesktopMode is { } desktop ? DockerDesktop.Label(desktop) : host.Endpoint.Display,
-        };
-
-        return host.State switch
-        {
-            HostConnectionState.Connected => kind,
-            HostConnectionState.Connecting => $"{kind} · connecting",
-            HostConnectionState.Degraded => $"{kind} · degraded",
-            HostConnectionState.Unreachable => $"{kind} · unreachable",
-            _ when host.StartsOnConnect => $"{kind} · starts when chosen",
-            _ => kind,
-        };
-    }
+    string Describe(DockerHost host) => _switcher.Describe(host);
 
     /// <summary>
     /// The list of engines, built when it opens so it is never stale. Each is a radio item: one

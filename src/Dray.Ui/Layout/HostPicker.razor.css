@@ -1,0 +1,50 @@
+/* Shaped like a nav item, because it sits above them and does the same kind of thing — chooses what
+   the rest of the window is about — but with two lines, because which engine is not enough without
+   what kind of container it runs. */
+.picker {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    width: 100%;
+    padding: var(--s2);
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--motion-fast) var(--motion-ease);
+}
+
+.picker:hover {
+    background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+
+.picker:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+}
+
+.picker__text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.picker__name,
+.picker__detail {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.picker__detail {
+    font-size: var(--text-xs);
+    color: var(--muted);
+}
+
+.picker__problem {
+    margin: var(--s1) var(--s2) 0;
+    font-size: var(--text-xs);
+    color: var(--danger-ink);
+}
