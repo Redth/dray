@@ -49,12 +49,21 @@ public static class WinProgram
         // no engine to find on this OS.
         builder.Services.AddSingleton<IDockerConfigSource, SystemDockerConfigSource>();
         builder.Services.AddSingleton<DockerContextReader>();
+        builder.Services.AddSingleton<DockerDesktop>();
+        builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
         builder.Services.AddSingleton<WindowsSetupReader>();
+        builder.Services.AddSingleton<MacSetupReader>();
+        builder.Services.AddSingleton<LinuxSetupReader>();
         builder.Services.AddSingleton<SetupStepRunner>();
+        builder.Services.AddSingleton<WslAccount>();
         builder.Services.AddSingleton<DockerCliContext>();
         builder.Services.AddSingleton<IContainerRuntimeFactory>(
             new CompositeRuntimeFactory(new DockerRuntimeFactory()));
         builder.Services.AddSingleton<EngineManager>();
+
+        // Singleton like the bridge it confirms through: the native sidebar's picker uses it, and
+        // the sidebar outlives any page.
+        builder.Services.AddSingleton<HostSwitcher>();
         // Scoped: it holds one live stream per watched container and must go away with the view
         // that asked for them.
         builder.Services.AddScoped<StatsHub>();

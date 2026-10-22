@@ -34,14 +34,18 @@ sealed class ProcessRelayStream : WriteClosableStream
     readonly Stream _input;
     readonly Stream _output;
     readonly StringBuilder _errors = new();
-    readonly string _describe;
+    readonly RelayCommand _command;
+    readonly Task _drained;
 
     bool _disposed;
 
-    ProcessRelayStream(Process process, string describe)
+    /// <summary>Whether the relay has produced a single byte of response yet.</summary>
+    bool _answered;
+
+    ProcessRelayStream(Process process, RelayCommand command)
     {
         _process = process;
-        _describe = describe;
+        _command = command;
         _input = process.StandardInput.BaseStream;
         _output = process.StandardOutput.BaseStream;
 
@@ -51,7 +55,7 @@ sealed class ProcessRelayStream : WriteClosableStream
         //
         // The second is that the explanation lives here. When a distribution has no docker binary,
         // the failure the HTTP layer sees is an empty stream; the sentence saying why is on stderr.
-        _ = DrainErrorsAsync();
+        _drained = DrainErrorsAsync();
     }
 
     public static ProcessRelayStream Start(RelayCommand command)
@@ -82,7 +86,7 @@ sealed class ProcessRelayStream : WriteClosableStream
                 $"Could not reach {command.Describe}: {command.FileName} could not be started. {ex.Message}", ex);
         }
 
-        return new ProcessRelayStream(process, command.Describe);
+        return new ProcessRelayStream(process, command);
     }
 
     /// <summary>What the relay said on standard error, trimmed, or null when it said nothing.</summary>
@@ -159,13 +163,50 @@ sealed class ProcessRelayStream : WriteClosableStream
         set => throw new NotSupportedException();
     }
 
-    public override int Read(byte[] buffer, int offset, int count) => _output.Read(buffer, offset, count);
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        var read = _output.Read(buffer, offset, count);
 
-    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
-        => _output.ReadAsync(buffer, ct);
+        if (read > 0)
+        {
+            _answered = true;
+            return read;
+        }
+
+        if (!_answered && count > 0) throw ExplainAsync().GetAwaiter().GetResult();
+
+        return 0;
+    }
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+    {
+        var read = await _output.ReadAsync(buffer, ct).ConfigureAwait(false);
+
+        if (read > 0)
+        {
+            _answered = true;
+            return read;
+        }
+
+        // End of stream before any response: the relay gave up. Left alone, the HTTP layer reports
+        // this as a malformed response, which says nothing. The reason is on stderr — "docker:
+        // not found", "connection refused" on the socket — so it is waited for and said instead.
+        if (!_answered && buffer.Length > 0) throw await ExplainAsync().ConfigureAwait(false);
+
+        return 0;
+    }
 
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
-        => _output.ReadAsync(buffer, offset, count, ct);
+        => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+
+    async Task<RuntimeConnectionException> ExplainAsync()
+    {
+        // stderr closes when the relay exits, which it is doing. Bounded, because a relay that has
+        // closed stdout and kept stderr open must not hang the connection it already failed.
+        await Task.WhenAny(_drained, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+
+        return new RuntimeConnectionException(RelayCommands.Explain(_command, Diagnostic));
+    }
 
     public override void Write(byte[] buffer, int offset, int count) => _input.Write(buffer, offset, count);
 
@@ -210,5 +251,5 @@ sealed class ProcessRelayStream : WriteClosableStream
         base.Dispose(disposing);
     }
 
-    public override string ToString() => $"relay to {_describe}";
+    public override string ToString() => $"relay to {_command.Describe}";
 }

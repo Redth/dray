@@ -36,3 +36,15 @@
     margin: 0 0 var(--s3);
     font-size: var(--text-sm);
 }
+
+/* Why a host is down, under its name. Wrapped rather than truncated: it is the one sentence on the
+   row that says what to do, and an ellipsis would cut off the half that does. */
+.hosts__detail {
+    max-width: 60ch;
+    font-size: var(--text-sm);
+    white-space: normal;
+}
+
+.hosts__transition {
+    margin-top: var(--s4);
+}

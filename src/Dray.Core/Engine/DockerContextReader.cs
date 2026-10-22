@@ -223,6 +223,7 @@ public sealed class DockerContextReader(IDockerConfigSource source)
                     : "WSL2 distribution, stopped — connecting will start it",
                 Endpoint = endpoint,
                 Origin = HostOrigin.WslDistro,
+                StartsOnConnect = !distro.IsRunning,
             });
         }
 

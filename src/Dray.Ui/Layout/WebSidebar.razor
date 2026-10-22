@@ -8,6 +8,12 @@
         <span>Dray</span>
     </div>
 
+    @* First in the sidebar, above the navigation: which engine is selected decides what every page
+       below it shows (DESIGN.md section 5). *@
+    <div class="sidebar__picker">
+        <HostPicker />
+    </div>
+
     <ul class="sidebar__list">
         @foreach (var node in NavigationManifest.Visible(Caps.IsDebugBuild))
         {

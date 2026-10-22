@@ -55,9 +55,10 @@ Dray drives an engine that is already running. It does not ship a runtime or pro
 connects to Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman's Docker-compatible socket, a
 bare `dockerd`, a WSL2 distro, or a remote host — through the same API.
 
-The one place it touches the machine rather than the engine is Windows setup (§2.4b), where it will
-run a documented command — after showing it — to enable a Windows feature or install WSL. It still
-does not install an engine.
+Where it touches the machine rather than the engine is setup (§2.4b): with nothing to connect to, it
+installs what the user chooses — WSL and a distribution, Docker's engine inside it, a Windows
+feature, Docker Desktop — by running the vendor's own documented command, shown first and run only
+when asked (PRODUCT.md). It installs engines; it never ships or repackages one.
 
 ```csharp
 public interface IContainerRuntime
@@ -133,8 +134,14 @@ forwards its Linux API to that exact name. So discovery offers the pipe and `/in
 settles what was behind it. That is why `ContainerOs` is a probed capability rather than something
 inferred from the endpoint, and why `Unknown` is a real value that must never collapse into Linux.
 
-Dray installs none of this. It is a client (§2.1), so what it owes the user is an honest account of
-the choice — which is what the first-run state says when nothing is found.
+It is also why **two hosts can be one engine**, and the picker decides that by `/info`'s `ID` rather
+than by address. With Docker Desktop installed, `docker_engine` (and the CLI's implicit `default`
+context on it) is whichever of `desktop-linux` and `desktop-windows` is current — measured: the same
+engine ID comes back from both. `EngineManager.CanonicalFor` hides the alias and keeps the name that
+does not change meaning on a switch, and the named pipes are probed once at start-up so this holds
+from the first frame rather than after the Hosts page has been opened.
+
+What to install, when nothing answers, is §2.4b.
 
 #### What actually differs under a Windows engine
 
@@ -204,10 +211,31 @@ matters less than it sounds like it should, because the expensive things here ar
 ones — the event stream, a log follow, a stats stream — and each of those is a single connection
 held open for as long as it is watched.
 
-**Verified.** The transport was exercised end to end against a real engine on macOS, with `docker
-system dial-stdio` standing in for the WSL launcher — the mechanism is identical and only the
-program differs. Version and info probes, container and image lists, a hijacked exec with its exit
-code, the archive endpoint streaming a tar, and a held-open stats stream all work through it.
+**The raw API goes through the relay too.** `DockerRawApi` — the second HTTP client, for the
+Inspect tab's engine JSON and `system df` — is built during connect, and it used to refuse `wsl://`
+and `ssh://` outright. Version and info would come back through the relay and then the connection
+would fail, so no WSL or SSH host could ever connect. It is now a `SocketsHttpHandler` whose
+`ConnectCallback` starts the same relay process. Pooling is harmless there: it only ever GETs.
+
+**Why a relay failed is read off its stderr** (`RelayCommands.Explain`), because the HTTP layer only
+sees an empty stream. The strings matched are the ones a real Ubuntu 26.04 and `wsl.exe` 2.6 wrote:
+
+| stderr | Means |
+|---|---|
+| `execvpe(docker) failed: No such file or directory` | Docker is not installed in the distro |
+| `dial unix /var/run/docker.sock: connect: connection refused` | Installed, engine not running |
+| `There is no distribution with the supplied name` (UTF-16 — the relay does not set `WSL_UTF8`) | The distro is gone |
+
+**Verified on Windows, against a real `wsl.exe`.** Ubuntu 26.04 with Docker 29.9 inside it: connect,
+container list, and the event stream held open through the relay — a container started from inside
+the distro appeared in the store without a re-fetch. A request on a warm distro costs about 175 ms,
+almost all of it `wsl.exe` starting. Before that, the transport was exercised on macOS with `docker
+system dial-stdio` standing in for the WSL launcher: a hijacked exec with its exit code, the archive
+endpoint streaming a tar, and a held-open stats stream.
+
+A stopped distribution boots when it is connected to, so it is connected to only when chosen.
+`DockerHost.StartsOnConnect` keeps the Hosts page's probe from booting every distribution on the
+machine to fill in a column.
 
 Distro enumeration is `wsl.exe --list --verbose` with `WSL_UTF8=1`, which is the only way to get
 UTF-8 out of it; builds that predate that variable write UTF-16LE, which arrives with a NUL after
@@ -226,18 +254,46 @@ say which engine you are looking at.
 > native-filesystem distinction is the top cause of "why is this so slow" on Windows and no GUI
 > surfaces it today.
 
-### 2.4b Windows setup, and the one switch worth having
+### 2.4b Windows setup, and switching engines
 
-**Dray has no Windows-container mode, and should not grow one.** Both of Docker Desktop's engines
-run at once, each on its own pipe — `dockerDesktopLinuxEngine` and `dockerDesktopWindowsEngine` —
-and containers started in either keep running across a switch. Switching only changes which engine
-the *default* pipe and CLI context resolve to. Since Dray addresses engines by endpoint and its host
-picker is the first control in the sidebar, both simply appear as two hosts. The picker is the
-switch, and unlike Docker Desktop's it stops nothing.
+**Docker Desktop runs one engine at a time.** This section used to say the opposite — that both ran
+at once and a switch stopped nothing — and the picker was designed on it. Measured on Docker Desktop
+with the WSL2 backend: in Windows mode the Linux pipe exists and does not answer; after `docker
+desktop engine use linux` the Windows pipe returns HTTP 500. Both pipes always exist, which is what
+made the inactive engine look broken rather than switched off.
 
-Docker Desktop normally registers both as the `desktop-linux` and `desktop-windows` contexts, which
-discovery reads. Both pipes are probed anyway, because it does not always manage to create
-`desktop-windows`, and a pipe that is not there just fails to connect.
+So Dray models the mode rather than pretending there is none. `DockerDesktop` reads and drives it
+through Docker Desktop's own CLI (4.37+), parsing `--format json`:
+
+| | Command | Measured |
+|---|---|---|
+| Running? | `docker desktop status` | ~110 ms; says `starting` for a second after a switch, which counts as up |
+| Which mode | `docker desktop engine ls` | ~110 ms |
+| Switch | `docker desktop engine use linux\|windows` | 11 s to Linux, 3 s back; returns once the new engine answers |
+| Start | `docker desktop start` | waits for the engine unless `--detach` |
+
+Each engine keeps its own host, matched to its mode by its pipe's name (`DockerHost.DesktopMode`).
+The host picker is still the switch, but now it says what switching costs. Choosing the inactive
+engine asks first — "Switching stops its Windows containers engine, and every container running on it
+stops too" — in the same confirmation every stop uses, then switches Docker Desktop and selects the
+engine that comes up. One place decides this (`HostSwitcher`), so the sidebar and the Hosts page
+cannot disagree. While a switch runs, `EngineManager.Transition` says so in both, because eleven
+seconds with nothing on screen reads as a hang.
+
+The inactive engine's row says why it is down in words that say what choosing it will do, instead of
+showing the 500. And a remembered selection that Docker Desktop has since switched away from — from
+its own tray menu — opens on the engine that is running instead, rather than on an empty app.
+
+**The picker is the first item in the sidebar** (DESIGN.md §5). On Windows it is a navigation item
+showing the selected engine and what kind of container it runs, and invoking it opens a menu of every
+engine. It is an item that opens a menu rather than a combo box because it survives the pane
+collapsing to icons. The choice is remembered (`IHostSelectionStore`), so the app opens where it was
+left rather than wherever the CLI's current context points.
+
+Every head has one, all saying the same sentence per engine (`HostSwitcher.Describe`). On Windows
+it is a `NavigationViewItem` with a `MenuFlyout`. On the web it is `HostPicker` on the shared
+`OverflowMenu`. On macOS it is the first `MacOSSidebarItem`, popping up an `NSMenu`; that version
+has not been built yet, because the macOS head only compiles on a Mac.
 
 **What the user still needs is for their terminal to agree with the screen**, and that is a Docker
 context rather than a mode. `DockerCliContext` creates one if there is not one already, and points
@@ -253,7 +309,86 @@ address — the reason Dray relays into it in the first place — so there is no
 context. The panel says where the command already works instead.
 
 **Guided setup** (`WindowsSetupPlan`) is two independent tracks, because they are two independent
-engines: someone who only wants Linux containers is never shown a Windows feature to enable.
+engines: someone who only wants Linux containers is never shown a Windows feature to enable. Each
+track offers **routes** side by side, because the user is choosing between them:
+
+- **Linux containers — Docker Engine in WSL.** Install WSL (elevated, restart) → install Ubuntu →
+  create your account (optional) → install Docker Engine in it → connected. Each step appears once
+  the one before it is done. Recommended when Docker Desktop is not installed: free for any use, and
+  nothing else runs in the background.
+- **Linux containers — Docker Desktop.** Install it (winget), start it, or switch it to Linux,
+  whichever is missing. Recommended when it is already installed, because then it is one action away.
+- **Windows containers.** The Containers feature (DISM, elevated), then an engine: Docker Desktop
+  switched to Windows mode, or on Windows Server, Microsoft's `install-docker-ce.ps1`. Windows Home
+  gets an explanation instead of steps — it has neither Hyper-V nor the feature.
+
+What each step does, as measured on this machine:
+
+- **Ubuntu** is `wsl --install Ubuntu --no-launch`, **not elevated**: a distribution is registered
+  to the user who installs it, and an administrator prompt answered with another account installs it
+  for that account. `--no-launch` keeps Ubuntu's own first run from opening a console to ask for a
+  username. Redirected, it prints three lines in about eight minutes, so the step says so beforehand
+  and shows elapsed time while it runs.
+- **The account** is created from a native form (`WslAccount`). Ubuntu's first run looks for a uid
+  of 1000 or more with a real shell, finds it, and skips its own prompt. The password reaches
+  `chpasswd` on stdin and nowhere else. `wsl --exec` searches a PATH without `/usr/sbin`, so
+  `chpasswd` runs through `sh -c`.
+- **Docker Engine** is Docker's own `get.docker.com` script, run as the distribution's root and shown
+  whole before it runs. It takes about a minute, including a twenty-second pause on WSL to suggest
+  Docker Desktop. It adds the first ordinary user to the `docker` group. Current Ubuntu already has
+  systemd, so the engine starts with the distribution; where it is missing the script enables it and
+  Dray restarts the distribution once.
+- **Keeping it running.** WSL stops a distribution about fifteen seconds after its last `wsl.exe`
+  client exits, and a running container does not count — measured: a container was gone within
+  eighteen seconds of the terminal closing. So an engine in WSL ran only while something happened to
+  be attached. `[general] instanceIdleTimeout=-1` in `%USERPROFILE%\.wslconfig` stops that, measured
+  on WSL 2.6. Once a Linux engine in WSL answers, setup offers it as the last step (`WslConfig`).
+  It writes only that key, keeping everything else in the file, then runs `wsl --shutdown` once so
+  it applies, and Dray reconnects. It is WSL-wide, so it is offered and explained, never set
+  quietly.
+- **What is inside a distribution** — engine none, stopped or running, and whether an account exists
+  — is one `key=value` probe script, run only when no Linux engine answers. It boots the
+  distribution, so it is never run for the sake of it.
+
+Steps that need Dray itself elevated run in their own window. Everything else runs inside Dray with
+its output streamed into the page, because those are the long ones and their output is the only sign
+they are moving.
+
+**macOS and Linux get the same treatment** (`MacSetupPlan`, `LinuxSetupPlan`), shown by the same
+`EngineSetup` panel:
+
+- **macOS** offers Colima, OrbStack and Docker Desktop side by side, with an installed one first.
+  Homebrew's installer and Docker Desktop's cask ask for a password, so they run in a new Terminal
+  window, where the password prompt belongs to the system and never to Dray. Everything else runs
+  in-app, by full path, with Homebrew's `bin` on `PATH`; an app opened from the Finder has neither,
+  and `colima start` runs `limactl` by name. Without Homebrew, OrbStack and Docker Desktop are
+  downloads from their makers' sites. When a step succeeds and the selected engine is not
+  answering, Dray connects to the CLI's current context, which Colima and OrbStack set as they
+  start.
+- **Docker Desktop on a Mac** is driven through `DockerDesktop`, as on Windows, minus the modes: it
+  has one engine, so `docker desktop engine` does not exist there and there is nothing to switch.
+  Its socket, `~/.docker/run/docker.sock`, is Docker Desktop's own and maps to its Linux engine the
+  way each pipe maps to one on Windows. A stopped Docker Desktop is started with
+  `docker desktop start` — from the picker or from setup — which returns once the engine answers,
+  and Dray connects then. The CLI is the one inside `Docker.app`, which has the `desktop` plugin
+  whatever `docker` is first on `PATH`.
+- **Linux** installs Docker's engine with Docker's script through polkit (`pkexec`), whose dialog
+  asks for the password and leaves the output for Dray to show. Then it starts the engine, then adds
+  the user to the `docker` group. Without polkit, Dray has no honest way to ask, so it shows the
+  `sudo` command to copy.
+
+The macOS head has run on a Mac, against Docker Desktop; Linux has not run on its platform. The
+plans and readers are unit-tested, and `/gallery` renders every platform's routes so each can be
+reviewed from any machine.
+
+**A Mac app opened from the Finder has launchd's `PATH`** — `/usr/bin:/bin:/usr/sbin:/sbin` — and
+none of the commands Dray runs is on it: not `docker` or its compose and buildx plugins, not the
+credential helpers, not Apple's `container`. Measured: compose detection found nothing under that
+`PATH`. Run from a terminal, the app inherits the shell's and the problem is invisible. So the
+macOS head appends, before anything is discovered, the system's own list (`/etc/paths`,
+`/etc/paths.d`, what `path_helper` gives a login shell) and the directories the engines install
+into (`MacSearchPath`). A login shell is not asked: that would run the user's shell configuration
+inside the app's launch.
 
 Every check is non-elevated. The authoritative reads need administrator, and prompting on every
 launch to answer a question nobody has asked yet is worse than not knowing — so `SetupFact.Unknown`
@@ -265,7 +400,7 @@ The signal that overrides all inference is an engine answering. A machine where 
 container already work is shown no checklist, whatever the feature probes concluded.
 
 Elevation means `UseShellExecute`, which means the child's output cannot be redirected — so each
-step runs in its own visible window. A platform constraint that happens to be the right behaviour:
+elevated step runs in its own visible window. A platform constraint that happens to be the right behaviour:
 the command is shown before it runs, and its output is visible while it does. DISM's 3010 is treated
 as success-plus-restart rather than as failure, and a dismissed UAC prompt is a decision rather than
 an error.
@@ -280,6 +415,27 @@ Running stacks are discovered from the `com.docker.compose.project`, `.service`,
 `.project.config_files` labels on containers, so a stack started from a terminal appears in Dray
 automatically. User-added compose files are tracked separately so a stack that is *down* is still
 visible — the thing Docker Desktop gets wrong.
+
+**Compose acts on the engine selected in Dray.** It used to be run with no target, so it acted on
+the CLI's current context instead. With Ubuntu selected and the CLI on Docker Desktop, Up would have
+started the stack on Docker Desktop. `ComposeCli.Invocation` now decides the target:
+
+- **Addressable engines** (sockets, pipes, TCP, SSH): this machine's compose, with
+  `DOCKER_HOST` set to the CLI's form of the endpoint, plus `DOCKER_TLS_VERIFY`/`DOCKER_CERT_PATH`
+  for TLS. `DOCKER_HOST` rather than `--context`, because every form compose ships in honours it
+  and no context has to exist.
+- **An engine in a WSL distribution**: the distribution's own compose, `wsl.exe -d <distro> --cd
+  <recorded dir> --exec docker compose …`, as its default user. A Windows compose cannot reach that
+  socket, and the paths compose recorded are Linux paths that only resolve in there.
+- **Apple's engine**: none.
+
+Whether a compose exists for an engine is measured once per host, when it first connects, and
+recorded as `SupportsCompose`. The runtime cannot answer it, since compose is a client and `/info`
+has no opinion, and leaving it false made every engine claim it could not run a stack.
+
+A WSL stack's files are opened from Windows through `\\wsl.localhost\<distro>\…`, or straight from
+the drive for a `/mnt/c/…` project (`EnginePaths`). Opened as recorded, every WSL stack's compose
+file read as missing.
 
 ### 2.6 What a real non-Docker engine actually does
 

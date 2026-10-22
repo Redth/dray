@@ -707,6 +707,13 @@ textarea,
   color: var(--ok-ink);
 }
 
+/* Something in progress — Docker Desktop switching engines. Neither failure nor success, so it is
+   neither tone: a switch drawn in danger pink reads as one that has already gone wrong. */
+.banner--info {
+  background: var(--neutral-tint);
+  color: var(--neutral-ink);
+}
+
 /* The shell every detail page shares: a header of facts, then a body that scrolls on its own.
    Container detail and volume detail are the same shape, and were the same stylesheet copied
    twice until the second one arrived without it. */

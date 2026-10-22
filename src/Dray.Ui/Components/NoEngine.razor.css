@@ -11,13 +11,13 @@
 }
 
 .noengine__options dt {
-    font-weight: var(--weight-medium);
+    font-weight: 500;
 }
 
 .noengine__options dd {
     margin: var(--s1) 0 var(--s4);
     font-size: var(--text-sm);
-    color: var(--text-secondary);
+    color: var(--muted);
 }
 
 .noengine__options dd:last-of-type {

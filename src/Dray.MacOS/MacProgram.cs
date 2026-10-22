@@ -57,11 +57,17 @@ public static class MacProgram
         // it: the pages are shared, so a service missing on one head is a DI failure on that head
         // rather than a hidden panel. Each reports "not applicable" off Windows.
         builder.Services.AddSingleton<WindowsSetupReader>();
+        builder.Services.AddSingleton<MacSetupReader>();
+        builder.Services.AddSingleton<LinuxSetupReader>();
         builder.Services.AddSingleton<SetupStepRunner>();
+        builder.Services.AddSingleton<WslAccount>();
         builder.Services.AddSingleton<DockerCliContext>();
+        builder.Services.AddSingleton<DockerDesktop>();
+        builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
         builder.Services.AddSingleton<IContainerRuntimeFactory>(
             new CompositeRuntimeFactory(new AppleRuntimeFactory(), new DockerRuntimeFactory()));
         builder.Services.AddSingleton<EngineManager>();
+        builder.Services.AddSingleton<HostSwitcher>();
         // Scoped: it holds one live stream per watched container and must go away with the view
         // that asked for them.
         builder.Services.AddScoped<StatsHub>();

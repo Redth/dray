@@ -20,12 +20,17 @@ builder.Services.AddSingleton<IPlatformTheme, GeneratedPaletteTheme>();
 builder.Services.AddSingleton<IDockerConfigSource, SystemDockerConfigSource>();
 builder.Services.AddSingleton<DockerContextReader>();
 
-// Windows setup and CLI-context help. Registered everywhere rather than behind an OS check: each
-// reports "not applicable" off Windows, and a service that exists only on one platform is one the
+// Engine setup for every platform, and CLI-context help. Registered everywhere rather than behind an
+// OS check: each reads only its own platform, and a service that exists only on one platform is one the
 // pages have to guard around.
 builder.Services.AddSingleton<WindowsSetupReader>();
+builder.Services.AddSingleton<MacSetupReader>();
+builder.Services.AddSingleton<LinuxSetupReader>();
 builder.Services.AddSingleton<SetupStepRunner>();
+builder.Services.AddSingleton<WslAccount>();
 builder.Services.AddSingleton<DockerCliContext>();
+builder.Services.AddSingleton<DockerDesktop>();
+builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
 // Two engines behind one seam. The composite dispatches on the endpoint's scheme, so an Apple
 // host in the picker gets Apple's runtime and everything else gets Docker's — and no page above
 // this line knows either exists.
@@ -42,6 +47,9 @@ builder.Services.AddSingleton<RegistryReader>();
 builder.Services.AddScoped<WebConfirmService>();
 builder.Services.AddScoped<WebDialogService>();
 builder.Services.AddScoped<IShellBridge, WebShellBridge>();
+
+// Scoped because the bridge it confirms through is.
+builder.Services.AddScoped<HostSwitcher>();
 
 var app = builder.Build();
 

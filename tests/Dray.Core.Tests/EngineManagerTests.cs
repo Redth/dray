@@ -255,6 +255,9 @@ sealed class FakeRuntimeFactory : IContainerRuntimeFactory
 
     public Dictionary<string, Exception> Failures { get; } = [];
 
+    /// <summary>The engine id each endpoint answers with, for the tests about two hosts being one engine.</summary>
+    public Dictionary<string, string> EngineIds { get; } = [];
+
     public List<TrackedRuntime> Created { get; } = [];
 
     public bool Handles(DockerEndpoint endpoint) => true;
@@ -265,6 +268,7 @@ sealed class FakeRuntimeFactory : IContainerRuntimeFactory
         {
             Containers = Containers.GetValueOrDefault(endpoint.Raw, []),
             ConnectFailure = Failures.GetValueOrDefault(endpoint.Raw),
+            EngineId = EngineIds.GetValueOrDefault(endpoint.Raw),
         };
 
         Created.Add(runtime);
@@ -286,11 +290,13 @@ sealed class TrackedRuntime(string endpoint) : StubRuntime
 
     public Exception? ConnectFailure { get; init; }
 
+    public string? EngineId { get; init; }
+
     public override Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default)
     {
         if (ConnectFailure is not null) throw ConnectFailure;
 
-        Capabilities = new RuntimeCapabilities { ApiVersion = "1.45", Flavor = EngineFlavor.Docker };
+        Capabilities = new RuntimeCapabilities { ApiVersion = "1.45", Flavor = EngineFlavor.Docker, EngineId = EngineId };
         return Task.FromResult(Capabilities);
     }
 

@@ -351,6 +351,13 @@ sealed class FakeConfigSource : IDockerConfigSource
         return this;
     }
 
+    /// <summary>A directory, which is how a Mac application bundle is found.</summary>
+    public FakeConfigSource WithDirectory(string path)
+    {
+        _dirs.Add(Normalize(path));
+        return this;
+    }
+
     public FakeConfigSource WithEnvironment(string name, string value)
     {
         _env[name] = value;
