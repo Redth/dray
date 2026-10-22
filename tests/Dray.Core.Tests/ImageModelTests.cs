@@ -166,6 +166,7 @@ public class NetworkSummaryTests
     [InlineData("host")]
     [InlineData("none")]
     [InlineData("podman")]
+    [InlineData("nat")]
     public void TheEnginesOwnNetworksAreMarked(string name)
     {
         // Offering Remove on one is offering a button that always fails.

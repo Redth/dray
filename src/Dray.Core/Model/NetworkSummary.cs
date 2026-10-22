@@ -42,9 +42,10 @@ public sealed record NetworkSummary
 
     /// <summary>
     /// The engine's own networks, which exist whether or not anyone wants them and cannot be
-    /// removed. Offering Delete on one is offering a button that always fails.
+    /// removed. Offering Delete on one is offering a button that always fails. <c>nat</c> is a
+    /// Windows engine's counterpart of <c>bridge</c>: the network every container joins by default.
     /// </summary>
-    public bool IsPredefined => Name is "bridge" or "host" or "none" or "podman";
+    public bool IsPredefined => Name is "bridge" or "host" or "none" or "podman" or "nat";
 }
 
 /// <summary>
