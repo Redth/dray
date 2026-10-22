@@ -72,8 +72,11 @@
     flex: 0 0 auto;
 }
 
+/* Sized by its options rather than in characters. A select's arrow takes a width that differs by
+   platform, and at 7ch Windows' wider arrow left room for "tc". */
 .pe__proto-select {
-    width: 7ch;
+    width: auto;
+    min-width: 7ch;
     flex: 0 0 auto;
 }
 

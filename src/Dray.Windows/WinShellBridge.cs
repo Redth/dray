@@ -96,14 +96,16 @@ public sealed class WinShellBridge(IServiceProvider services) : IShellBridge
             if (options.SuggestedName is { } name) picker.SuggestedFileName = Path.GetFileNameWithoutExtension(name);
 
             // The save picker refuses to open without at least one file type. The declared ones
-            // first, then the suggested name's own, then "." — the picker's spelling of any file,
-            // which is what saving a file out of a container needs when it has no extension.
+            // first, then the suggested name's own, then ".". There is no spelling for "any file":
+            // "*" and ".*" throw, and "." lists only names without an extension while saving the
+            // name exactly as typed. So it is labelled for what it does, which is also what saving
+            // an extensionless file out of a container needs.
             List<string> extensions = options.Extensions is { Count: > 0 } declared
                 ? declared.Select(Dotted).ToList()
                 : Path.GetExtension(options.SuggestedName) is { Length: > 1 } own ? [own] : [];
 
             foreach (var extension in extensions) picker.FileTypeChoices.Add(extension.TrimStart('.').ToUpperInvariant(), [extension]);
-            picker.FileTypeChoices.Add("All files", ["."]);
+            picker.FileTypeChoices.Add("Name as typed", ["."]);
 
             var path = (await picker.PickSaveFileAsync())?.Path;
 

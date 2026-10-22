@@ -257,6 +257,13 @@ else if (_results.Count > 0)
         _layers.Clear();
         _order.Clear();
 
+        // The suggestions have done their job. Left open they sit above the layer progress and push
+        // it out of a dialog body whose height is fixed — the pull ran with nothing to show for it.
+        _searchCts?.Cancel();
+        _results = [];
+        _searchError = null;
+        _searching = false;
+
         _cts = new CancellationTokenSource();
 
         // Started from the head's button as well as from Enter, and only an event handler re-renders
