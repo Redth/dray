@@ -324,7 +324,15 @@ public sealed class WinDialog(IServiceProvider services)
 
         void OnChanged() => _dialog.DispatcherQueue.TryEnqueue(Apply);
 
-        void OnCloseRequested() => _dialog.DispatcherQueue.TryEnqueue(_dialog.Hide);
+        // Set while a button press is being answered. A body that closes itself then is closed by
+        // the press finishing uncancelled: a Hide while the press holds its deferral is swallowed,
+        // and leaves the dialog open with its work done.
+        bool _pressing;
+
+        void OnCloseRequested() => _dialog.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_pressing) _dialog.Hide();
+        });
 
         void OnPrimary(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _commit);
 
@@ -337,9 +345,16 @@ public sealed class WinDialog(IServiceProvider services)
             if (button is null) return;
 
             var deferral = e.GetDeferral();
+            _pressing = true;
             try
             {
-                e.Cancel = !await _controller.PressAsync(button.Id);
+                var close = await _controller.PressAsync(button.Id);
+
+                // A body that closes itself during the press (a create that succeeded) answers
+                // "keep open" to the press and "close" to the dialog. The press is what closes it
+                // then; cancelling it left the network created and the dialog open, its Create
+                // button live for a second one.
+                e.Cancel = !close && !_controller.IsClosed;
             }
             catch (Exception ex)
             {
@@ -350,6 +365,7 @@ public sealed class WinDialog(IServiceProvider services)
             }
             finally
             {
+                _pressing = false;
                 deferral.Complete();
             }
         }
