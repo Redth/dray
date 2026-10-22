@@ -100,11 +100,22 @@ public static class Icons
     /// <summary>Adwaita icon name, for GTK chrome.</summary>
     public static string GtkName(IconRef icon) => GtkNames[icon];
 
-    /// <summary>
-    /// Sprite fragment id for the WebView (and for Windows chrome, which renders the same
-    /// geometry rather than guessing at Segoe Fluent codepoints).
-    /// </summary>
+    /// <summary>Sprite fragment id, for the WebView.</summary>
     public static string SpriteId(IconRef icon) => "i-" + SpriteSlugs[icon];
+
+    /// <summary>
+    /// The sprite geometry as a standalone SVG document, stroked in <paramref name="stroke"/>.
+    /// <para>
+    /// For Windows chrome, which renders the same geometry rather than guessing at Segoe Fluent
+    /// codepoints. A native image has no <c>currentColor</c> to inherit, so the head passes the
+    /// colour it resolved from the generated palette for the theme it is drawing.
+    /// </para>
+    /// </summary>
+    public static string Svg(IconRef icon, string stroke) =>
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='${geometry.viewBox}' fill='none' " +
+        "stroke='" + stroke + "' stroke-width='${geometry.strokeWidth}' " +
+        "stroke-linecap='${geometry.linecap}' stroke-linejoin='${geometry.linejoin}'>" +
+        SvgBodies[icon] + "</svg>";
 
     public static readonly IReadOnlyDictionary<IconRef, string> SfSymbols = new Dictionary<IconRef, string>
     {
@@ -114,6 +125,11 @@ ${table('sf')}
     public static readonly IReadOnlyDictionary<IconRef, string> GtkNames = new Dictionary<IconRef, string>
     {
 ${table('gtk')}
+    };
+
+    static readonly IReadOnlyDictionary<IconRef, string> SvgBodies = new Dictionary<IconRef, string>
+    {
+${table('svg')}
     };
 
     internal static readonly IReadOnlyDictionary<IconRef, string> SpriteSlugs = new Dictionary<IconRef, string>

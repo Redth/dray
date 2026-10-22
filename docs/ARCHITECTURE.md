@@ -8,8 +8,8 @@ Dray.sln
 │   ├── Dray.Core/            net10.0    domain, state store, services, nav manifest — no UI, no Docker
 │   ├── Dray.Docker/          net10.0    IContainerRuntime implemented over the Docker Engine API
 │   ├── Dray.Ui/              net10.0    Razor Class Library — ALL Blazor pages, components, wwwroot
-│   ├── Dray.App/             MAUI       shared app model + the Windows head
 │   ├── Dray.MacOS/           net10.0-macos      AppKit head
+│   ├── Dray.Windows/         net10.0-windows    WinUI head (namespace Dray.WinUI)
 │   ├── Dray.LinuxGtk/        net10.0            GTK4 head
 │   └── Dray.Cli/             net10.0    optional `dray` CLI over the same Core
 └── tests/

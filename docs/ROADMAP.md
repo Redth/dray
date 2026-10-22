@@ -54,8 +54,15 @@ places that pattern frays. The work here is re-expressing the proven mechanics a
 
 **Progress:** Core abstractions, the RCL, the component kit, `Dray.DevHost` and the **macOS head**
 are done — native `NSOutlineView` sidebar and `NSToolbar` both projected from the manifest and from
-`PageChrome`, with the theme handoff verified in light and dark. Windows and GTK heads are next.
-Greyscale and both-theme checks pass on `/gallery`.
+`PageChrome`, with the theme handoff verified in light and dark. Greyscale and both-theme checks
+pass on `/gallery`.
+
+**The Windows head is written but has not run.** It has a WinUI `NavigationView` sidebar built from
+the manifest, a native toolbar row projected from `PageChrome`, `ContentDialog` dialogs with Blazor
+bodies, a transparent WebView2 on Mica, and the token handoff read from WinUI's own theme
+dictionaries. Every file compiles against the real Windows reference assemblies with warnings as
+errors. Nothing has been seen on screen. docs/NATIVE-SHELL.md §5.4 lists what to verify first. The
+GTK head is next.
 
 Since built on top of that:
 
@@ -73,11 +80,12 @@ and you cannot see where native chrome ends and the WebView begins.
 app launches with networking disabled · no route, nav entry, icon or colour is declared in more than
 one place.
 
-> **Windows and GTK4 heads are deferred.** Neither can be run or verified on the development
-> machine, so writing them now would produce untested code whose first real check is CI. The seams
-> they need — `NavigationManifest`, `PageChrome`, `IconRef`, `IShellBridge`, `IPlatformTheme` — are
-> all in place and exercised by the macOS head and `Dray.DevHost`, so adding a head later is
-> additive rather than structural. Picked up when there is a machine to run them on.
+> **The GTK4 head is deferred.** It cannot be run or verified on the development machine. The
+> seams it needs — `NavigationManifest`, `PageChrome`, `IconRef`, `IShellBridge`, `IPlatformTheme`
+> — are all in place and exercised by the other heads, so adding it later is additive rather than
+> structural. The Windows head was written ahead of a Windows machine, so it could be finished in one
+> session on one. It is the precedent for what "written but not run" has to come with: a compile
+> check against the platform's real assemblies, and a written list of runtime claims to verify.
 
 ---
 
@@ -622,9 +630,10 @@ Dray-prefixed twin of every engine.
 A `wsl://` host gets no button, because its socket has no Windows-side address — the panel says
 where the command already works instead of offering one that cannot.
 
-**What is not done:** the WinUI head. The engine layer is head-agnostic and every part of it above
-is covered by tests that run on any platform, but Dray still has no window on Windows. Nor does
-Dray install an engine, which is deliberate rather than pending.
+**What is not done:** running it. The engine layer is head-agnostic and every part of it above is
+covered by tests that run on any platform. The WinUI head now exists (Phase 1), but it has not been
+run on a Windows machine, so none of this has been seen in a Windows window. Dray also does not
+install an engine, which is deliberate rather than pending.
 
 ---
 

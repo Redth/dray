@@ -1,0 +1,76 @@
+<Project>
+
+  <!-- Explicit SDK imports rather than Sdk="…" on the root element, so the no-op targets at the
+       bottom can be imported after the SDK's own and replace them. -->
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk.Razor" />
+
+  <!--
+    The Windows head builds on Windows and is inert everywhere else.
+
+    A WinUI app cannot be built off Windows at all: the XAML compiler, MakePri and the Windows App
+    SDK's packaging tasks are Windows executables. Worse, restoring a UseMaui project with a Windows
+    TFM on macOS or Linux fails outright, because the maui-windows workload does not exist there.
+    So off Windows this is a plain net10.0 project with nothing to restore and a Build target that
+    does nothing, and `dotnet build` of the whole solution keeps working on every OS — which is what
+    lets CI's three-OS matrix build one solution rather than three hand-kept project lists.
+  -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('windows'))">
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+
+    <!-- Unpackaged: the exe runs as built, with no MSIX install step between a build and a run.
+         Phase 7 adds the MSIX and winget packaging alongside, not instead. -->
+    <WindowsPackageType>None</WindowsPackageType>
+
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <ApplicationManifest>Platforms\Windows\app.manifest</ApplicationManifest>
+
+    <ApplicationTitle>Dray</ApplicationTitle>
+    <ApplicationId>codes.redth.dray</ApplicationId>
+    <ApplicationDisplayVersion>$(AppVersion)</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('windows'))">
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Not Dray.Windows. Inside a namespace of that name, every `Windows.Storage`,
+         `Windows.UI.Color` and `Windows.System.Launcher` binds to Dray.Windows first and fails to
+         resolve — the reason MAUI's own templates put Windows code in a .WinUI namespace. -->
+    <RootNamespace>Dray.WinUI</RootNamespace>
+    <EnableDefaultCssItems>false</EnableDefaultCssItems>
+    <EnableDefaultRazorItems>false</EnableDefaultRazorItems>
+  </PropertyGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('windows'))">
+    <PackageReference Include="Microsoft.Maui.Controls" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
+
+    <!-- MAUI DevFlow: screenshots and Blazor DOM snapshots of the running app, driven by
+         `dotnet maui devflow`. Debug only; never shipped. -->
+    <PackageReference Include="Microsoft.Maui.DevFlow.Agent" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Microsoft.Maui.DevFlow.Blazor" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Condition="'$(Configuration)' == 'Debug'" />
+
+    <ProjectReference Include="../Dray.Ui/Dray.Ui.csproj" />
+    <ProjectReference Include="../Dray.Docker/Dray.Docker.csproj" />
+  </ItemGroup>
+
+  <!-- Off Windows nothing here compiles: the sources name WinUI types that do not exist. -->
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('windows'))">
+    <Compile Remove="**/*.cs" />
+    <Content Remove="**/*" />
+    <None Remove="**/*" />
+  </ItemGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk.Razor" />
+
+  <Import Project="../../build/SkipHeadOnOtherOS.targets"
+          Condition="!$([MSBuild]::IsOSPlatform('windows'))" />
+
+</Project>
