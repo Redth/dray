@@ -110,7 +110,7 @@ public sealed class DrayWinApp(IServiceProvider services) : Application
             return;
         }
 
-        native.SystemBackdrop = new Xaml.Media.MicaBackdrop();
+        native.SystemBackdrop = new DrayMica();
         WinBackdrop.IsMica = true;
 
         // MAUI's root view paints the page background over whatever the window has behind it.
