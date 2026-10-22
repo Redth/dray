@@ -512,7 +512,17 @@ applies all of the following to every WebView2, including the dialog bodies:
 - **No password autosave or autofill.** Otherwise WebView2 would offer to save a registry password
   into its own profile on disk, which breaks docs/CREDENTIALS.md.
 - **User data under `%LOCALAPPDATA%\Dray\WebView2`.** The default location is beside the exe, which
-  is read-only under Program Files, and WebView2 fails to start there without saying why.
+  is read-only under Program Files, and WebView2 fails to start there without saying why. Set
+  through the loader's `WEBVIEW2_USER_DATA_FOLDER`, not `BlazorWebViewInitializing`: MAUI 10.0.100
+  builds an environment from that event's `UserDataFolder` and `EnvironmentOptions`, then calls
+  `EnsureCoreWebView2Async()` without it, so neither reaches the browser. Until that was found the
+  profile was in fact beside the exe. Check with the browser process's command line
+  (`--user-data-dir`), not with the event.
+- **Overlay scrollbars.** `--enable-features=OverlayScrollbar`, through
+  `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` for the same reason. Chromium's default bar has arrow
+  buttons and a gutter that takes width from every scroller. Edge's own
+  `msOverlayScrollbarWinStyle` changed nothing on runtime 155. With the overlay, a scroller's
+  `clientWidth` equals its `offsetWidth`.
 
 `WinTheme` reads WinUI's theme dictionaries by name for an explicit theme (`"Default"` is WinUI's
 name for dark), not through `Application.Resources[key]`: that answers for the theme the app

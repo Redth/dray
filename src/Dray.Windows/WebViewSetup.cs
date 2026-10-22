@@ -107,13 +107,30 @@ public static class WebViewSetup
                 webView.DefaultBackgroundColor = Microsoft.UI.Colors.Transparent;
         };
 
-        view.BlazorWebViewInitializing += (_, e) =>
-        {
-            Directory.CreateDirectory(UserDataFolder);
-            e.UserDataFolder = UserDataFolder;
-        };
-
         view.BlazorWebViewInitialized += (_, e) => Configure(e);
+    }
+
+    /// <summary>
+    /// The browser environment's settings, for every WebView in the process. Call once, before any
+    /// WebView exists.
+    /// <para>
+    /// Not through <c>BlazorWebViewInitializing</c>: MAUI 10.0.100 raises it and builds an
+    /// environment from its <c>UserDataFolder</c> and <c>EnvironmentOptions</c>, then calls
+    /// <c>EnsureCoreWebView2Async()</c> without that environment, so the control creates a default
+    /// one and neither setting reaches the browser. The profile ended up beside the executable.
+    /// These variables are the WebView2 loader's own overrides, and a default environment reads them.
+    /// </para>
+    /// </summary>
+    public static void ConfigureEnvironment()
+    {
+        Directory.CreateDirectory(UserDataFolder);
+        Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", UserDataFolder);
+
+        // Overlay scrollbars: thin, drawn over the content and only while scrolling, as WinUI's own
+        // are. The default is Chromium's classic bar, with arrow buttons and a gutter that takes
+        // width from every scrolling region, and is the clearest sign of a web page. Edge's
+        // msOverlayScrollbarWinStyle has no effect on runtime 155; this one does.
+        Environment.SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--enable-features=OverlayScrollbar");
     }
 
     static void Configure(BlazorWebViewInitializedEventArgs e)

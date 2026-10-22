@@ -23,6 +23,9 @@ public partial class App : MauiWinUIApplication
         // XAML callback crosses back into the framework here, and nowhere else reports it.
         UnhandledException += (_, e) => CrashLog.Report("XAML", e.Exception);
 
+        // Read when the first WebView's environment is created, so before anything can create one.
+        WebViewSetup.ConfigureEnvironment();
+
         InitializeComponent();
     }
 
