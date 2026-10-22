@@ -160,6 +160,19 @@ public sealed class WinTheme : IPlatformTheme
     }
 
     /// <summary>
+    /// The colour of a <c>ContentDialog</c>'s content section in the current theme:
+    /// <c>ContentDialogTopOverlay</c> (<c>LayerFillColorAlt</c>) over <c>ContentDialogBackground</c>
+    /// (<c>SolidBackgroundFillColorBase</c>), composited to opaque. What a dialog body's WebView has
+    /// to paint to be indistinguishable from the dialog around it. Null if either is missing.
+    /// </summary>
+    public WinColor? DialogBodyGround()
+    {
+        var dictionary = Current == DrayTheme.Dark ? "Default" : "Light";
+        if (ThemeColor(dictionary, "SolidBackgroundFillColorBase") is not { } ground) return null;
+        return ThemeColor(dictionary, "LayerFillColorAlt") is { } top ? Over(top, ground) : ground;
+    }
+
+    /// <summary>
     /// A colour from WinUI's theme dictionaries, for a theme named explicitly.
     /// <para>
     /// Looked up by theme rather than through <c>Application.Resources[key]</c>, which answers for

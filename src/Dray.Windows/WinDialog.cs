@@ -40,6 +40,36 @@ public sealed class WinDialog(IServiceProvider services)
         _ => (560, 320),
     };
 
+    const string EscapeMessage = "dray:dialog-escape";
+
+    /// <summary>
+    /// Keys a ContentDialog handles that never reach it from a WebView body. Chromium consumes
+    /// every key while the body has focus, so Escape did nothing at all once a field had been typed
+    /// into. Unhandled by the page (a combobox closing its list claims it first), it is passed to
+    /// the host, which closes the dialog the way Escape would: through <c>Closing</c>, where the
+    /// body can still refuse. The body's first field is focused once it renders, which is what
+    /// showModal() did for the web dialog this replaced.
+    /// </summary>
+    const string BodyKeys = $$"""
+        addEventListener('keydown', e => {
+          if (e.key === 'Escape' && !e.defaultPrevented) window.chrome.webview.postMessage('{{EscapeMessage}}');
+        });
+        (() => {
+          const field = () => document.querySelector(
+            '[autofocus], input:not([type=hidden]):not([disabled]):not([readonly]), textarea:not([disabled]), select:not([disabled])');
+          const focus = el => { if (!document.activeElement || document.activeElement === document.body) el.focus(); };
+          const observer = new MutationObserver(() => {
+            const el = field();
+            if (el) { observer.disconnect(); focus(el); }
+          });
+          addEventListener('DOMContentLoaded', () => {
+            const el = field();
+            if (el) focus(el); else observer.observe(document.body, { childList: true, subtree: true });
+            setTimeout(() => observer.disconnect(), 5000);
+          });
+        })();
+        """;
+
     public async Task<string?> ShowAsync(DialogRequest request, CancellationToken ct = default)
     {
         await Gate.WaitAsync(ct);
@@ -98,8 +128,31 @@ public sealed class WinDialog(IServiceProvider services)
         });
         WebViewSetup.Apply(webView);
 
+        // The dialog's document has no PlatformThemeSync of its own, so without this the body
+        // renders in the generated palette rather than the Windows one around it.
+        var theme = services.GetRequiredService<IPlatformTheme>();
+        WebViewSetup.SeedTheme(webView, theme);
+
+        Xaml.Controls.ContentDialog? shown = null;
+        webView.BlazorWebViewInitialized += (_, e) =>
+        {
+            var core = e.WebView.CoreWebView2;
+            _ = core.AddScriptToExecuteOnDocumentCreatedAsync(BodyKeys);
+            core.WebMessageReceived += (_, m) =>
+            {
+                if (m.TryGetWebMessageAsString() == EscapeMessage) shown?.Hide();
+            };
+        };
+
         var (width, height) = SizeOf(request.Size);
         var body = (Xaml.FrameworkElement)webView.ToPlatform(context);
+
+        // A transparent WebView inside a dialog would show the window behind the dialog, and the
+        // default ground WinUI substitutes is the button row's grey, not the white of the section
+        // the body sits in. Its ground is that section's colour instead: WinUI resolves this
+        // resource as the browser's base when the controller is created, which is still to come.
+        if (theme is WinTheme win && win.DialogBodyGround() is { } ground && body is Xaml.Controls.WebView2 platform)
+            platform.Resources["SolidBackgroundFillColorBase"] = ground;
         body.Width = width;
         body.Height = height;
 
@@ -125,6 +178,13 @@ public sealed class WinDialog(IServiceProvider services)
         // ContentDialog caps its width well under a Large body; lifted for this dialog only.
         dialog.Resources["ContentDialogMaxWidth"] = width + 48;
         dialog.Resources["ContentDialogMaxHeight"] = height + 240;
+
+        shown = dialog;
+
+        // The keyboard goes to the body, as it does when a web dialog opens with showModal(): the
+        // ContentDialog would otherwise keep it on its own first control, and typing would go
+        // nowhere until the field was clicked.
+        dialog.Opened += (_, _) => body.Focus(Xaml.FocusState.Programmatic);
 
         var map = Map(request, dialog);
         if (request.ButtonList.Any(b => b.Role == DialogButtonRole.Destructive)) WinDanger.Style(dialog);
