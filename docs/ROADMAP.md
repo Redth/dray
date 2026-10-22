@@ -644,15 +644,31 @@ Dray-prefixed twin of every engine.
 A `wsl://` host gets no button, because its socket has no Windows-side address — the panel says
 where the command already works instead of offering one that cannot.
 
+**Since then, verified on this machine:**
+
+- **The setup UI was clicked through.** In the Windows head (Release, via UI Automation): the
+  picker, choosing a WSL engine, and the Docker Desktop switch with its confirmation. In DevHost
+  (driven over CDP): Start Docker in a distro, the account dialog, and Keep it running. This found
+  that **every setup button had always been disabled**: `Running="_running"` binds the literal text
+  to a string parameter.
+- **An engine in WSL stopped whenever nothing was attached.** WSL ends a distribution about fifteen
+  seconds after its last client, and containers do not count. Setup now offers
+  `instanceIdleTimeout=-1` once such an engine answers; measured to keep the distribution and its
+  containers up.
+- **Compose acted on the CLI's context, not the selected engine,** and `SupportsCompose` was never
+  set. It now targets the selected engine, and runs inside the distribution for a WSL engine.
+  Verified: a stack in Ubuntu stopped and started through Dray, and its compose file opened from
+  Windows.
+- **Install help on macOS and Linux exists** (Colima, OrbStack and Docker Desktop on macOS; Docker
+  Engine through polkit on Linux), as has a host picker in the web head.
+
 **What is not done:**
 
-- **The setup UI has not been driven in the Windows head.** The engine layer was run for real through
-  a harness. The pages and the native picker build, but have not been clicked through with DevFlow.
-- **Install help on macOS and Linux.** PRODUCT.md commits to it on every platform. The plan is Colima
-  or Docker Desktop via Homebrew on macOS, Apple's `container` where the machine can run it, and the
-  distribution's own Docker packages on Linux. None of it exists yet.
-- **The macOS head's picker.** The shared `HostSwitcher` is registered there, but `MacSidebar` has no
-  picker item yet.
+- **Nothing here has run on a Mac or a Linux desktop.** The macOS sidebar picker has not even been
+  compiled — the head builds only on macOS. The macOS and Linux setup plans are unit-tested and
+  reviewed in `/gallery`, but no step has executed on either platform.
+- **The Windows head was not driven with DevFlow**, because another worktree's Debug instance held
+  its port and log file. It was driven in a Release build through UI Automation and screen capture.
 - **Windows Server's engine script** (`install-docker-ce.ps1`) is the command Microsoft documents. It
   has not been run on a Server machine.
 - Showing which distro a bind mount lives in (`/mnt/c` versus native) is still outstanding from Phase 2.

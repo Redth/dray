@@ -84,6 +84,10 @@ public sealed class WindowsSetupReader(
             Desktop = await _desktop.ReadAsync(ct).ConfigureAwait(false),
             IsHomeEdition = isHome,
             IsServer = isServer,
+            LinuxEngineInWsl = hosts.Any(h => h.State == HostConnectionState.Connected
+                && h.Capabilities.ContainerOs == Model.ContainerOs.Linux
+                && h.Endpoint.Scheme == EndpointScheme.Wsl),
+            KeepsDistributionsRunning = WslConfig.KeepsDistributionsRunning(ReadWslConfig()),
         };
 
         // Looking inside a distribution boots it, so it is done only when the answer decides what
@@ -91,6 +95,24 @@ public sealed class WindowsSetupReader(
         return !state.HasLinuxEngine && state.TargetDistro is { } target
             ? state with { Target = await ProbeDistroAsync(target, ct).ConfigureAwait(false) }
             : state;
+    }
+
+    /// <summary>The user's .wslconfig, or null when there is none.</summary>
+    string? ReadWslConfig()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrEmpty(profile)) return null;
+
+        var path = WslConfig.PathFor(profile);
+
+        try
+        {
+            return _source.FileExists(path) ? _source.ReadAllText(path) : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>What is inside <paramref name="distro"/>. Unknown rather than a failure when it could not be asked.</summary>

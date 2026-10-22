@@ -44,6 +44,12 @@ public enum SetupStepKind
     Connect,
 
     /// <summary>
+    /// Turn on the WSL setting that keeps distributions running with nothing attached, in the
+    /// user's .wslconfig, then restart WSL once so it applies (<see cref="WslConfig"/>).
+    /// </summary>
+    WslSetting,
+
+    /// <summary>
     /// Run in a new Terminal window on macOS. For an installer that asks for the user's password at
     /// its own prompt — Homebrew's, a cask with a privileged helper — which needs a terminal to ask
     /// in, and which Dray must never be the one to collect.
@@ -215,6 +221,22 @@ public sealed record WindowsSetupState(
     /// <summary>Windows Server, where Windows containers have an engine of their own to install.</summary>
     public bool IsServer { get; init; }
 
+    /// <summary>Whether the Linux engine that answered lives in a WSL distribution of the user's own.</summary>
+    public bool LinuxEngineInWsl { get; init; }
+
+    /// <summary>
+    /// Whether WSL keeps a distribution running with nothing attached (<see cref="WslConfig"/>).
+    /// Without it an engine in WSL stops, and every container with it, about fifteen seconds after
+    /// the last terminal closes.
+    /// </summary>
+    public bool KeepsDistributionsRunning { get; init; }
+
+    /// <summary>
+    /// A Linux engine answers from WSL, but WSL will stop it as soon as nothing is attached. The
+    /// one thing left to do on a working Linux track.
+    /// </summary>
+    public bool NeedsKeepAlive => HasLinuxEngine && LinuxEngineInWsl && !KeepsDistributionsRunning;
+
     /// <summary>Distributions the user might actually put an engine in.</summary>
     public IReadOnlyList<WslDistro> UsableDistros => [.. Distros.Where(d => d.CanHostAnEngine)];
 
@@ -236,7 +258,7 @@ public sealed record WindowsSetupState(
     /// setup checklist.
     /// </para>
     /// </summary>
-    public bool IsComplete => HasLinuxEngine && (HasWindowsEngine || IsHomeEdition);
+    public bool IsComplete => HasLinuxEngine && !NeedsKeepAlive && (HasWindowsEngine || IsHomeEdition);
 }
 
 /// <summary>
@@ -322,6 +344,27 @@ public static class WindowsSetupPlan
 
         return desktopFirst ? [desktop, wsl] : [wsl, desktop];
     }
+
+    /// <summary>
+    /// The last step for an engine in WSL, offered once it answers: keep WSL from stopping it the
+    /// moment nothing is attached. Null when it is not needed.
+    /// </summary>
+    public static SetupStep? KeepAlive(WindowsSetupState state) => !state.NeedsKeepAlive ? null : new SetupStep(
+        "wsl.keepalive",
+        "Keep it running when nothing is attached",
+        "WSL stops a distribution about fifteen seconds after its last terminal closes, and running "
+        + "containers do not count — so without this, your containers stop whenever Dray and every "
+        + "terminal are closed. This turns that off for WSL as a whole. WSL restarts once to apply it, "
+        + "which stops what is running in WSL now; containers with a restart policy come back with it.",
+        "wsl.exe",
+        ["--shutdown"],
+        NeedsElevation: false,
+        NeedsRestart: false)
+    {
+        Kind = SetupStepKind.WslSetting,
+        Script = $"[{WslConfig.Section}]\n{WslConfig.Key}=-1",
+        ScriptContext = @"Added to %USERPROFILE%\.wslconfig, keeping everything else in it; then wsl --shutdown:",
+    };
 
     /// <summary>The routes to Windows containers. Empty when an engine is reachable, or on Windows Home, where there is none.</summary>
     public static IReadOnlyList<SetupRoute> WindowsRoutes(WindowsSetupState state)

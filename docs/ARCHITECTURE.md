@@ -290,6 +290,11 @@ engine. It is an item that opens a menu rather than a combo box because it survi
 collapsing to icons. The choice is remembered (`IHostSelectionStore`), so the app opens where it was
 left rather than wherever the CLI's current context points.
 
+Every head has one, all saying the same sentence per engine (`HostSwitcher.Describe`). On Windows
+it is a `NavigationViewItem` with a `MenuFlyout`. On the web it is `HostPicker` on the shared
+`OverflowMenu`. On macOS it is the first `MacOSSidebarItem`, popping up an `NSMenu`; that version
+has not been built yet, because the macOS head only compiles on a Mac.
+
 **What the user still needs is for their terminal to agree with the screen**, and that is a Docker
 context rather than a mode. `DockerCliContext` creates one if there is not one already, and points
 the CLI at it. A context and not `DOCKER_HOST`: compose, buildx and everything else resolve their
@@ -333,6 +338,14 @@ What each step does, as measured on this machine:
   Docker Desktop. It adds the first ordinary user to the `docker` group. Current Ubuntu already has
   systemd, so the engine starts with the distribution; where it is missing the script enables it and
   Dray restarts the distribution once.
+- **Keeping it running.** WSL stops a distribution about fifteen seconds after its last `wsl.exe`
+  client exits, and a running container does not count — measured: a container was gone within
+  eighteen seconds of the terminal closing. So an engine in WSL ran only while something happened to
+  be attached. `[general] instanceIdleTimeout=-1` in `%USERPROFILE%\.wslconfig` stops that, measured
+  on WSL 2.6. Once a Linux engine in WSL answers, setup offers it as the last step (`WslConfig`).
+  It writes only that key, keeping everything else in the file, then runs `wsl --shutdown` once so
+  it applies, and Dray reconnects. It is WSL-wide, so it is offered and explained, never set
+  quietly.
 - **What is inside a distribution** — engine none, stopped or running, and whether an account exists
   — is one `key=value` probe script, run only when no Linux engine answers. It boots the
   distribution, so it is never run for the sake of it.
@@ -340,6 +353,23 @@ What each step does, as measured on this machine:
 Steps that need Dray itself elevated run in their own window. Everything else runs inside Dray with
 its output streamed into the page, because those are the long ones and their output is the only sign
 they are moving.
+
+**macOS and Linux get the same treatment** (`MacSetupPlan`, `LinuxSetupPlan`), shown by the same
+`EngineSetup` panel:
+
+- **macOS** offers Colima, OrbStack and Docker Desktop side by side, with an installed one first.
+  Homebrew's installer and Docker Desktop's cask ask for a password, so they run in a new Terminal
+  window, where the password prompt belongs to the system and never to Dray. Everything else runs
+  in-app, by full path, with Homebrew's `bin` on `PATH`; an app opened from the Finder has neither,
+  and `colima start` runs `limactl` by name. Without Homebrew, OrbStack and Docker Desktop are
+  downloads from their makers' sites.
+- **Linux** installs Docker's engine with Docker's script through polkit (`pkexec`), whose dialog
+  asks for the password and leaves the output for Dray to show. Then it starts the engine, then adds
+  the user to the `docker` group. Without polkit, Dray has no honest way to ask, so it shows the
+  `sudo` command to copy.
+
+Neither has run on its platform yet. The plans and readers are unit-tested, and `/gallery` renders
+every platform's routes so each can be reviewed from any machine.
 
 Every check is non-elevated. The authoritative reads need administrator, and prompting on every
 launch to answer a question nobody has asked yet is worse than not knowing — so `SetupFact.Unknown`
@@ -366,6 +396,27 @@ Running stacks are discovered from the `com.docker.compose.project`, `.service`,
 `.project.config_files` labels on containers, so a stack started from a terminal appears in Dray
 automatically. User-added compose files are tracked separately so a stack that is *down* is still
 visible — the thing Docker Desktop gets wrong.
+
+**Compose acts on the engine selected in Dray.** It used to be run with no target, so it acted on
+the CLI's current context instead. With Ubuntu selected and the CLI on Docker Desktop, Up would have
+started the stack on Docker Desktop. `ComposeCli.Invocation` now decides the target:
+
+- **Addressable engines** (sockets, pipes, TCP, SSH): this machine's compose, with
+  `DOCKER_HOST` set to the CLI's form of the endpoint, plus `DOCKER_TLS_VERIFY`/`DOCKER_CERT_PATH`
+  for TLS. `DOCKER_HOST` rather than `--context`, because every form compose ships in honours it
+  and no context has to exist.
+- **An engine in a WSL distribution**: the distribution's own compose, `wsl.exe -d <distro> --cd
+  <recorded dir> --exec docker compose …`, as its default user. A Windows compose cannot reach that
+  socket, and the paths compose recorded are Linux paths that only resolve in there.
+- **Apple's engine**: none.
+
+Whether a compose exists for an engine is measured once per host, when it first connects, and
+recorded as `SupportsCompose`. The runtime cannot answer it, since compose is a client and `/info`
+has no opinion, and leaving it false made every engine claim it could not run a stack.
+
+A WSL stack's files are opened from Windows through `\\wsl.localhost\<distro>\…`, or straight from
+the drive for a `/mnt/c/…` project (`EnginePaths`). Opened as recorded, every WSL stack's compose
+file read as missing.
 
 ### 2.6 What a real non-Docker engine actually does
 

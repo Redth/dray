@@ -181,6 +181,33 @@ public sealed class SetupStepRunner
         }
     }
 
+    /// <summary>
+    /// Turn on <see cref="WslConfig"/>'s setting in the user's .wslconfig, keeping everything else in
+    /// it, then shut WSL down so it starts again with the setting in force.
+    /// </summary>
+    public async Task<SetupStepResult> ApplyWslSettingAsync(SetupStep step, Action<string> output, CancellationToken ct = default)
+    {
+        var path = WslConfig.PathFor(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+        try
+        {
+            var existing = File.Exists(path) ? await File.ReadAllTextAsync(path, ct).ConfigureAwait(false) : null;
+            await File.WriteAllTextAsync(path, WslConfig.WithDistributionsKeptRunning(existing), ct).ConfigureAwait(false);
+            output($"Updated {path}.");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return new SetupStepResult(false, false, $"Could not write {path}: {e.Message}");
+        }
+
+        output("Restarting WSL so it applies…");
+        var restarted = await RunInAppAsync(step, output, ct).ConfigureAwait(false);
+
+        return restarted.Succeeded
+            ? new SetupStepResult(true, false, "WSL keeps your distributions running now, with or without a terminal open.")
+            : restarted;
+    }
+
     public async Task<SetupStepResult> RunAsync(SetupStep step, CancellationToken ct = default)
     {
         if (!OperatingSystem.IsWindows())

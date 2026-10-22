@@ -113,3 +113,75 @@ public class DistroProbeTests
     public void IgnoresAnythingElseTheDistributionPrints()
         => Assert.Equal(DistroEngine.Running, WindowsSetupReader.ParseDistroProbe(Ubuntu, "Welcome to Ubuntu!\nengine=running\n").Engine);
 }
+
+/// <summary>
+/// The one .wslconfig setting an engine in WSL needs, written without disturbing anything else in
+/// the user's file.
+/// </summary>
+public class WslConfigTests
+{
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("[general]\ninstanceIdleTimeout=-1\n", true)]
+    [InlineData("[general]\r\ninstanceIdleTimeout = -1\r\n", true)]
+    [InlineData("[general]\ninstanceIdleTimeout=60000\n", false)]
+    [InlineData("[wsl2]\ninstanceIdleTimeout=-1\n", false)]
+    public void ReadsWhetherDistributionsAreKeptRunning(string? content, bool expected)
+        => Assert.Equal(expected, WslConfig.KeepsDistributionsRunning(content));
+
+    [Fact]
+    public void WritesTheSettingIntoAnEmptyFile()
+        => Assert.Equal("[general]\ninstanceIdleTimeout=-1\n", WslConfig.WithDistributionsKeptRunning(null));
+
+    /// <summary>Someone's memory limit and their other sections survive untouched.</summary>
+    [Fact]
+    public void KeepsEverythingElseInTheFile()
+    {
+        var before = "[wsl2]\nmemory=8GB\nprocessors=4\n";
+
+        var after = WslConfig.WithDistributionsKeptRunning(before);
+
+        Assert.StartsWith("[wsl2]\nmemory=8GB\nprocessors=4", after);
+        Assert.True(WslConfig.KeepsDistributionsRunning(after));
+    }
+
+    [Fact]
+    public void ReplacesAnExistingTimeoutRatherThanAddingASecond()
+    {
+        var after = WslConfig.WithDistributionsKeptRunning("[general]\ninstanceIdleTimeout=60000\nother=1\n");
+
+        Assert.Single(after.Split('\n'), l => l.StartsWith("instanceIdleTimeout"));
+        Assert.Contains("other=1", after);
+        Assert.True(WslConfig.KeepsDistributionsRunning(after));
+    }
+
+    [Fact]
+    public void AddsToAnExistingGeneralSection()
+    {
+        var after = WslConfig.WithDistributionsKeptRunning("[general]\nother=1\n[wsl2]\nmemory=8GB\n");
+
+        Assert.Single(after.Split('\n'), l => l.Trim() == "[general]");
+        Assert.True(WslConfig.KeepsDistributionsRunning(after));
+        Assert.Contains("memory=8GB", after);
+    }
+
+    /// <summary>Offered exactly when a Linux engine in WSL answers and WSL would stop it.</summary>
+    [Fact]
+    public void OfferedOnlyForAnEngineInWslThatWouldBeStopped()
+    {
+        WindowsSetupState State(bool inWsl, bool kept) =>
+            new(SetupFact.Present, null, [], SetupFact.Unknown, SetupFact.Present, HasLinuxEngine: true, HasWindowsEngine: true)
+            {
+                LinuxEngineInWsl = inWsl,
+                KeepsDistributionsRunning = kept,
+            };
+
+        Assert.NotNull(WindowsSetupPlan.KeepAlive(State(inWsl: true, kept: false)));
+        Assert.False(State(inWsl: true, kept: false).IsComplete);
+
+        Assert.Null(WindowsSetupPlan.KeepAlive(State(inWsl: false, kept: false)));
+        Assert.Null(WindowsSetupPlan.KeepAlive(State(inWsl: true, kept: true)));
+        Assert.True(State(inWsl: true, kept: true).IsComplete);
+    }
+}

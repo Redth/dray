@@ -167,7 +167,7 @@
         var where = step.Kind switch
         {
             SetupStepKind.Window => "Runs in its own window, so you can see what it does.",
-            SetupStepKind.InApp => "Its output appears here as it runs.",
+            SetupStepKind.InApp or SetupStepKind.WslSetting => "Its output appears here as it runs.",
             SetupStepKind.Terminal => "Opens in Terminal, which asks for what it needs there.",
             SetupStepKind.OpenUrl => "Opens in your browser.",
             _ => null,
@@ -186,6 +186,7 @@
         SetupStepKind.Terminal => "Open in Terminal",
         SetupStepKind.OpenUrl => "Download",
         SetupStepKind.Manual => "Copy",
+        SetupStepKind.WslSetting => "Apply",
         _ when step.Id.EndsWith(".start", StringComparison.Ordinal) || step.Id.EndsWith(".open", StringComparison.Ordinal) => "Start",
         _ => step.Id.EndsWith(".install", StringComparison.Ordinal) || step.Id == "wsl.distro" ? "Install" : "Run",
     };

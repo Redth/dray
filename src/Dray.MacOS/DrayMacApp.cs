@@ -2,6 +2,7 @@ using AppKit;
 using Dray.Core.Engine;
 using Dray.Core.Navigation;
 using Dray.Core.Shell;
+using Dray.Ui.Services;
 using Foundation;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Platforms.MacOS.Platform;
@@ -88,6 +89,16 @@ public sealed class DrayMacApp : Application
 
         MacOSFlyoutPage.SetSidebarSelectionChanged(flyout, item =>
         {
+            if (item.Tag as string == PickerTag)
+            {
+                ShowEnginePicker();
+
+                // The picker is a control, not a place: the selection goes back to the page the
+                // user is on, so the sidebar never claims they have navigated to "an engine".
+                MacOSFlyoutPage.SelectSidebarItem(flyout, i => i.Tag as string == _shell.Route);
+                return;
+            }
+
             // ShellState owns the reentrancy guard, so a head may sync freely: an echo arriving
             // while the router is mid-navigation is swallowed rather than looping.
             if (item.Tag is string route) _shell.RequestNavigation(route);
@@ -97,10 +108,38 @@ public sealed class DrayMacApp : Application
             NSApplication.SharedApplication.InvokeOnMainThread(() =>
                 MacOSFlyoutPage.SelectSidebarItem(flyout, i => i.Tag as string == route));
 
+        // The picker's title is the selected engine, so the sidebar is rebuilt when that changes —
+        // and only then. Changed also fires for every container event, and rebuilding the outline
+        // view for each would be churn the user can see.
+        var engine = _services.GetRequiredService<EngineManager>();
+        engine.Changed += () => NSApplication.SharedApplication.BeginInvokeOnMainThread(() =>
+        {
+            if (PickerTitle() == _pickerTitle) return;
+
+            MacOSFlyoutPage.SetSidebarItems(flyout, BuildSidebarItems());
+            MacOSFlyoutPage.SelectSidebarItem(flyout, i => i.Tag as string == _shell.Route);
+        });
+
         return flyout;
     }
 
-    static List<MacOSSidebarItem> BuildSidebarItems()
+    /// <summary>Marks the sidebar item that is the host picker rather than a route.</summary>
+    const string PickerTag = "dray:engine-picker";
+
+    /// <summary>The title the picker was last built with, so a rebuild happens only when it would differ.</summary>
+    string? _pickerTitle;
+
+    /// <summary>
+    /// The selected engine, or what is happening to it. One line, because a sidebar item has one:
+    /// what kind of container it runs is in the menu the item opens.
+    /// </summary>
+    string PickerTitle()
+    {
+        var engine = _services.GetRequiredService<EngineManager>();
+        return engine.Transition ?? engine.Selected?.Name ?? "No engine";
+    }
+
+    List<MacOSSidebarItem> BuildSidebarItems()
     {
         var debug =
 #if DEBUG
@@ -109,7 +148,71 @@ public sealed class DrayMacApp : Application
             false;
 #endif
 
-        return [.. NavigationManifest.Visible(debug).Select(ToSidebarItem)];
+        // First, above the navigation: which engine is selected decides what every page below it
+        // shows (DESIGN.md section 5).
+        _pickerTitle = PickerTitle();
+        var picker = new MacOSSidebarItem
+        {
+            Title = _pickerTitle,
+            SystemImage = Icons.SfSymbol(IconRef.Host),
+            Tag = PickerTag,
+        };
+
+        return [picker, .. NavigationManifest.Visible(debug).Select(ToSidebarItem)];
+    }
+
+    /// <summary>
+    /// The engines, as a menu at the pointer. Each says what it is or what choosing it will do, in
+    /// the sentence every head's picker uses, and choosing goes through <see cref="HostSwitcher"/>
+    /// so a switch that stops something asks first here too.
+    /// </summary>
+    void ShowEnginePicker()
+    {
+        var engine = _services.GetRequiredService<EngineManager>();
+        var switcher = _services.GetRequiredService<HostSwitcher>();
+        var bridge = _services.GetRequiredService<IShellBridge>();
+
+        var menu = new NSMenu();
+        _pickerTargets.Clear();
+
+        foreach (var host in engine.Hosts)
+        {
+            var id = host.Id;
+            var item = new NSMenuItem($"{host.Name}  ·  {switcher.Describe(host)}")
+            {
+                State = engine.Selected?.Id == id ? NSCellStateValue.On : NSCellStateValue.Off,
+                Enabled = engine.Transition is null,
+            };
+
+            var choose = new Action(() => _ = ChooseAsync(switcher, bridge, id));
+            item.Activated += (_, _) => choose();
+            _pickerTargets.Add(new Retained(choose));
+            menu.AddItem(item);
+        }
+
+        if (menu.Count > 0) menu.AddItem(NSMenuItem.SeparatorItem);
+
+        var manage = new NSMenuItem("Hosts and setup…");
+        manage.Activated += (_, _) => _shell.RequestNavigation("/hosts");
+        menu.AddItem(manage);
+
+        menu.PopUpMenu(null, NSEvent.CurrentMouseLocation, null);
+    }
+
+    static async Task ChooseAsync(HostSwitcher switcher, IShellBridge bridge, string hostId)
+    {
+        if (await switcher.ChooseAsync(hostId) is { } problem)
+        {
+            await bridge.NotifyAsync("Could not switch engine", problem, NoticeKind.Warning);
+        }
+    }
+
+    // Menu callbacks, kept alive for as long as the menu that calls them (docs/NATIVE-SHELL.md 1.5b).
+    readonly List<NSObject> _pickerTargets = [];
+
+    sealed class Retained(Action action) : NSObject
+    {
+        public Action Action { get; } = action;
     }
 
     static MacOSSidebarItem ToSidebarItem(NavNode node) => node.IsGroup

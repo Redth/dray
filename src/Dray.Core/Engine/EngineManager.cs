@@ -275,11 +275,13 @@ public sealed class EngineManager : IAsyncDisposable
             // while the connection is coming up.
             Capabilities = live == RuntimeCapabilities.None && Selected.Capabilities.EngineId is not null
                 ? Selected.Capabilities
-                : live,
+                : WithCompose(Selected, live),
         });
 
         Selected = updated;
         _hosts[updated.Id] = updated;
+
+        if (state == HostConnectionState.Connected) _ = LearnComposeAsync(updated);
         Changed?.Invoke();
 
         // Now connected and known to be an engine that another host already names more precisely:
@@ -580,7 +582,42 @@ public sealed class EngineManager : IAsyncDisposable
     /// </para>
     /// </summary>
     public Task<ComposeCommand?> DetectComposeAsync(CancellationToken ct = default)
-        => _compose.DetectAsync(ct);
+        => _compose.DetectAsync(Selected?.Endpoint, ct);
+
+    /// <summary>Which hosts have a compose that can drive them, as measured — see <see cref="LearnComposeAsync"/>.</summary>
+    readonly Dictionary<string, bool> _composeFor = [];
+
+    /// <summary>
+    /// Find out whether compose can drive <paramref name="host"/>, and put the answer in its
+    /// capabilities.
+    /// <para>
+    /// The engine cannot say: compose is a client, not a daemon feature, so <c>/info</c> has no
+    /// opinion and the runtime reports false. Left at that, every engine claimed it could not run
+    /// a stack — the Hosts page said so and the Stacks page said "compose does not target this
+    /// engine" under any empty list. Asked once per host, when it first connects.
+    /// </para>
+    /// </summary>
+    async Task LearnComposeAsync(DockerHost host)
+    {
+        if (_composeFor.ContainsKey(host.Id)) return;
+
+        var found = await _compose.DetectAsync(host.Endpoint).ConfigureAwait(false) is not null;
+        _composeFor[host.Id] = found;
+
+        if (!found || !_hosts.TryGetValue(host.Id, out var current)) return;
+
+        var updated = current with { Capabilities = WithCompose(current, current.Capabilities) };
+        _hosts[host.Id] = updated;
+        if (Selected?.Id == host.Id) Selected = updated;
+
+        Changed?.Invoke();
+    }
+
+    /// <summary>Capabilities as the runtime reported them, plus compose where it was found to work.</summary>
+    RuntimeCapabilities WithCompose(DockerHost host, RuntimeCapabilities capabilities)
+        => capabilities.Flavor is EngineFlavor.Docker or EngineFlavor.Podman && _composeFor.GetValueOrDefault(host.Id)
+            ? capabilities with { SupportsCompose = true }
+            : capabilities;
 
     /// <summary>
     /// The stacks currently on this host, assembled from the labels compose puts on containers.
@@ -597,14 +634,14 @@ public sealed class EngineManager : IAsyncDisposable
         IReadOnlyList<string> arguments,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (await _compose.DetectAsync(ct).ConfigureAwait(false) is not { } command)
+        if (await _compose.DetectAsync(Selected?.Endpoint, ct).ConfigureAwait(false) is not { } command)
         {
-            yield return new ComposeOutput("Compose is not installed on this machine.", IsError: true);
+            yield return new ComposeOutput(Selected?.Endpoint.Scheme == EndpointScheme.Wsl ? $"Compose is not installed in {Selected.Endpoint.Distro}." : "Compose is not installed on this machine.", IsError: true);
             yield break;
         }
 
         await foreach (var line in _compose
-            .RunAsync(command, stack.Name, stack.ConfigFiles, arguments, stack.WorkingDirectory, ct)
+            .RunAsync(command, stack.Name, stack.ConfigFiles, arguments, stack.WorkingDirectory, Selected?.Endpoint, ct)
             .ConfigureAwait(false))
         {
             yield return line;
@@ -999,7 +1036,7 @@ public sealed class EngineManager : IAsyncDisposable
         try
         {
             var capabilities = await runtime.ConnectAsync(timeout.Token).ConfigureAwait(false);
-            result = host with { State = HostConnectionState.Connected, StateDetail = null, Capabilities = capabilities };
+            result = host with { State = HostConnectionState.Connected, StateDetail = null, Capabilities = WithCompose(host, capabilities) };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

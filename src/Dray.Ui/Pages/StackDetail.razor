@@ -179,12 +179,21 @@
     /// every container it creates. Falls back to the compose file's own folder, which is the same
     /// place in all but the unusual case of `-f` pointing elsewhere.
     /// </summary>
+    /// <para>
+    /// As this machine reaches it, which for a stack in a WSL distribution is not the path compose
+    /// recorded (<see cref="EnginePaths"/>).
+    /// </para>
     string? WorkingDirectory
         => Stack?.WorkingDirectory is { Length: > 0 } recorded
-            ? recorded
+            ? EnginePaths.ToLocal(Engine.Selected?.Endpoint, recorded)
             : Stack?.ConfigFiles.FirstOrDefault() is { } path
-                ? System.IO.Path.GetDirectoryName(path)
+                ? EnginePaths.DirectoryOf(Engine.Selected?.Endpoint, path)
                 : null;
+
+    /// <summary>The compose file as this machine reaches it.</summary>
+    string? ComposeFilePath => Stack?.ConfigFiles.FirstOrDefault() is { } path
+        ? EnginePaths.ToLocal(Engine.Selected?.Endpoint, path)
+        : null;
 
     void BackToServices() => _tab = "Services";
 
@@ -348,7 +357,8 @@
     /// </summary>
     void LoadComposeFile()
     {
-        if (Stack?.ConfigFiles.FirstOrDefault() is not { } path) return;
+        // The local path, so the editor's Save writes back to the same place it read from.
+        if (ComposeFilePath is not { } path) return;
 
         try
         {

@@ -77,6 +77,15 @@ else if (_state is { } state && !state.IsComplete)
                 @if (state.HasLinuxEngine)
                 {
                     <p class="setup__done muted">@Connected(ContainerOs.Linux)</p>
+
+                    @* Working, but only while something is attached: WSL stops the distribution,
+                       and its containers, once the last terminal closes. *@
+                    @if (WindowsSetupPlan.KeepAlive(state) is { } keepAlive)
+                    {
+                        <Track Route="@(new SetupRoute("linux.keepalive", "Keep it running", "One setting stands between this engine and containers that keep running after you close Dray.", [keepAlive], Recommended: true))"
+                               Running="@_running" OutputFor="@_outputFor" Output="_output" StartedAt="_startedAt"
+                               OnRun="RunAsync" />
+                    }
                 }
                 else
                 {
@@ -195,9 +204,10 @@ else if (_state is { } state && !state.IsComplete)
 
         var linux = Answering(ContainerOs.Linux) is not null;
         var windows = Answering(ContainerOs.Windows) is not null;
-        if (linux == state.HasLinuxEngine && windows == state.HasWindowsEngine) return;
+        var inWsl = Answering(ContainerOs.Linux) is { Endpoint.Scheme: EndpointScheme.Wsl };
+        if (linux == state.HasLinuxEngine && windows == state.HasWindowsEngine && inWsl == state.LinuxEngineInWsl) return;
 
-        _state = state with { HasLinuxEngine = linux, HasWindowsEngine = windows };
+        _state = state with { HasLinuxEngine = linux, HasWindowsEngine = windows, LinuxEngineInWsl = inWsl };
         _ = InvokeAsync(StateHasChanged);
     }
 
@@ -213,7 +223,7 @@ else if (_state is { } state && !state.IsComplete)
         _running = step.Id;
         _result = null;
 
-        if (step.Kind == SetupStepKind.InApp)
+        if (step.Kind is SetupStepKind.InApp or SetupStepKind.WslSetting)
         {
             _output.Clear();
             _outputFor = step.Id;
@@ -232,6 +242,7 @@ else if (_state is { } state && !state.IsComplete)
                 SetupStepKind.DockerDesktop => await DesktopAsync(step),
                 SetupStepKind.Connect => await ConnectAsync(step),
                 SetupStepKind.Terminal => await Runner.RunInTerminalAsync(step),
+                SetupStepKind.WslSetting => await Runner.ApplyWslSettingAsync(step, Append),
                 SetupStepKind.OpenUrl => await OpenAsync(step),
                 SetupStepKind.Manual => await CopyAsync(step),
                 _ => null,
@@ -258,6 +269,12 @@ else if (_state is { } state && !state.IsComplete)
         if (_result.Succeeded && step.Distro is { } distro && step.Id.StartsWith("engine.", StringComparison.Ordinal))
         {
             await Engine.ConnectNowAsync("wsl:" + distro);
+        }
+
+        // WSL restarted under the selected engine; connect again now rather than after the pump's backoff.
+        if (_result.Succeeded && step.Kind == SetupStepKind.WslSetting && Engine.Selected is { Endpoint.Scheme: EndpointScheme.Wsl } selected)
+        {
+            await Engine.ConnectNowAsync(selected.Id);
         }
 
         // Re-read rather than assume the step worked. A step needing a restart has changed nothing
