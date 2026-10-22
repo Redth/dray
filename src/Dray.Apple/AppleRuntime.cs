@@ -74,6 +74,12 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
             Flavor = EngineFlavor.Apple,
             EngineVersion = ParseVersion(version.StandardOutput),
             OperatingSystem = "macOS",
+
+            // The host is macOS; the containers are Linux. Apple's runtime boots a lightweight
+            // Linux VM per container and runs an OCI image in it, so paths, shells and exit codes
+            // all follow the Linux vocabulary even though nothing in the stack is Docker.
+            ContainerOs = ContainerOs.Linux,
+
             Architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(),
 
             // Every one of these was measured against the running engine, not assumed. They are

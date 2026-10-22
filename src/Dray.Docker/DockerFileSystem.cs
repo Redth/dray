@@ -46,19 +46,27 @@ internal static class DockerFileSystem
         string containerId,
         string path,
         bool containerIsRunning,
+        ContainerOs os,
         CancellationToken ct)
     {
-        path = FileEntry.Normalize(path);
+        path = ContainerPath.Normalize(path, os);
 
         // exec needs a running container, so a stopped one goes straight to the archive path —
         // which is exactly the case that makes the fallback worth having.
-        if (containerIsRunning)
+        //
+        // A Windows container skips exec too, and for a better reason than "it might not work".
+        // There is no `ls` there, and `dir` is not a substitute: its output is localised, its
+        // column order and date format follow the container's locale rather than the host's, and
+        // it has no machine-readable mode. A parser for it would be right on an English image and
+        // quietly wrong on a German one. The archive path reads tar headers, which are the same
+        // everywhere, so on Windows it is the reliable route rather than the fallback.
+        if (containerIsRunning && os != ContainerOs.Windows)
         {
             var viaExec = await TryListViaExecAsync(client, containerId, path, ct).ConfigureAwait(false);
             if (viaExec is not null) return viaExec;
         }
 
-        return await ListViaArchiveAsync(client, containerId, path, containerIsRunning, ct).ConfigureAwait(false);
+        return await ListViaArchiveAsync(client, containerId, path, containerIsRunning, os, ct).ConfigureAwait(false);
     }
 
     // ---------------------------------------------------------------- exec
@@ -120,6 +128,7 @@ internal static class DockerFileSystem
         string containerId,
         string path,
         bool containerIsRunning,
+        ContainerOs os,
         CancellationToken ct)
     {
         var response = await client.Containers
@@ -167,9 +176,13 @@ internal static class DockerFileSystem
             if (relative.Contains('/', StringComparison.Ordinal)) continue;
             if (relative.Length == 0 || !seen.Add(relative)) continue;
 
+            // The tar always names entries with forward slashes, whatever the container's OS —
+            // that is the archive format, not the filesystem. The child path has to be rebuilt in
+            // the container's own shape or nothing round-trips: `C:\inetpub/wwwroot` is not a
+            // path the engine will accept back.
             entries.Add(new FileEntry(
                 relative,
-                FileEntry.Combine(path, relative),
+                ContainerPath.Combine(path, relative, os),
                 IsDirectory: entry.EntryType is TarEntryType.Directory,
                 Size: entry.Length,
                 Modified: entry.ModificationTime,
@@ -179,9 +192,11 @@ internal static class DockerFileSystem
 
         var note = truncated
             ? "This listing stopped early. The engine has no directory listing, so Dray reads a tar of the folder, and this one is larger than the budget."
-            : containerIsRunning
-                ? "Listed by reading a tar of the folder, because this image has no usable ls."
-                : "Listed by reading a tar of the folder, because the container is not running.";
+            : os == ContainerOs.Windows
+                ? "Listed by reading a tar of the folder. Windows containers have no listing command whose output is safe to parse."
+                : containerIsRunning
+                    ? "Listed by reading a tar of the folder, because this image has no usable ls."
+                    : "Listed by reading a tar of the folder, because the container is not running.";
 
         return new DirectoryListing(path, entries, ListingMethod.Archive, note, truncated);
     }
@@ -242,9 +257,10 @@ internal static class DockerFileSystem
         DockerClient client,
         string containerId,
         string path,
+        ContainerOs os,
         CancellationToken ct)
     {
-        path = FileEntry.Normalize(path);
+        path = ContainerPath.Normalize(path, os);
 
         var response = await client.Containers
             .GetArchiveFromContainerAsync(containerId, new ContainerPathStatParameters { Path = path }, statOnly: false, ct)
@@ -288,16 +304,21 @@ internal static class DockerFileSystem
         string containerId,
         string path,
         byte[] content,
+        ContainerOs os,
         CancellationToken ct)
     {
-        path = FileEntry.Normalize(path);
+        path = ContainerPath.Normalize(path, os);
 
-        var parent = FileEntry.ParentOf(path) ?? "/";
-        var name = path[(path.LastIndexOf('/') + 1)..];
+        var parent = ContainerPath.ParentOf(path, os) ?? ContainerPath.Root(os);
+        var name = path[(path.LastIndexOf(ContainerPath.Separator(os)) + 1)..];
 
         // Preserve the existing mode rather than inventing one: writing back a file that was
         // executable must not quietly make it non-executable.
-        var mode = await TryGetModeAsync(client, containerId, path, ct).ConfigureAwait(false);
+        // Windows has no POSIX mode, so there is nothing to preserve and the probe is a wasted
+        // round trip against an engine that would report a synthesised value anyway.
+        var mode = os == ContainerOs.Windows
+            ? null
+            : await TryGetModeAsync(client, containerId, path, ct).ConfigureAwait(false);
 
         using var buffer = new MemoryStream();
 

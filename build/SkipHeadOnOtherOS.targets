@@ -1,0 +1,15 @@
+<Project>
+  <!--
+    Imported last by an app head, and only on an OS that cannot build it. Each target defined here
+    replaces the SDK's target of the same name, so `dotnet build` of the whole solution succeeds on
+    every OS and simply builds nothing for a head that belongs to another one.
+
+    Lifted from MAUI.Sherpa's SkipWindowsHeadOnNonWindows.targets. It must be imported AFTER
+    Sdk.targets — MSBuild keeps the last definition of a target, so imported earlier it would be
+    overwritten by the real one.
+  -->
+  <Target Name="Build" />
+  <Target Name="Rebuild" />
+  <Target Name="Publish" />
+  <Target Name="VSTest" />
+</Project>

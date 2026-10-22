@@ -1,0 +1,83 @@
+@* Guided setup for Windows, and the one place Dray touches the machine rather than the engine.
+   PRODUCT.md holds the line: Dray does not ship or install a runtime. What it does here is name
+   exactly what is missing and offer to run the documented command for it — shown first, run only
+   when asked, elevated in the open. Installing an engine stays the user's own step. *@
+@inject WindowsSetupReader Reader
+@inject SetupStepRunner Runner
+@inject EngineManager Engine
+
+@if (_state is { } state && !state.IsComplete)
+{
+    <div class="panel setup">
+        <div class="panel__head">
+            <span class="panel__title">Set up containers on this machine</span>
+        </div>
+        <div class="panel__body">
+            <p class="setup__intro muted">
+                Windows runs two kinds of container from two separate engines that share no images,
+                containers, volumes or networks. Both can run at once, and Dray shows each as its own
+                host — so this is about getting them working, not about choosing between them.
+            </p>
+
+            <Track Title="Linux containers"
+                   Done="state.HasLinuxEngine"
+                   DoneWord="An engine running Linux containers is connected."
+                   Steps="WindowsSetupPlan.ForLinuxContainers(state)"
+                   Running="_running"
+                   OnRun="RunAsync" />
+
+            <Track Title="Windows containers"
+                   Done="state.HasWindowsEngine"
+                   DoneWord="An engine running Windows containers is connected."
+                   Steps="WindowsSetupPlan.ForWindowsContainers(state)"
+                   Running="_running"
+                   OnRun="RunAsync"
+                   Advice="WindowsSetupPlan.EngineAdvice(state)" />
+
+            @if (_result is { } result)
+            {
+                <p class="setup__result @(result.Succeeded ? "is-ok" : "is-bad")">
+                    <Icon Name="@(result.Succeeded ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                    @result.Detail
+                </p>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    WindowsSetupState? _state;
+    SetupStepResult? _result;
+    string? _running;
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    async Task RefreshAsync()
+    {
+        // Only on Windows, and only ever from an explicit trigger: this shells out to wsl.exe and
+        // docker, and doing it on a timer would be the polling the design exists to avoid.
+        if (!OperatingSystem.IsWindows()) return;
+
+        _state = await Reader.ReadAsync(Engine.Hosts);
+        StateHasChanged();
+    }
+
+    async Task RunAsync(SetupStep step)
+    {
+        _running = step.Id;
+        _result = null;
+
+        try
+        {
+            _result = await Runner.RunAsync(step);
+        }
+        finally
+        {
+            _running = null;
+        }
+
+        // Re-read rather than assume the step worked. A step needing a restart has changed nothing
+        // yet, and saying so is the whole reason the result carries that distinction.
+        await RefreshAsync();
+    }
+}

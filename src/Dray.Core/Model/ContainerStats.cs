@@ -1,6 +1,12 @@
 namespace Dray.Core.Model;
 
 /// <summary>One sample of a container's resource use.</summary>
+/// <param name="ProcessCount">
+/// How many processes are running inside the container, or null where the engine does not count
+/// them. A Windows engine does not: its stats carry <c>num_procs</c>, which is the host's
+/// processor count and not a process count at all, and no <c>pids_stats</c>. Reporting zero there
+/// would draw an empty container that is in fact running normally.
+/// </param>
 /// <param name="CpuPercent">
 /// Share of the host's CPUs, so a container saturating two of four cores reads 200%. That is what
 /// <c>docker stats</c> reports and what people compare against; normalising to 100% would make the
@@ -15,7 +21,7 @@ public sealed record ContainerStats(
     long NetworkTxBytes,
     long BlockReadBytes,
     long BlockWriteBytes,
-    int ProcessCount)
+    int? ProcessCount)
 {
     /// <summary>
     /// Memory as a share of the container's limit, or null when it has none.

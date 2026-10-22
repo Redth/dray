@@ -20,10 +20,27 @@ public static class DockerExec
     static readonly string[] ShellCandidates =
         ["/bin/bash", "/usr/bin/bash", "/bin/ash", "/bin/sh", "/usr/bin/sh", "bash", "sh"];
 
+    /// <summary>
+    /// The same question for a Windows container, where none of the above exists.
+    /// <para>
+    /// PowerShell first because it is what a Windows image's own documentation assumes and what
+    /// makes a session usable; <c>cmd.exe</c> last because it is the one thing every Windows base
+    /// image has — Nano Server dropped PowerShell at ltsc2019 and still ships <c>cmd.exe</c>, so
+    /// a cmd session is the difference between a terminal and no terminal on the smallest images.
+    /// </para>
+    /// <para>
+    /// <c>pwsh.exe</c> is offered above <c>powershell.exe</c> only where an image has installed it
+    /// deliberately, which is the case in most .NET images.
+    /// </para>
+    /// </summary>
+    static readonly string[] WindowsShellCandidates =
+        ["pwsh.exe", "powershell.exe", "cmd.exe"];
+
     public static async Task<IExecSession> StartAsync(
         DockerClient client,
         string containerId,
         ExecOptions options,
+        ContainerOs os,
         CancellationToken ct = default)
     {
         // Asked before trying, because the two engines disagree about how they refuse: Docker
@@ -34,7 +51,7 @@ public static class DockerExec
 
         var command = options.Command is { Count: > 0 }
             ? options.Command
-            : [await FindShellAsync(client, containerId, ct).ConfigureAwait(false)];
+            : [await FindShellAsync(client, containerId, os, ct).ConfigureAwait(false)];
 
         try
         {
@@ -51,8 +68,10 @@ public static class DockerExec
                     User = options.User ?? string.Empty,
 
                     // Without TERM the shell assumes a dumb terminal and turns off colour, and
-                    // anything full-screen refuses to draw at all.
-                    Env = options.Tty ? ["TERM=xterm-256color"] : [],
+                    // anything full-screen refuses to draw at all. Windows has no TERM convention
+                    // — the console host reads its capabilities from the pseudoconsole the engine
+                    // allocates — so setting one there would be cargo cult.
+                    Env = options.Tty && os != ContainerOs.Windows ? ["TERM=xterm-256color"] : [],
                 },
                 ct).ConfigureAwait(false);
 
@@ -106,7 +125,70 @@ public static class DockerExec
     /// closes — the least diagnosable failure available. One cheap exec answers it properly.
     /// </para>
     /// </summary>
-    internal static async Task<string> FindShellAsync(
+    internal static Task<string> FindShellAsync(
+        DockerClient client, string containerId, ContainerOs os, CancellationToken ct)
+        => os == ContainerOs.Windows
+            ? FindWindowsShellAsync(client, containerId, ct)
+            : FindPosixShellAsync(client, containerId, ct);
+
+    /// <summary>
+    /// Which Windows shell this image has.
+    /// <para>
+    /// One exec per candidate rather than one script that tests them all, because the trick the
+    /// POSIX path uses is not available: that probe runs a <c>sh</c> loop, and the whole problem
+    /// here is that there is no shell to run a loop in. Testing for a file with <c>cmd.exe</c>
+    /// instead would answer a slightly different question — an image can have
+    /// <c>powershell.exe</c> on disk and still fail to start it — and would cost a round trip
+    /// anyway.
+    /// </para>
+    /// <para>
+    /// At most three round trips, and usually one: a Server Core image answers on the second and a
+    /// Nano Server image on the third.
+    /// </para>
+    /// </summary>
+    static async Task<string> FindWindowsShellAsync(
+        DockerClient client, string containerId, CancellationToken ct)
+    {
+        foreach (var candidate in WindowsShellCandidates)
+        {
+            try
+            {
+                var probe = await client.Exec.CreateContainerExecAsync(
+                    containerId,
+                    new ContainerExecCreateParameters
+                    {
+                        AttachStdout = false,
+                        AttachStderr = false,
+
+                        // Every one of the three accepts this and exits 0. `cmd /c exit` without a
+                        // code exits with whatever ERRORLEVEL happened to be, so the 0 is written.
+                        Cmd = candidate.StartsWith("cmd", StringComparison.OrdinalIgnoreCase)
+                            ? [candidate, "/c", "exit", "0"]
+                            : [candidate, "-NoLogo", "-NoProfile", "-Command", "exit 0"],
+                    },
+                    ct).ConfigureAwait(false);
+
+                using var stream = await client.Exec
+                    .StartContainerExecAsync(probe.ID, new ContainerExecStartParameters { Detach = false }, ct)
+                    .ConfigureAwait(false);
+
+                await stream.ReadOutputToEndAsync(ct).ConfigureAwait(false);
+
+                var inspect = await client.Exec.InspectContainerExecAsync(probe.ID, ct).ConfigureAwait(false);
+                if (inspect.ExitCode == 0) return candidate;
+            }
+            catch (Exception ex) when (ex is DockerApiException or IOException)
+            {
+                // Not present, or not startable. Either way the next candidate is the answer.
+            }
+        }
+
+        throw new NoShellException(
+            "No shell was found in this container. A Windows image built on a minimal base may have "
+            + "neither PowerShell nor cmd.exe — use the Files tab to read and edit what is inside instead.");
+    }
+
+    static async Task<string> FindPosixShellAsync(
         DockerClient client, string containerId, CancellationToken ct)
     {
         // `test -x` on each candidate in turn, printing the first that exists. Run through sh

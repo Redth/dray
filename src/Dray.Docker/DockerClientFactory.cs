@@ -3,6 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 using Docker.DotNet;
 using Docker.DotNet.NativeHttp;
 using Dray.Core.Engine;
+using Dray.Docker.Transport;
 
 namespace Dray.Docker;
 
@@ -17,6 +18,10 @@ public static class DockerClientFactory
 
     public static DockerClient Create(DockerEndpoint endpoint, TimeSpan? timeout = null)
     {
+        // An endpoint with no address on this machine is reached by running something that has it.
+        // Handled before the URI is built, because there is no URI that describes "a process".
+        if (RelayCommands.For(endpoint) is { } relay) return CreateRelayed(relay, timeout);
+
         var builder = new DockerClientBuilder()
             .WithEndpoint(ToUri(endpoint))
             .WithTimeout(timeout ?? DefaultTimeout);
@@ -28,6 +33,27 @@ public static class DockerClientFactory
             : builder.Build();
     }
 
+    /// <summary>
+    /// A client that reaches its engine through a relay process.
+    /// <para>
+    /// The timeout is deliberately more generous than <see cref="DefaultTimeout"/>. Starting the
+    /// relay is part of the first request, and starting one means starting a WSL distribution that
+    /// may be cold or completing an SSH handshake — both of which routinely take longer than the
+    /// ten seconds that is right for a socket that either answers or does not.
+    /// </para>
+    /// </summary>
+    public static DockerClient CreateRelayed(RelayCommand command, TimeSpan? timeout = null)
+        => new DockerClientBuilder()
+            .WithTimeout(timeout ?? RelayTimeout)
+            .WithTransportOptions(StdioRelayHandlerFactory.Instance, new StdioRelayTransportOptions(command))
+            .Build();
+
+    /// <summary>
+    /// How long a relayed request may take. Long enough for a cold WSL distribution to boot, which
+    /// is the slowest thing that legitimately happens on this path.
+    /// </summary>
+    public static readonly TimeSpan RelayTimeout = TimeSpan.FromSeconds(60);
+
     static Uri ToUri(DockerEndpoint endpoint) => endpoint.Scheme switch
     {
         EndpointScheme.Unix => new Uri($"unix://{endpoint.Path}"),
@@ -37,11 +63,10 @@ public static class DockerClientFactory
 
         EndpointScheme.Tcp => new Uri($"{(endpoint.Tls is null ? "http" : "https")}://{endpoint.Host}:{endpoint.Port}"),
 
-        // Docker.DotNet speaks HTTP over a socket or TCP; it has no SSH transport. Dray forwards
-        // the remote socket to a local one first, so by the time a client is built the endpoint
-        // has already been rewritten to Unix. Reaching here means that did not happen.
-        EndpointScheme.Ssh => throw new RuntimeConnectionException(
-            "An SSH endpoint must be tunnelled to a local socket before a client is created."),
+        // Both of these are reached through a relay process and never get this far; Create()
+        // routes them before a URI is built. Reaching here means that routing was bypassed.
+        EndpointScheme.Ssh or EndpointScheme.Wsl => throw new RuntimeConnectionException(
+            $"A {endpoint.Scheme} endpoint is reached through a relay process and has no URI."),
 
         _ => throw new RuntimeConnectionException($"Unsupported endpoint: {endpoint.Raw}"),
     };

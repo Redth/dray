@@ -1,0 +1,80 @@
+@* One of the two independent routes to a working engine. Separate rather than one merged checklist
+   because they are two engines that share nothing: someone who only wants Linux containers must not
+   be shown a Windows feature to enable, and the reverse. *@
+
+<div class="track">
+    <h3 class="track__title">
+        @if (Done)
+        {
+            <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+        }
+        @Title
+    </h3>
+
+    @if (Done)
+    {
+        <p class="track__done muted">@DoneWord</p>
+    }
+    else
+    {
+        @foreach (var step in Steps)
+        {
+            <div class="track__step" @key="step.Id">
+                <div class="track__stephead">
+                    <span class="track__steptitle">@step.Title</span>
+                    <Button Label="Run"
+                            Icon="IconRef.Play"
+                            Variant="ButtonVariant.Secondary"
+                            Busy="@(Running == step.Id)"
+                            Disabled="@(Running is not null)"
+                            OnClick="() => OnRun.InvokeAsync(step)" />
+                </div>
+
+                <p class="track__why muted">@step.Why</p>
+
+                @* The command is shown before it is run, every time. It is what makes this a
+                   suggestion rather than Dray quietly reconfiguring someone's machine — and it
+                   means they can run it themselves, or decide Dray is wrong about it. *@
+                <div class="track__cmd">
+                    <code class="mono">@step.CommandLine</code>
+                </div>
+
+                <p class="track__cost muted">
+                    @if (step.NeedsElevation)
+                    {
+                        <span>Asks for administrator.</span>
+                    }
+                    @if (step.NeedsRestart)
+                    {
+                        <span> Needs a restart to take effect.</span>
+                    }
+                    <span> Runs in its own window, so you can see what it does.</span>
+                </p>
+            </div>
+        }
+
+        @if (Advice is { Length: > 0 } advice)
+        {
+            <p class="track__advice muted">@advice</p>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    [Parameter] public bool Done { get; set; }
+
+    /// <summary>What to say when there is nothing left to do. Never just "Done".</summary>
+    [Parameter] public string DoneWord { get; set; } = "";
+
+    [Parameter] public IReadOnlyList<SetupStep> Steps { get; set; } = [];
+
+    /// <summary>The id of the step running right now, so only that one shows a spinner.</summary>
+    [Parameter] public string? Running { get; set; }
+
+    [Parameter] public EventCallback<SetupStep> OnRun { get; set; }
+
+    /// <summary>What Dray will not do, and why. Shown under the steps it will.</summary>
+    [Parameter] public string? Advice { get; set; }
+}

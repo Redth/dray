@@ -95,6 +95,11 @@ dotnet run --project src/Dray.DevHost --launch-profile dray   # http://localhost
 dotnet build src/Dray.MacOS
 src/Dray.MacOS/bin/Debug/net10.0-macos26.0/osx-arm64/Dray.app/Contents/MacOS/Dray.MacOS
 
+# Windows head (on Windows; it builds as a no-op elsewhere). Unpackaged, so the exe runs as
+# built. It is a GUI app, so stderr is lost: failures also go to %LOCALAPPDATA%\Dray\logs\last-run.log.
+dotnet build src/Dray.Windows
+src/Dray.Windows/bin/Debug/net10.0-windows10.0.19041.0/win-x64/Dray.Windows.exe   # win-arm64 on ARM
+
 # Drive and inspect the running app (Debug builds only). The CLI defaults to port 9223;
 # Dray's agent is on MauiDevFlowPort from Directory.Build.props.
 dotnet maui devflow -ap 9241 ui status
@@ -115,11 +120,22 @@ message if either is absent.
 ## Conventions
 
 - No XAML. UI is Blazor (`.razor`) in `Dray.Ui`, a Razor Class Library shared by all three heads —
-  never MSBuild globs across projects (`docs/ARCHITECTURE.md` §1.1 explains why).
+  never MSBuild globs across projects (`docs/ARCHITECTURE.md` §1.1 explains why). The one
+  exception is the Windows head's `App.xaml`, which contains no UI and exists so WinUI's XAML
+  compiler generates `Main` (`docs/NATIVE-SHELL.md` §5.5). Native chrome is built in C#.
+- Each app head builds only on its own OS and is a no-op everywhere else
+  (`build/SkipHeadOnOtherOS.targets`), so `dotnet build` of the solution works on all three.
 - `Dray.Core` references neither Docker nor a UI framework. `Dray.Docker` and `Dray.Apple` are two
   implementations of `IContainerRuntime`; a composite factory in the composition root dispatches on
   the endpoint's scheme. Adding an engine must not change a page — if it does, the seam is in the
   wrong place.
+- **A container's OS is measured, never inferred.** `RuntimeCapabilities.ContainerOs` comes from
+  `/info`'s `OSType` and from nothing else — not from the endpoint, which cannot answer it: on
+  Windows a native `dockerd`, Docker Desktop and podman's machine all serve `//./pipe/docker_engine`
+  and only one of them runs Windows containers. `Unknown` is a real value and must not be treated as
+  Linux. Paths, shells, exit codes, stats units, the default network driver and pause all branch on
+  it (`docs/ARCHITECTURE.md` §2.4), and every one of them fails quietly rather than loudly when the
+  branch is wrong.
 - **Engines differ, and the difference is data, not an exception.** When an engine cannot do
   something, add a `RuntimeCapabilities` flag set from something you measured against the running
   engine, and have the UI hide the control (DESIGN.md §8.1). Never catch the refusal and show an
@@ -136,7 +152,10 @@ message if either is absent.
 - Anything that reads `EngineManager.Store` must sit **inside** `<EngineScope>`, including
   `<PageChromeScope>` when the chrome shows a count. A value computed above the tag is captured by
   the child-content closure and never recomputed, so the screen silently goes stale.
-- Each app head links its own scoped-CSS bundle: `Dray.MacOS.styles.css`, `Dray.DevHost.styles.css`.
+- Each app head links its own scoped-CSS bundle: `Dray.MacOS.styles.css`, `Dray.Windows.styles.css`,
+  `Dray.DevHost.styles.css`.
+- The Windows head's namespace is `Dray.WinUI`, not `Dray.Windows`: inside a namespace with that
+  name, every `Windows.*` WinRT reference binds to it first and fails to resolve.
 - The page `<h1>` is emitted by `PageChromeScope` into the content area, visually hidden. It cannot
   live in the toolbar: on native heads the toolbar has no DOM.
 

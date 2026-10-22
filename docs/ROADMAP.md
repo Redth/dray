@@ -54,8 +54,15 @@ places that pattern frays. The work here is re-expressing the proven mechanics a
 
 **Progress:** Core abstractions, the RCL, the component kit, `Dray.DevHost` and the **macOS head**
 are done — native `NSOutlineView` sidebar and `NSToolbar` both projected from the manifest and from
-`PageChrome`, with the theme handoff verified in light and dark. Windows and GTK heads are next.
-Greyscale and both-theme checks pass on `/gallery`.
+`PageChrome`, with the theme handoff verified in light and dark. Greyscale and both-theme checks
+pass on `/gallery`.
+
+**The Windows head is written but has not run.** It has a WinUI `NavigationView` sidebar built from
+the manifest, a native toolbar row projected from `PageChrome`, `ContentDialog` dialogs with Blazor
+bodies, a transparent WebView2 on Mica, and the token handoff read from WinUI's own theme
+dictionaries. Every file compiles against the real Windows reference assemblies with warnings as
+errors. Nothing has been seen on screen. docs/NATIVE-SHELL.md §5.4 lists what to verify first. The
+GTK head is next.
 
 Since built on top of that:
 
@@ -73,11 +80,12 @@ and you cannot see where native chrome ends and the WebView begins.
 app launches with networking disabled · no route, nav entry, icon or colour is declared in more than
 one place.
 
-> **Windows and GTK4 heads are deferred.** Neither can be run or verified on the development
-> machine, so writing them now would produce untested code whose first real check is CI. The seams
-> they need — `NavigationManifest`, `PageChrome`, `IconRef`, `IShellBridge`, `IPlatformTheme` — are
-> all in place and exercised by the macOS head and `Dray.DevHost`, so adding a head later is
-> additive rather than structural. Picked up when there is a machine to run them on.
+> **The GTK4 head is deferred.** It cannot be run or verified on the development machine. The
+> seams it needs — `NavigationManifest`, `PageChrome`, `IconRef`, `IShellBridge`, `IPlatformTheme`
+> — are all in place and exercised by the other heads, so adding it later is additive rather than
+> structural. The Windows head was written ahead of a Windows machine, so it could be finished in one
+> session on one. It is the precedent for what "written but not run" has to come with: a compile
+> check against the platform's real assemblies, and a written list of runtime claims to verify.
 
 ---
 
@@ -105,11 +113,32 @@ one place.
 **Progress:** endpoints, context discovery, capabilities, entity store, event pump, the Docker
 transport and the host picker are done and running against a live engine. Killing a container from a
 terminal updates the UI with no refresh, and the Refresh action is disabled while the stream is
-healthy. Still outstanding: SSH tunnelling, WSL2 distro enumeration, and the disk-usage breakdown
-(`system df` is not exposed by the client and needs a direct call).
+healthy.
+
+**SSH and WSL2 both landed, as one piece of work.** Neither has an address on this machine, so both
+are reached by running a program that already has the socket and speaking HTTP over its stdio —
+`docker system dial-stdio`, which is the Docker CLI's own hidden subcommand for exactly this. One
+transport serves both, which is why `ssh://` arrived alongside WSL rather than as a project of its
+own (docs/ARCHITECTURE.md §2.4a).
+
+The transport was **verified end to end against a live engine** with `dial-stdio` standing in for
+the WSL launcher — the mechanism is identical and only the program differs. Version and info probes,
+container and image lists, a hijacked exec with its exit code, the archive endpoint streaming a tar,
+and a held-open stats stream all work through it. What stays unverified until there is a Windows
+machine is `wsl.exe` itself.
+
+Distro enumeration handles the two traps in `wsl --list --verbose`: it is UTF-16LE unless
+`WSL_UTF8=1` is honoured, and the table is localised in both its header and its state word. The
+parser matches on shape rather than words — and a test written from the French output caught a real
+bug, because "En cours" is two words and reading the name backwards from the version made every
+distro on a French machine parse as `Ubuntu En`.
+
+Still outstanding for this phase: showing which distro a container's bind mounts live in (`/mnt/c`
+versus the native filesystem, the top cause of "why is this so slow" on Windows).
 
 **Demo:** connect to local Docker, a WSL2 distro, and a remote host over SSH; kill a container from a
-terminal and watch the dashboard update with no refresh.
+terminal and watch the dashboard update with no refresh. *(The first is verified live; the relay the
+other two use is verified live, but against a stand-in launcher rather than `wsl.exe` or `ssh`.)*
 **Exit:** an unreachable host degrades one sidebar entry and nothing else · reconnect survives a
 daemon restart · zero polling in the code path.
 
@@ -532,6 +561,79 @@ unset, which is exactly the state the annotation calls "will not run".
 **Exit:** nobody has to know a mapping syntax to publish a port · a variable marked secret is masked
 everywhere without exception · a `${VAR}` with nothing behind it is visible before deploy, not after.
 **All three met.**
+
+---
+
+**Windows containers.** Done at the runtime layer, unverified until there is a machine to run it on.
+
+Windows is the only platform where "the local engine" is ambiguous, and the ambiguity is not
+cosmetic: Windows containers and Linux containers are separate engines that share no images,
+containers, volumes or networks. Windows containers need neither WSL2 nor Docker Desktop — the
+`Containers` feature and `dockerd.exe` are a complete install — while Linux containers need a Linux
+kernel and therefore a VM, which is WSL2 for Docker Desktop, Rancher Desktop and `podman machine`
+alike.
+
+**The endpoint cannot be asked which it is.** `//./pipe/docker_engine` is served by a native Windows
+daemon, by Docker Desktop in either mode, *and* by podman's machine, which forwards its Linux API to
+that same name. So `ContainerOs` is probed from `/info`'s `OSType`, `Unknown` is a real value that
+never collapses into Linux, and the Hosts page says which kind of container the selected engine runs
+before it says anything else about it.
+
+Ten things branch on it, each of which fails quietly rather than loudly if missed — paths, shells,
+directory listing, exit codes, CPU units, memory field, process count, block I/O, network driver,
+pause. The full table is in docs/ARCHITECTURE.md §2.4. Two are worth naming here:
+
+- **CPU is reported in 100-nanosecond intervals**, in the same field Linux uses for nanoseconds,
+  with nothing in the payload marking the difference. Read as nanoseconds it under-reports by a
+  factor of a hundred — a pegged container draws as a flat 1% rather than visibly failing. The
+  decision in §2.9 to divide by elapsed wall time rather than Docker's published formula paid for
+  itself a third time here: the fix is a scale factor and nothing else.
+- **Absences stay absent**, as they did for Apple. There is no process count on Windows —
+  `num_procs` is the host's CPU count, not a process count — so `ContainerStats.ProcessCount` became
+  nullable and the panel draws a dash. Zero would have described an empty container that is in fact
+  running normally.
+
+Pause follows isolation rather than being assumed: Windows can only freeze a container that has its
+own utility VM, so it is offered under Hyper-V isolation and hidden under process isolation. An
+engine that did not report its default is treated as unable, because a Pause button that always
+fails is the outcome `ContainerAction.cs` calls worse than no button.
+
+**Exit codes are the clearest case of why this could not be one shared table.** 137 is `128 +
+SIGKILL` on Linux and almost always the OOM killer; on Windows it means nothing at all, and Windows
+reports an NTSTATUS instead — which arrives signed through some paths and unsigned through others,
+so both spellings of `0xC0000005` reach the same sentence.
+
+**Both kinds at once, with no mode.** Docker Desktop's switch is not a mode of the machine: both
+daemons run simultaneously on their own pipes, and containers started in either keep running across
+a switch. It only changes which engine the default pipe and CLI context resolve to. Since Dray
+addresses engines by endpoint, both appear as two hosts and Dray needs no mode of its own — the host
+picker is the switch, and unlike Docker Desktop's it stops nothing.
+
+**Guided setup, and where the line is.** Windows is the one platform where a developer can be left
+with no engine and no idea which of two unrelated things to install. Dray names exactly what is
+missing and offers to run the documented command — shown first, run only when asked, elevated in the
+open, in its own visible window. It stops short of installing an engine, and PRODUCT.md now says so
+explicitly rather than leaving the exception unstated.
+
+Every check is non-elevated, so `Unknown` is a common answer rather than a failure. What makes that
+safe is that every offered command is idempotent — DISM against an enabled feature says so and
+changes nothing — so Dray never has to guess in order to offer a step. An engine answering overrides
+every inference: a machine where both kinds already work is shown no checklist at all.
+
+**The CLI follows the picker.** "Use this host in my terminal" writes or reuses a Docker context and
+switches to it, which covers `docker compose`, buildx and everything else for free — they resolve
+their endpoint the same way `docker` does, where `DOCKER_HOST` would only cover one shell. Verified
+against the live CLI on this machine: it reused the existing `desktop-linux` context rather than
+creating a duplicate, which is the behaviour that would otherwise litter `docker context ls` with a
+Dray-prefixed twin of every engine.
+
+A `wsl://` host gets no button, because its socket has no Windows-side address — the panel says
+where the command already works instead of offering one that cannot.
+
+**What is not done:** running it. The engine layer is head-agnostic and every part of it above is
+covered by tests that run on any platform. The WinUI head now exists (Phase 1), but it has not been
+run on a Windows machine, so none of this has been seen in a Windows window. Dray also does not
+install an engine, which is deliberate rather than pending.
 
 ---
 

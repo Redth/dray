@@ -143,6 +143,27 @@ public interface IProcessRunner
         string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct);
 
     /// <summary>
+    /// Run a program with extra environment variables set for it alone.
+    /// <para>
+    /// Exists for one program: <c>wsl.exe</c> writes UTF-16LE unless <c>WSL_UTF8</c> is set, and
+    /// setting that in Dray's own environment to reach it would leak into every other child
+    /// process for the life of the app.
+    /// </para>
+    /// <para>
+    /// Defaulted rather than abstract because a runner that cannot set an environment can still
+    /// answer the question — a test fake replays a recorded transcript, and the encoding of a
+    /// string it already holds is not in question.
+    /// </para>
+    /// </summary>
+    Task<ProcessResult> RunAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
+        => RunAsync(executable, arguments, workingDirectory, ct);
+
+    /// <summary>
     /// Run a program, writing <paramref name="input"/> to its stdin.
     /// <para>
     /// How the credential helper protocol works: the payload goes in on stdin, never on the command
@@ -180,10 +201,18 @@ public sealed class SystemProcessRunner : IProcessRunner
     /// </summary>
     static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(8);
 
-    public async Task<ProcessResult> RunAsync(
+    public Task<ProcessResult> RunAsync(
         string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct)
+        => RunAsync(executable, arguments, workingDirectory, environment: null, ct);
+
+    public async Task<ProcessResult> RunAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
     {
-        using var process = Start(executable, arguments, workingDirectory);
+        using var process = Start(executable, arguments, workingDirectory, environment: environment);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(ProbeTimeout);
@@ -335,7 +364,8 @@ public sealed class SystemProcessRunner : IProcessRunner
         string executable,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
-        bool redirectInput = false)
+        bool redirectInput = false,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var info = new ProcessStartInfo(executable)
         {
@@ -350,6 +380,11 @@ public sealed class SystemProcessRunner : IProcessRunner
         // ArgumentList rather than a joined string: it quotes each argument for the platform, so a
         // compose file under a path with a space works without Dray inventing escaping rules.
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
+
+        if (environment is not null)
+        {
+            foreach (var (key, value) in environment) info.Environment[key] = value;
+        }
 
         return Process.Start(info) ?? throw new InvalidOperationException($"Could not start {executable}.");
     }
