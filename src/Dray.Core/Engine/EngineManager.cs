@@ -85,6 +85,9 @@ public sealed class EngineManager : IAsyncDisposable
     /// </summary>
     public async Task InitializeAsync(CancellationToken ct = default)
     {
+        // Alongside discovery rather than before it: a process launch must not hold up the picker.
+        _ = DetectClientToolsAsync(ct);
+
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -153,7 +156,7 @@ public sealed class EngineManager : IAsyncDisposable
         {
             State = state,
             StateDetail = detail,
-            Capabilities = _runtime?.Capabilities ?? RuntimeCapabilities.None,
+            Capabilities = WithClientTools(_runtime?.Capabilities ?? RuntimeCapabilities.None),
         };
 
         Selected = updated;
@@ -315,6 +318,55 @@ public sealed class EngineManager : IAsyncDisposable
     /// </summary>
     public Task<ComposeCommand?> DetectComposeAsync(CancellationToken ct = default)
         => _compose.DetectAsync(ct);
+
+    // Whether compose is installed on this machine, once known. Null until the probe has answered.
+    volatile object? _hasCompose;
+
+    /// <summary>
+    /// Fold what this machine's CLI can do into an engine's capabilities.
+    /// <para>
+    /// A runtime reports <see cref="RuntimeCapabilities.SupportsCompose"/> false, because compose is
+    /// a client plugin and not something the daemon can answer. Nothing else set it, so every Docker
+    /// engine showed Compose as unsupported on the Hosts page, on every OS, with compose installed.
+    /// Any Docker-API engine can be driven by it; Apple's runtime cannot, and keeps its own answer.
+    /// </para>
+    /// </summary>
+    RuntimeCapabilities WithClientTools(RuntimeCapabilities capabilities)
+        => capabilities.Flavor == EngineFlavor.Apple || _hasCompose is not bool has
+            ? capabilities
+            : capabilities with { SupportsCompose = has };
+
+    async Task DetectClientToolsAsync(CancellationToken ct)
+    {
+        try
+        {
+            _hasCompose = await _compose.DetectAsync(ct).ConfigureAwait(false) is not null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _hasCompose = false;
+        }
+
+        // Hosts already connected were recorded before the answer arrived. Under the gate, which
+        // is what every other change to the host table takes.
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            foreach (var (id, host) in _hosts.ToArray())
+            {
+                if (host.State == HostConnectionState.Connected)
+                    _hosts[id] = host with { Capabilities = WithClientTools(host.Capabilities) };
+            }
+
+            if (Selected is { } selected && _hosts.TryGetValue(selected.Id, out var current)) Selected = current;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        Changed?.Invoke();
+    }
 
     /// <summary>
     /// The stacks currently on this host, assembled from the labels compose puts on containers.
@@ -691,7 +743,7 @@ public sealed class EngineManager : IAsyncDisposable
         try
         {
             var capabilities = await runtime.ConnectAsync(timeout.Token).ConfigureAwait(false);
-            result = host with { State = HostConnectionState.Connected, StateDetail = null, Capabilities = capabilities };
+            result = host with { State = HostConnectionState.Connected, StateDetail = null, Capabilities = WithClientTools(capabilities) };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
