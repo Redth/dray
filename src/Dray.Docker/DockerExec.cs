@@ -157,8 +157,10 @@ public static class DockerExec
                     containerId,
                     new ContainerExecCreateParameters
                     {
-                        AttachStdout = false,
-                        AttachStderr = false,
+                        // Attached, though nothing is read from them: with nothing attached the
+                        // start call returns as soon as the process starts rather than when it ends.
+                        AttachStdout = true,
+                        AttachStderr = true,
 
                         // Every one of the three accepts this and exits 0. `cmd /c exit` without a
                         // code exits with whatever ERRORLEVEL happened to be, so the 0 is written.
@@ -174,8 +176,9 @@ public static class DockerExec
 
                 await stream.ReadOutputToEndAsync(ct).ConfigureAwait(false);
 
-                var inspect = await client.Exec.InspectContainerExecAsync(probe.ID, ct).ConfigureAwait(false);
-                if (inspect.ExitCode == 0) return candidate;
+                var exitCode = await ExitCodeAsync(
+                    token => client.Exec.InspectContainerExecAsync(probe.ID, token), ProbeExitWait, ct).ConfigureAwait(false);
+                if (exitCode == 0) return candidate;
             }
             catch (Exception ex) when (ex is DockerApiException or IOException)
             {
@@ -186,6 +189,35 @@ public static class DockerExec
         throw new NoShellException(
             "No shell was found in this container. A Windows image built on a minimal base may have "
             + "neither PowerShell nor cmd.exe — use the Files tab to read and edit what is inside instead.");
+    }
+
+    /// <summary>How long a shell probe may take to be recorded as finished.</summary>
+    static readonly TimeSpan ProbeExitWait = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The exit code of an exec whose process has ended, or null if the engine still reports it
+    /// running after <paramref name="wait"/>.
+    /// <para>
+    /// The engine records an exec's exit a moment after its output stream closes. Under Hyper-V
+    /// isolation that moment is long enough that an immediate inspect reads Running with no code:
+    /// the probe took <c>cmd.exe</c> for missing in every Nano Server container, and the terminal
+    /// said there was no shell. A probe still running after the wait is not a shell answering
+    /// <c>exit 0</c>, so null is a true answer rather than a timeout.
+    /// </para>
+    /// </summary>
+    internal static async Task<long?> ExitCodeAsync(
+        Func<CancellationToken, Task<ContainerExecInspectResponse>> inspect, TimeSpan wait, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + wait;
+
+        while (true)
+        {
+            var state = await inspect(ct).ConfigureAwait(false);
+            if (!state.Running) return state.ExitCode;
+            if (DateTime.UtcNow >= deadline) return null;
+
+            await Task.Delay(50, ct).ConfigureAwait(false);
+        }
     }
 
     static async Task<string> FindPosixShellAsync(
