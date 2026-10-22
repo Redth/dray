@@ -61,6 +61,22 @@
     <ProjectReference Include="../Dray.Docker/Dray.Docker.csproj" />
   </ItemGroup>
 
+  <!--
+    DevFlow.Blazor's Windows .pri indexes Microsoft.Maui.DevFlow.Blazor\wwwroot\chobitsu.js beside
+    its dll, but the package ships that file only under staticwebassets/, where Blazor serves it from
+    as _content/…. The Windows App SDK turns every file a referenced .pri indexes into a copy item,
+    so the build fails with MSB3030 on a file that was never needed there. Drop only that phantom.
+  -->
+  <Target Name="DropDevFlowPriPhantoms"
+          AfterTargets="AddPriPayloadFilesToCopyToOutputDirectoryItems"
+          Condition="$([MSBuild]::IsOSPlatform('windows')) and '$(Configuration)' == 'Debug'">
+    <ItemGroup>
+      <_DevFlowPriPhantom Include="@(_AllChildProjectItemsWithTargetPath)"
+                          Condition="$([System.String]::Copy('%(TargetPath)').StartsWith('Microsoft.Maui.DevFlow.Blazor\')) and !Exists('%(FullPath)')" />
+      <_AllChildProjectItemsWithTargetPath Remove="@(_DevFlowPriPhantom)" />
+    </ItemGroup>
+  </Target>
+
   <!-- Off Windows nothing here compiles: the sources name WinUI types that do not exist. -->
   <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('windows'))">
     <Compile Remove="**/*.cs" />
