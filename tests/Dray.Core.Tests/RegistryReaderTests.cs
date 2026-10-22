@@ -58,6 +58,103 @@ public class RegistryReaderTests
     [Fact]
     public void TheHelperExecutableFollowsTheProtocolNaming()
         => Assert.Equal("docker-credential-osxkeychain", RegistryReader.Executable("osxkeychain"));
+
+    [Fact]
+    public async Task ARegistrySignedIntoWithoutAnAuthsEntryIsListedFromTheDefaultHelper()
+    {
+        // Dray writes nothing to config.json, so a registry it signed in to exists only in the
+        // helper's store. The CLI finds it there through credsStore, and so must the list.
+        var source = new FakeConfigSource().WithRawConfig("""{ "credsStore": "desktop" }""");
+        var runner = new HelperListRunner("""{ "https://ghcr.io": "redth" }""");
+
+        var entry = Assert.Single(await new RegistryReader(source, runner).ListAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("https://ghcr.io", entry.Server);
+        Assert.Equal("ghcr.io", entry.DisplayName);
+        Assert.Equal("redth", entry.Username);
+        Assert.Equal(CredentialStorage.Helper, entry.Storage);
+    }
+
+    [Fact]
+    public async Task ARegistryInBothTheConfigAndTheHelperIsListedOnce()
+    {
+        var source = new FakeConfigSource().WithRawConfig("""{ "credsStore": "desktop", "auths": { "ghcr.io": {} } }""");
+        var runner = new HelperListRunner("""{ "https://ghcr.io": "redth" }""");
+
+        var entry = Assert.Single(await new RegistryReader(source, runner).ListAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("ghcr.io", entry.Server);
+        Assert.Equal("redth", entry.Username);
+    }
+
+    [Fact]
+    public async Task DockerDesktopsOwnTokensAreNotRegistries()
+    {
+        // Docker Desktop keeps its sign-in in the same store, under the hub URL plus a path.
+        var source = new FakeConfigSource().WithRawConfig("""{ "credsStore": "desktop" }""");
+        var runner = new HelperListRunner("""
+            {
+              "https://index.docker.io/v1/": "redth",
+              "https://index.docker.io/v1/access-token": "redth",
+              "https://index.docker.io/v1/refresh-token": "redth"
+            }
+            """);
+
+        var entry = Assert.Single(await new RegistryReader(source, runner).ListAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("Docker Hub", entry.DisplayName);
+    }
+
+    [Fact]
+    public void HelperForPrefersTheRegistrysOwnHelper()
+    {
+        var source = new FakeConfigSource().WithRawConfig(
+            """{ "credsStore": "desktop", "credHelpers": { "123.dkr.ecr.us-east-1.amazonaws.com": "ecr-login" } }""");
+        var reader = new RegistryReader(source, new HelperListRunner("{}"));
+
+        Assert.Equal("ecr-login", reader.HelperFor("123.dkr.ecr.us-east-1.amazonaws.com"));
+        Assert.Equal("desktop", reader.HelperFor("ghcr.io"));
+    }
+
+    [Fact]
+    public void NoConfigMeansNoHelperRatherThanPlaintext()
+        => Assert.Null(new RegistryReader(new FakeConfigSource(), new HelperListRunner("{}")).HelperFor("ghcr.io"));
+
+    [Theory]
+    [InlineData("", RegistryEntry.DockerHub)]
+    [InlineData("  docker.io ", RegistryEntry.DockerHub)]
+    [InlineData("https://index.docker.io/v1/", RegistryEntry.DockerHub)]
+    [InlineData("hub.docker.com", RegistryEntry.DockerHub)]
+    [InlineData("https://ghcr.io/", "ghcr.io")]
+    [InlineData("localhost:5000", "localhost:5000")]
+    public void ATypedRegistryIsNamedAsTheCliNamesIt(string typed, string expected)
+        => Assert.Equal(expected, RegistryReader.NormalizeServer(typed));
+}
+
+/// <summary>A credential helper whose <c>list</c> answers with the given JSON, and that does nothing else.</summary>
+sealed class HelperListRunner(string list) : IProcessRunner
+{
+    public Task<ProcessResult> RunAsync(
+        string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct)
+        => Task.FromResult(arguments is ["list"]
+            ? new ProcessResult(0, list, "")
+            : new ProcessResult(1, "", "unexpected"));
+
+    public Task<ProcessResult> RunWithInputAsync(
+        string executable, IReadOnlyList<string> arguments, string input, CancellationToken ct)
+        => Task.FromResult(new ProcessResult(1, "", "unexpected"));
+
+    public Task<ProcessResult> RunWithBytesAsync(
+        string executable, IReadOnlyList<string> arguments, byte[] input, CancellationToken ct)
+        => Task.FromResult(new ProcessResult(1, "", "unexpected"));
+
+    public async IAsyncEnumerable<ComposeOutput> StreamAsync(
+        string executable, IReadOnlyList<string> arguments, string? workingDirectory,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
 }
 
 public class RegistryEntryTests

@@ -1225,6 +1225,12 @@ textarea,
   font-size: var(--text-base);
 }
 
+/* WebView2 and Edge put an eye in every password field that shows what was typed. A token field
+   is one: docs/CREDENTIALS.md has a secret never rendered, not even on request. */
+.input::-ms-reveal {
+  display: none;
+}
+
 .input::placeholder {
   /* Held to the same 4.5:1 as body text — no light grey "for elegance". */
   color: var(--muted);
