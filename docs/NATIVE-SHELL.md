@@ -383,6 +383,31 @@ Three things about the macOS half that were learned by running it:
 The body declares nothing about chrome. `DialogSurface` renders the component and nothing else — no
 title, no buttons — which is the rule in one file.
 
+### 4.6 Forms: a body that drives its buttons
+
+A question has fixed answers and closes on the first button pressed. A form does not. Its commit
+button is disabled until the fields are valid, reads "Pulling…" while it works, keeps the dialog
+open while it does, and closes only on success. Before `DialogController` existed, every form in
+the app (Pull, Build, Run, Push, Tag, Rename, Sign in, New volume, New network) solved that by
+becoming a web `<dialog>` with its own HTML title and buttons, which is the bug this section
+forbids.
+
+`DialogRequest.Controller` is the channel. The body inherits `DialogBody`, states its buttons in
+`DeclareButtons()` after every render, and answers presses in `OnButtonAsync`: true closes, false
+keeps the dialog open. A long piece of work is started there and left running. The page opens the
+dialog through a static `ShowAsync` on the body, and refreshes once it closes. No callback crosses
+into the dialog's WebView.
+
+| Head | How the controller is projected |
+|---|---|
+| Web | `DialogHost` draws the button row from `DialogRequest.Current(button)` and routes presses through the controller. Escape presses cancel, and the dialog reopens if the body refuses. |
+| macOS | Each alert button's target is pointed at the controller instead of at `NSAlert`, which would end the sheet on any press. The sheet ends only when the body says so. Titles and enabled states follow `Changed`. |
+| Windows | Each `ContentDialog` button click holds a deferral while the body decides, and cancels the click to stay open. Escape arrives in `Closing` as a close with no button and is put to the body as its cancel button. |
+
+A destructive commit button is marked the platform's way. macOS uses `HasDestructiveAction`.
+Windows has no destructive style, so `WinDanger` draws the danger tokens through the button's
+lightweight-styling resources. The web head uses `btn--primary btn--danger`.
+
 ### 4.4 Consequences for how a feature is written
 
 - Anything that would be a modal in a web app is asked for through the shell, not built in the page.

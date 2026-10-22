@@ -127,12 +127,22 @@ public sealed class WinDialog(IServiceProvider services)
         dialog.Resources["ContentDialogMaxHeight"] = height + 240;
 
         var map = Map(request, dialog);
+        if (request.ButtonList.Any(b => b.Role == DialogButtonRole.Destructive)) WinDanger.Style(dialog);
+
+        // A form's body drives the buttons and decides what a press does; a plain question closes
+        // on the first one. See DialogController.
+        using var live = request.Controller is { } controller ? new LiveButtons(dialog, request, controller) : null;
 
         try
         {
-            using var _ = ct.Register(() => dialog.DispatcherQueue.TryEnqueue(dialog.Hide));
+            using var _ = ct.Register(() => dialog.DispatcherQueue.TryEnqueue(() =>
+            {
+                request.Controller?.Dismissed();
+                dialog.Hide();
+            }));
+
             var result = await dialog.ShowAsync();
-            return map(result);
+            return request.Controller is { } c ? c.Result : map(result);
         }
         finally
         {
@@ -165,8 +175,7 @@ public sealed class WinDialog(IServiceProvider services)
             return _ => only.Id;
         }
 
-        var commit = buttons.FirstOrDefault(b => b.Role is DialogButtonRole.Confirm or DialogButtonRole.Destructive);
-        var other = buttons.FirstOrDefault(b => b.Role == DialogButtonRole.Normal);
+        var (commit, other) = Slots(request);
 
         // Three is what a ContentDialog has. Anything past that is dropped loudly rather than
         // silently — a fourth choice needs a different body, not a hidden button.
@@ -174,9 +183,9 @@ public sealed class WinDialog(IServiceProvider services)
         if (placed < buttons.Count)
             CrashLog.Write($"[dray:dialog] '{request.Title}' declares {buttons.Count} buttons; a ContentDialog shows {placed}.");
 
-        if (commit is not null) dialog.PrimaryButtonText = commit.Label;
-        if (other is not null) dialog.SecondaryButtonText = other.Label;
-        if (cancel is not null) dialog.CloseButtonText = cancel.Label;
+        if (commit is not null) dialog.PrimaryButtonText = request.Current(commit).Label;
+        if (other is not null) dialog.SecondaryButtonText = request.Current(other).Label;
+        if (cancel is not null) dialog.CloseButtonText = request.Current(cancel).Label;
 
         dialog.DefaultButton = request.DefaultButton is { } d && d == commit
             ? Xaml.Controls.ContentDialogButton.Primary
@@ -188,6 +197,140 @@ public sealed class WinDialog(IServiceProvider services)
             Xaml.Controls.ContentDialogResult.Secondary => other?.Id,
             _ => cancel?.Id,
         };
+    }
+
+    /// <summary>Which request button sits in the primary slot and which in the secondary.</summary>
+    static (DialogButton? Commit, DialogButton? Other) Slots(DialogRequest request) => (
+        request.ButtonList.FirstOrDefault(b => b.Role is DialogButtonRole.Confirm or DialogButtonRole.Destructive),
+        request.ButtonList.FirstOrDefault(b => b.Role == DialogButtonRole.Normal));
+
+    /// <summary>
+    /// A <see cref="DialogController"/> projected onto a ContentDialog's three buttons.
+    /// <para>
+    /// Each click holds the button event open with a deferral while the body decides, and cancels
+    /// it when the body keeps the dialog open — which is how a Pull button starts a pull without the
+    /// dialog going away. Escape arrives as a close with no button, and is put to the body as its
+    /// cancel button, so a body that cannot abandon running work can refuse it. The close button has
+    /// no enabled state of its own; the controller refuses a press of a disabled one instead.
+    /// </para>
+    /// </summary>
+    sealed class LiveButtons : IDisposable
+    {
+        readonly Xaml.Controls.ContentDialog _dialog;
+        readonly DialogRequest _request;
+        readonly DialogController _controller;
+        readonly DialogButton? _commit;
+        readonly DialogButton? _other;
+        readonly DialogButton? _cancel;
+
+        public LiveButtons(Xaml.Controls.ContentDialog dialog, DialogRequest request, DialogController controller)
+        {
+            _dialog = dialog;
+            _request = request;
+            _controller = controller;
+            (_commit, _other) = Slots(request);
+            _cancel = request.ButtonList.Count == 1 ? request.ButtonList[0] : request.CancelButton;
+
+            Apply();
+
+            controller.Changed += OnChanged;
+            controller.CloseRequested += OnCloseRequested;
+            dialog.PrimaryButtonClick += OnPrimary;
+            dialog.SecondaryButtonClick += OnSecondary;
+            dialog.CloseButtonClick += OnClose;
+            dialog.Closing += OnClosing;
+        }
+
+        void Apply()
+        {
+            if (_commit is not null)
+            {
+                var state = _request.Current(_commit);
+                _dialog.PrimaryButtonText = state.Label;
+                _dialog.IsPrimaryButtonEnabled = state.IsEnabled;
+            }
+
+            if (_other is not null)
+            {
+                var state = _request.Current(_other);
+                _dialog.SecondaryButtonText = state.Label;
+                _dialog.IsSecondaryButtonEnabled = state.IsEnabled;
+            }
+
+            if (_cancel is not null) _dialog.CloseButtonText = _request.Current(_cancel).Label;
+        }
+
+        void OnChanged() => _dialog.DispatcherQueue.TryEnqueue(Apply);
+
+        void OnCloseRequested() => _dialog.DispatcherQueue.TryEnqueue(_dialog.Hide);
+
+        void OnPrimary(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _commit);
+
+        void OnSecondary(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _other);
+
+        void OnClose(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _cancel);
+
+        async void Press(Xaml.Controls.ContentDialogButtonClickEventArgs e, DialogButton? button)
+        {
+            if (button is null) return;
+
+            var deferral = e.GetDeferral();
+            try
+            {
+                e.Cancel = !await _controller.PressAsync(button.Id);
+            }
+            catch (Exception ex)
+            {
+                // The body failed to answer. Staying open keeps whatever it was showing on screen,
+                // which is better than closing on an error nobody saw.
+                CrashLog.Write($"[dray:dialog] '{_request.Title}' {button.Id}: {ex}");
+                e.Cancel = true;
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        }
+
+        /// <summary>
+        /// Every close passes through here. After a press or a body's own close the controller has
+        /// already settled; what is left is Escape.
+        /// </summary>
+        async void OnClosing(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogClosingEventArgs e)
+        {
+            if (_controller.IsClosed) return;
+
+            if (_cancel is null)
+            {
+                _controller.Dismissed();
+                return;
+            }
+
+            var deferral = e.GetDeferral();
+            try
+            {
+                e.Cancel = !await _controller.PressAsync(_cancel.Id);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write($"[dray:dialog] '{_request.Title}' escape: {ex}");
+                e.Cancel = true;
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        }
+
+        public void Dispose()
+        {
+            _controller.Changed -= OnChanged;
+            _controller.CloseRequested -= OnCloseRequested;
+            _dialog.PrimaryButtonClick -= OnPrimary;
+            _dialog.SecondaryButtonClick -= OnSecondary;
+            _dialog.CloseButtonClick -= OnClose;
+            _dialog.Closing -= OnClosing;
+        }
     }
 
     static Xaml.Style? Resource(string key)

@@ -3,107 +3,127 @@
    Not a single bar. A pull is a dozen layers downloading and extracting at once, and averaging them
    into one number produces a bar that jumps backwards whenever a new layer starts — which reads as
    a bug rather than as progress. *@
+@inherits DialogBody
 @implements IAsyncDisposable
 @inject EngineManager Engine
 @inject IShellBridge Shell
 
-<Dialog Title="Pull an image" Open="Open" OpenChanged="OnOpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="pull-ref">Image</label>
-            <input id="pull-ref" class="input" placeholder="nginx:alpine"
-                   value="@_reference" @oninput="OnReferenceInput"
-                   @onkeydown="OnKeyDown"
-                   autocomplete="off" spellcheck="false" disabled="@_pulling" />
-        </div>
+<div class="field">
+    <label class="field__label" for="pull-ref">Image</label>
+    <input id="pull-ref" class="input" placeholder="nginx:alpine"
+           value="@_reference" @oninput="OnReferenceInput"
+           @onkeydown="OnKeyDown"
+           autocomplete="off" spellcheck="false" disabled="@_pulling" />
+</div>
 
-        @if (_error is { } error)
+@if (_error is { } error)
+{
+    <p class="pull__error">@error</p>
+}
+else if (!_pulling && _layers.Count == 0)
+{
+    <p class="pull__hint muted">
+        A bare name pulls <span class="mono">:latest</span> from Docker Hub. Prefix a host to
+        use another registry — <span class="mono">ghcr.io/owner/app:1.2</span>.
+    </p>
+}
+
+@* Search runs as the name is typed, so finding an image and pulling it is one flow rather
+   than a browser tab and a copied string. The engine does the searching — it already holds
+   the registry configuration and the credentials — and what it searches is Docker Hub:
+   there is no search API behind a private registry to offer. *@
+@if (_searching)
+{
+    <p class="pull__hint muted">Searching Docker Hub…</p>
+}
+else if (_searchError is { } problem)
+{
+    <p class="pull__hint muted">@problem</p>
+}
+else if (_results.Count > 0)
+{
+    @* A list of buttons, not a listbox. Each row is an action — "use this name" — rather
+       than a value being selected, and role="option" would take the button semantics away
+       from a control that is exactly a button. *@
+    <ul class="pull__results" aria-label="Images on Docker Hub">
+        @foreach (var result in _results)
         {
-            <p class="pull__error">@error</p>
-        }
-        else if (!_pulling && _layers.Count == 0)
-        {
-            <p class="pull__hint muted">
-                A bare name pulls <span class="mono">:latest</span> from Docker Hub. Prefix a host to
-                use another registry — <span class="mono">ghcr.io/owner/app:1.2</span>.
-            </p>
-        }
+            var captured = result;
 
-        @* Search runs as the name is typed, so finding an image and pulling it is one flow rather
-           than a browser tab and a copied string. The engine does the searching — it already holds
-           the registry configuration and the credentials — and what it searches is Docker Hub:
-           there is no search API behind a private registry to offer. *@
-        @if (_searching)
-        {
-            <p class="pull__hint muted">Searching Docker Hub…</p>
+            <li>
+                <button type="button" class="pull__result"
+                        title="@($"Use {captured.Name}")"
+                        @onclick="() => Choose(captured)">
+                    <span class="pull__result-name">
+                        @result.ShortName
+
+                        @if (result.IsOfficial)
+                        {
+                            <span class="pull__badge" title="Published by the project itself">official</span>
+                        }
+                    </span>
+
+                    @if (result.Stars >= 0)
+                    {
+                        <span class="pull__stars num muted" title="@($"{result.Stars} stars")">@Humanize.Count(result.Stars)</span>
+                    }
+
+                    @if (result.Description is { Length: > 0 } description)
+                    {
+                        <span class="pull__result-body muted">@description</span>
+                    }
+                </button>
+            </li>
         }
-        else if (_searchError is { } problem)
-        {
-            <p class="pull__hint muted">@problem</p>
-        }
-        else if (_results.Count > 0)
-        {
-            @* A list of buttons, not a listbox. Each row is an action — "use this name" — rather
-               than a value being selected, and role="option" would take the button semantics away
-               from a control that is exactly a button. *@
-            <ul class="pull__results" aria-label="Images on Docker Hub">
-                @foreach (var result in _results)
-                {
-                    var captured = result;
+    </ul>
+}
 
-                    <li>
-                        <button type="button" class="pull__result"
-                                title="@($"Use {captured.Name}")"
-                                @onclick="() => Choose(captured)">
-                            <span class="pull__result-name">
-                                @result.ShortName
+@if (_layers.Count > 0)
+{
+    <LayerProgress Layers="Ordered" />
+}
 
-                                @if (result.IsOfficial)
-                                {
-                                    <span class="pull__badge" title="Published by the project itself">official</span>
-                                }
-                            </span>
-
-                            @if (result.Stars >= 0)
-                            {
-                                <span class="pull__stars num muted" title="@($"{result.Stars} stars")">@Humanize.Count(result.Stars)</span>
-                            }
-
-                            @if (result.Description is { Length: > 0 } description)
-                            {
-                                <span class="pull__result-body muted">@description</span>
-                            }
-                        </button>
-                    </li>
-                }
-            </ul>
-        }
-
-        @if (_layers.Count > 0)
-        {
-            <LayerProgress Layers="Ordered" />
-        }
-
-        @if (_done is { } done)
-        {
-            <p class="pull__done">@done</p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="@(_pulling ? "Cancel" : "Close")" Variant="ButtonVariant.Ghost" OnClick="CloseAsync" />
-        <Button Label="@(_pulling ? "Pulling…" : "Pull")" Variant="ButtonVariant.Primary"
-                Disabled="@(_pulling || string.IsNullOrWhiteSpace(_reference))"
-                Busy="_pulling" OnClick="StartAsync" />
-    </Footer>
-</Dialog>
+@if (_done is { } done)
+{
+    <p class="pull__done">@done</p>
+}
 
 @code {
-    [Parameter] public bool Open { get; set; }
+    /// <summary>
+    /// Open it. Completes when it closes; the page refreshes then, and the pull — which may have
+    /// finished long before — needs no callback across into the dialog's own WebView to say so.
+    /// </summary>
+    public static async Task ShowAsync(IShellBridge shell)
+    {
+        var dialog = new DialogController();
+        await shell.ShowDialogAsync(new DialogRequest(
+            "Pull an image",
+            typeof(PullDialog),
+            Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("pull", "Pull")],
+            Controller: dialog));
+    }
 
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    protected override void DeclareButtons()
+    {
+        Button("cancel", _pulling ? "Cancel" : "Close");
+        Button("pull", _pulling ? "Pulling…" : "Pull",
+            enabled: !_pulling && !string.IsNullOrWhiteSpace(_reference), busy: _pulling);
+    }
 
-    /// <summary>Raised once a pull finishes, so the list behind can refresh.</summary>
-    [Parameter] public EventCallback OnPulled { get; set; }
+    protected override async Task<bool> OnButtonAsync(string buttonId)
+    {
+        if (buttonId == "pull")
+        {
+            // Started and left running: the dialog stays open to show it.
+            _ = StartAsync();
+            return false;
+        }
+
+        // Cancelling the stream stops Dray reading it; the engine finishes the pull it started.
+        // Saying otherwise would be a lie, and a half-pulled image is not a state Dray can create.
+        if (_cts is { } cts) await cts.CancelAsync();
+        return true;
+    }
 
     string _reference = "";
     string? _error;
@@ -239,6 +259,10 @@
 
         _cts = new CancellationTokenSource();
 
+        // Started from the head's button as well as from Enter, and only an event handler re-renders
+        // by itself — so the buttons learn they are busy from here.
+        StateHasChanged();
+
         try
         {
             await foreach (var step in Engine.PullImageAsync(reference, _cts.Token))
@@ -267,8 +291,6 @@
                 // Only lands if the window is not in front — see WebShellBridge.NotifyAsync. A pull
                 // is the archetypal "started it and went to do something else" operation.
                 await Shell.NotifyAsync("Pull finished", $"{reference} is on {Engine.Selected?.Name}.", NoticeKind.Success);
-
-                await OnPulled.InvokeAsync();
             }
             else
             {
@@ -288,21 +310,8 @@
             _pulling = false;
             _cts?.Dispose();
             _cts = null;
+            StateHasChanged();
         }
-    }
-
-    async Task CloseAsync()
-    {
-        // Cancelling the stream stops Dray reading it; the engine finishes the pull it started.
-        // Saying otherwise would be a lie, and a half-pulled image is not a state Dray can create.
-        if (_cts is { } cts) await cts.CancelAsync();
-
-        await OpenChanged.InvokeAsync(false);
-    }
-
-    async Task OnOpenChanged(bool open)
-    {
-        if (!open) await CloseAsync();
     }
 
     public async ValueTask DisposeAsync()

@@ -82,15 +82,28 @@ public sealed class MacDialogSheet(IServiceProvider services)
         // this one is the opposite of the browser's.
         var order = request.Ordered(DialogButtonOrder.CommitFirst);
 
+        var buttons = new List<NSButton>(order.Count);
+
         foreach (var button in order)
         {
-            var added = alert.AddButton(button.Label);
+            var added = alert.AddButton(request.Current(button).Label);
 
             // A destructive button is never the one Return commits. DialogRequest refuses to name
             // one as the default; this makes sure AppKit does not either.
-            if (button.Role == DialogButtonRole.Destructive) added.KeyEquivalent = string.Empty;
+            if (button.Role == DialogButtonRole.Destructive)
+            {
+                added.KeyEquivalent = string.Empty;
 
-            if (button.Role == DialogButtonRole.Cancel) added.KeyEquivalent = "";
+                // AppKit's own marking for an action that cannot be undone — the platform's
+                // version of the danger fill the web head draws (DESIGN.md section 2.5).
+                added.HasDestructiveAction = true;
+            }
+
+            // Escape presses cancel, which is what DialogButtonRole.Cancel promises. AppKit only
+            // infers that from a button titled exactly "Cancel", and Close is not.
+            if (button.Role == DialogButtonRole.Cancel) added.KeyEquivalent = "\u001b";
+
+            buttons.Add(added);
         }
 
         var size = SizeOf(request.Size);
@@ -106,14 +119,31 @@ public sealed class MacDialogSheet(IServiceProvider services)
             ?? NSApplication.SharedApplication.MainWindow
             ?? (Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault()?.Handler?.PlatformView as NSWindow);
 
+        LiveButtons? live = null;
+
         void Finish(nint response)
         {
             // NSAlertFirstButtonReturn is 1000 and they count up in the order added.
             var index = (int)(response - (nint)NSAlertButtonReturn.First);
 
+            live?.Dispose();
             host.Dispose();
-            tcs.TrySetResult(index >= 0 && index < order.Count ? order[index].Id : null);
+
+            // A form's controller knows its own result — including one the body closed with itself,
+            // which no button index describes.
+            tcs.TrySetResult(request.Controller is { } controller
+                ? controller.Result
+                : index >= 0 && index < order.Count ? order[index].Id : null);
         }
+
+        // Ends the alert the way AppKit would have on a press: as a sheet, or as a modal session.
+        void End(nint response)
+        {
+            if (window is null) NSApplication.SharedApplication.StopModalWithCode(response);
+            else window.EndSheet(alert.Window, (NSModalResponse)(long)response);
+        }
+
+        if (request.Controller is { } form) live = new LiveButtons(request, form, order, buttons, End);
 
         if (window is null)
         {
@@ -123,5 +153,97 @@ public sealed class MacDialogSheet(IServiceProvider services)
 
         // A sheet, not a free-floating window: this is about the document in front of the user.
         alert.BeginSheet(window, response => Finish((nint)(long)response));
+    }
+
+    /// <summary>
+    /// A <see cref="DialogController"/> projected onto an alert's buttons.
+    /// <para>
+    /// An alert ends the moment any of its buttons is pressed, which is right for a question and
+    /// wrong for a form: Pull has to start a pull and stay open to show it. So each button's action
+    /// is pointed here instead, the body is asked, and the sheet is ended only when it says so.
+    /// Titles and enabled states follow the body as it changes them.
+    /// </para>
+    /// </summary>
+    sealed class LiveButtons : IDisposable
+    {
+        readonly DialogRequest _request;
+        readonly DialogController _controller;
+        readonly IReadOnlyList<DialogButton> _order;
+        readonly List<NSButton> _buttons;
+        readonly Action<nint> _end;
+
+        // NSButton targets are weak; without these references the targets are collected and the
+        // buttons silently stop responding (docs/NATIVE-SHELL.md section 1.5b).
+        readonly List<NSObject> _targets = [];
+
+        public LiveButtons(
+            DialogRequest request, DialogController controller, IReadOnlyList<DialogButton> order,
+            List<NSButton> buttons, Action<nint> end)
+        {
+            _request = request;
+            _controller = controller;
+            _order = order;
+            _buttons = buttons;
+            _end = end;
+
+            for (var i = 0; i < buttons.Count; i++)
+            {
+                var index = i;
+                var target = new ButtonTarget(() => Press(index));
+                _targets.Add(target);
+
+                buttons[i].Target = target;
+                buttons[i].Action = new ObjCRuntime.Selector("press:");
+            }
+
+            Apply();
+
+            controller.Changed += OnChanged;
+            controller.CloseRequested += OnCloseRequested;
+        }
+
+        void Apply()
+        {
+            for (var i = 0; i < _order.Count; i++)
+            {
+                var state = _request.Current(_order[i]);
+                _buttons[i].Title = state.Label;
+                _buttons[i].Enabled = state.IsEnabled;
+            }
+        }
+
+        void OnChanged() => NSApplication.SharedApplication.InvokeOnMainThread(Apply);
+
+        void OnCloseRequested() => NSApplication.SharedApplication.InvokeOnMainThread(() => _end(Response(-1)));
+
+        async void Press(int index)
+        {
+            try
+            {
+                if (await _controller.PressAsync(_order[index].Id))
+                    NSApplication.SharedApplication.InvokeOnMainThread(() => _end(Response(index)));
+            }
+            catch (Exception ex)
+            {
+                // The body failed to answer. Staying open keeps whatever it was showing on screen.
+                Console.Error.WriteLine($"[dray:dialog] '{_request.Title}' {_order[index].Id}: {ex}");
+            }
+        }
+
+        /// <summary>The response code AppKit would have used for a button, or one past the last for none.</summary>
+        nint Response(int index) => (nint)NSAlertButtonReturn.First + (index >= 0 ? index : _order.Count);
+
+        public void Dispose()
+        {
+            _controller.Changed -= OnChanged;
+            _controller.CloseRequested -= OnCloseRequested;
+        }
+    }
+
+    /// <summary>An <c>NSButton</c> action that runs a callback. Must be retained by the caller.</summary>
+    sealed class ButtonTarget(Action action) : NSObject
+    {
+        [Export("press:")]
+        public void Press(NSObject sender) => action();
     }
 }

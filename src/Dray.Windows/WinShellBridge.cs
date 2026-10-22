@@ -56,6 +56,7 @@ public sealed class WinShellBridge(IServiceProvider services) : IShellBridge
                 dialog.Opened += (_, _) => field.Focus(Xaml.FocusState.Programmatic);
             }
 
+            WinDanger.Style(dialog);
             return await WinDialog.ShowNativeAsync(dialog, ct);
         });
 

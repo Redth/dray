@@ -11,7 +11,14 @@
 <IconSprite />
 
 <div class="surface">
-    @if (State.Current is { } request)
+    @if (State.Current is { Controller: { } controller } live)
+    {
+        @* A form's body drives the native buttons through this; see DialogBody. *@
+        <CascadingValue Value="controller" IsFixed="true">
+            <DynamicComponent Type="live.Body" Parameters="Writable(live.ParameterMap)" />
+        </CascadingValue>
+    }
+    else if (State.Current is { } request)
     {
         <DynamicComponent Type="request.Body" Parameters="Writable(request.ParameterMap)" />
     }

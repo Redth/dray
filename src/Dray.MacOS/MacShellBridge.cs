@@ -34,7 +34,7 @@ public sealed class MacShellBridge(IServiceProvider services) : IShellBridge
                 InformativeText = request.Body,
             };
 
-            alert.AddButton(request.ConfirmLabel);
+            alert.AddButton(request.ConfirmLabel).HasDestructiveAction = true;
             alert.AddButton("Cancel");
 
             // Irreversible bulk operations require the user to type the target's name. An

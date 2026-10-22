@@ -19,32 +19,106 @@
 
             @* The body is the same component every head hosts. Rendered by type rather than as a
                fragment because a fragment cannot cross into a native head's own WebView. *@
-            <DynamicComponent Type="request.Body" Parameters="Writable(request.ParameterMap)" />
+            @if (request.Controller is { } controller)
+            {
+                <CascadingValue Value="controller" IsFixed="true">
+                    <DynamicComponent Type="request.Body" Parameters="Writable(request.ParameterMap)" />
+                </CascadingValue>
+            }
+            else
+            {
+                <DynamicComponent Type="request.Body" Parameters="Writable(request.ParameterMap)" />
+            }
         </ChildContent>
 
         <Footer>
             @foreach (var button in request.Ordered(DialogButtonOrder.CommitLast))
             {
                 var captured = button;
+                var state = request.Current(button);
 
-                <Button Label="@button.Label"
+                <Button Label="@state.Label"
                         Variant="@Variant(button.Role)"
                         Danger="@(button.Role == DialogButtonRole.Destructive)"
-                        OnClick="() => Dialogs.Close(captured.Id)" />
+                        Disabled="@(!state.IsEnabled)"
+                        Busy="@state.IsBusy"
+                        OnClick="() => PressAsync(captured.Id)" />
             }
         </Footer>
     </Dialog>
 }
 
 @code {
+    DialogController? _controller;
+
     protected override void OnInitialized() => Dialogs.Changed += OnChanged;
 
-    void OnChanged() => InvokeAsync(StateHasChanged);
-
-    /// <summary>Escape and the backdrop are a dismissal, not a choice.</summary>
-    void OnOpenChanged(bool open)
+    void OnChanged()
     {
-        if (!open) Dialogs.Close(null);
+        Watch(Dialogs.Request?.Controller);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Follow the open dialog's controller, so the button row redraws as its body changes it.</summary>
+    void Watch(DialogController? controller)
+    {
+        if (ReferenceEquals(controller, _controller)) return;
+
+        if (_controller is { } previous)
+        {
+            previous.Changed -= OnControllerChanged;
+            previous.CloseRequested -= OnCloseRequested;
+        }
+
+        _controller = controller;
+
+        if (controller is not null)
+        {
+            controller.Changed += OnControllerChanged;
+            controller.CloseRequested += OnCloseRequested;
+        }
+    }
+
+    void OnControllerChanged() => _ = InvokeAsync(StateHasChanged);
+
+    void OnCloseRequested() => _ = InvokeAsync(() => Dialogs.Close(_controller?.Result));
+
+    /// <summary>A button with no controller closes the dialog; with one, the body decides.</summary>
+    async Task PressAsync(string buttonId)
+    {
+        if (Dialogs.Request?.Controller is not { } controller)
+        {
+            Dialogs.Close(buttonId);
+            return;
+        }
+
+        if (await controller.PressAsync(buttonId)) Dialogs.Close(buttonId);
+    }
+
+    /// <summary>
+    /// Escape and the backdrop. Without a controller, a dismissal rather than a choice. With one,
+    /// they press cancel — which a body may refuse while work it cannot abandon is running, in which
+    /// case the dialog is shown again rather than vanishing with the work still going.
+    /// </summary>
+    async Task OnOpenChanged(bool open)
+    {
+        if (open) return;
+
+        if (Dialogs.Request is not { Controller: { } controller } request)
+        {
+            Dialogs.Close(null);
+            return;
+        }
+
+        if (request.CancelButton is not { } cancel)
+        {
+            controller.Dismissed();
+            Dialogs.Close(null);
+            return;
+        }
+
+        if (await controller.PressAsync(cancel.Id)) Dialogs.Close(cancel.Id);
+        else StateHasChanged();
     }
 
     static ButtonVariant Variant(DialogButtonRole role) => role switch
@@ -81,5 +155,9 @@
         return copy;
     }
 
-    public void Dispose() => Dialogs.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Dialogs.Changed -= OnChanged;
+        Watch(null);
+    }
 }

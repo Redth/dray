@@ -55,7 +55,7 @@
                             : "This engine has no volumes. One appears the first time a container asks for persistent storage.")">
                 <Actions>
                     <Button Label="Create a volume…" Icon="IconRef.Plus" Variant="ButtonVariant.Primary"
-                            OnClick="() => _creating = true" />
+                            OnClick="CreateAsync" />
                 </Actions>
             </EmptyState>
         }
@@ -72,11 +72,6 @@
                        Placeholder="No volumes" />
         }
     </div>
-
-    @if (_creating)
-    {
-        <VolumeDialog Open="true" OpenChanged="open => _creating = open" OnCreated="LoadAsync" />
-    }
 </EngineScope>
 
 @code {
@@ -85,7 +80,6 @@
     string? _notice;
     bool _noticeOk;
     string _search = "";
-    bool _creating;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -205,6 +199,11 @@
                 ChromeAction.Secondary("hosts", "Switch engine…", IconRef.Host),
             ]);
 
+    async Task CreateAsync()
+    {
+        if (await VolumeDialog.ShowAsync(Shell)) await LoadAsync();
+    }
+
     async Task HandleAction(string id)
     {
         switch (id)
@@ -218,7 +217,7 @@
                 break;
 
             case "create":
-                _creating = true;
+                await CreateAsync();
                 break;
 
             case "prune":
