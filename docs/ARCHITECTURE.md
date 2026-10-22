@@ -8,8 +8,8 @@ Dray.sln
 │   ├── Dray.Core/            net10.0    domain, state store, services, nav manifest — no UI, no Docker
 │   ├── Dray.Docker/          net10.0    IContainerRuntime implemented over the Docker Engine API
 │   ├── Dray.Ui/              net10.0    Razor Class Library — ALL Blazor pages, components, wwwroot
-│   ├── Dray.App/             MAUI       shared app model + the Windows head
 │   ├── Dray.MacOS/           net10.0-macos      AppKit head
+│   ├── Dray.Windows/         net10.0-windows    WinUI head (namespace Dray.WinUI)
 │   ├── Dray.LinuxGtk/        net10.0            GTK4 head
 │   └── Dray.Cli/             net10.0    optional `dray` CLI over the same Core
 └── tests/
@@ -51,9 +51,13 @@ element with focus trap, restore, and `Escape` built in, styled globally.
 
 ### 2.1 Client, not host
 
-Dray drives an engine that is already running. It does not ship a runtime, provision a VM, or manage a
-WSL2 distro's lifecycle. It connects to Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman's
-Docker-compatible socket, a bare `dockerd`, a WSL2 distro, or a remote host — through the same API.
+Dray drives an engine that is already running. It does not ship a runtime or provision a VM. It
+connects to Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman's Docker-compatible socket, a
+bare `dockerd`, a WSL2 distro, or a remote host — through the same API.
+
+The one place it touches the machine rather than the engine is Windows setup (§2.4b), where it will
+run a documented command — after showing it — to enable a Windows feature or install WSL. It still
+does not install an engine.
 
 ```csharp
 public interface IContainerRuntime
@@ -83,11 +87,14 @@ TLS-authenticated remote daemons.
 | `unix://` | Unix domain socket — macOS, Linux |
 | `npipe://` | Named pipe — `//./pipe/dockerDesktopLinuxEngine`, `//./pipe/docker_engine` |
 | `tcp://` + TLS | `X509` handler using the context's own cert material |
-| `ssh://` | SSH tunnel to the remote socket |
+| `ssh://` | Relay process — `ssh host -- docker system dial-stdio` (§2.4a) |
+| `wsl://` | Relay process — `wsl.exe -d <distro> … dial-stdio` (§2.4a). Dray's own scheme |
 
-For `ssh://`, prefer shelling out to the system `ssh` binary so the user's `~/.ssh/config`, agent,
-jump hosts, and hardware keys work exactly as they already do. An in-process SSH.NET tunnel is the
-fallback where no `ssh` binary exists. **Do not reimplement SSH config parsing.**
+The last two have no address on this machine, so they are reached by running a program that already
+has the socket and speaking HTTP over its stdio. One transport serves both; §2.4a is the detail.
+
+For `ssh://` this means the system `ssh` binary, so the user's `~/.ssh/config`, agent, jump hosts and
+hardware keys work exactly as they already do. **Do not reimplement SSH config parsing.**
 
 ### 2.3 Contexts and hosts
 
@@ -97,14 +104,171 @@ picker alongside any Dray-specific profiles. Every host carries its own connecti
 `Disconnected → Connecting → Connected → Degraded → Unreachable` — surfaced in the picker, so a dead
 SSH host degrades one entry rather than hanging the app.
 
-### 2.4 WSL2 on Windows
+### 2.4 Windows: two engines, and a pipe name that means nothing
 
-Enumerate distros with `wsl.exe --list --verbose --quiet`, detect an engine socket inside each, and
-offer them as hosts. Docker Desktop's WSL integration is exposed through
-`//./pipe/dockerDesktopLinuxEngine`; a distro running its own `dockerd` is reached by running the
-Docker CLI inside that distro or by relaying its Unix socket. Show which distro a container's bind
-mounts actually live in — the `/mnt/c` versus native-filesystem distinction is the top cause of
-"why is this so slow" on Windows, and no GUI surfaces it today.
+Windows is the only platform where "connect to the local engine" is an ambiguous instruction, and
+the ambiguity is not cosmetic — the two answers do not share images, containers, volumes or
+networks.
+
+**Windows containers** run on this machine's own kernel through the Host Compute Service. They need
+no WSL2 and no Linux VM — but Windows ships the platform, not a daemon. The `Containers` optional
+feature is what makes containers possible; `dockerd.exe` is a separate install, and has been since
+Microsoft retired the `DockerMsftProvider` package in 2023. The documented routes now are Docker
+Desktop in Windows-container mode, Microsoft's `install-docker-ce.ps1` (which enables the feature and
+installs Moby in one step), Mirantis Container Runtime, or containerd.
+
+Isolation differs by SKU, which matters because it decides whether pause works. On Windows Server,
+process isolation is the default and Hyper-V is needed only for `--isolation=hyperv`. On Windows 10
+and 11 — Pro or Enterprise, never Home — Hyper-V is a prerequisite and containers get Hyper-V
+isolation by default. Dray does not encode any of this: it reads `/info`'s `Isolation` and lets the
+answer decide.
+
+**Linux containers** need a Linux kernel, so they run in a virtual machine. Every product does the
+same thing here and there is no clever alternative to copy: Docker Desktop uses WSL2, Rancher
+Desktop uses WSL2, and `podman machine` uses WSL2 by default with Hyper-V as its other provider.
+
+**The pipe name does not say which.** `//./pipe/docker_engine` is served by a native Windows
+`dockerd`, by Docker Desktop in whichever mode it is switched to, *and* by podman's machine, which
+forwards its Linux API to that exact name. So discovery offers the pipe and `/info`'s `OSType`
+settles what was behind it. That is why `ContainerOs` is a probed capability rather than something
+inferred from the endpoint, and why `Unknown` is a real value that must never collapse into Linux.
+
+Dray installs none of this. It is a client (§2.1), so what it owes the user is an honest account of
+the choice — which is what the first-run state says when nothing is found.
+
+#### What actually differs under a Windows engine
+
+Each of these is a branch on `RuntimeCapabilities.ContainerOs`, and each fails quietly rather than
+loudly if it is missed:
+
+| | Linux | Windows |
+|---|---|---|
+| Paths | `/etc/nginx` | `C:\inetpub`, and never a forward slash |
+| Shell | `bash`, `ash`, `sh` | `pwsh.exe`, `powershell.exe`, `cmd.exe` |
+| Directory listing | `ls -la`, parsed | archive only — `dir` is localised and unparseable |
+| Exit codes | `128 + signal`; 137 is an OOM kill | NTSTATUS; 137 means nothing |
+| CPU counter | nanoseconds | **100-nanosecond intervals**, same field, no marker |
+| Memory | `usage` less `inactive_file` | `privateworkingset`; no limit reported |
+| Process count | `pids_stats.current` | absent — `num_procs` is the CPU count, not a process count |
+| Block I/O | `blkio_stats` | `storage_stats` |
+| Default network driver | `bridge` | `nat` — `bridge` is rejected |
+| Pause | always | Hyper-V isolation only |
+
+The CPU one is the most dangerous, because reading Windows ticks as nanoseconds under-reports by a
+factor of a hundred: a pegged container draws as a flat 1% rather than failing.
+
+The volume browser needs an image to mount a volume into, and there is no Windows equivalent of
+alpine to fall back on — a Windows base image's tag has to match the host's build under process
+isolation, so no single reference is right on every machine. Dray borrows a local image and, where
+there is none, says what to pull instead of pulling a guess that would cost a gigabyte and then
+refuse to run.
+
+### 2.4a Reaching an engine that has no address here
+
+A WSL2 distro running its own `dockerd` publishes a Unix socket that exists only inside that distro.
+Windows has no path to it, and the Docker CLI has no scheme for it either.
+
+Dray reaches it the way the Docker CLI reaches `ssh://`: by running a program that already has the
+socket and speaking HTTP over its standard input and output. `docker system dial-stdio` is the
+CLI's own hidden subcommand for exactly this — it connects to whatever `DOCKER_HOST` resolves to on
+its side and copies bytes to its stdio.
+
+```
+wsl.exe -d Ubuntu -u root --exec docker system dial-stdio
+ssh -o BatchMode=yes host -- docker system dial-stdio
+```
+
+One transport (`StdioRelayHandlerFactory`) serves both, which is why `ssh://` arrived with this work
+rather than as a project of its own. It is built on `ManagedHandler` — the same hand-rolled HTTP/1.1
+client the Unix-socket and named-pipe transports use — rather than on `SocketsHttpHandler`, because
+exec and attach upgrade the connection and hand back the raw stream, which a pooling handler will
+not do.
+
+Three details are load-bearing:
+
+- **`--exec`** runs the program directly instead of through a login shell. Not an optimisation: a
+  login shell prints whatever the user's `.profile` prints, and those bytes land in the middle of an
+  HTTP response. Anyone with a banner or a version manager's greeting would see connections fail to
+  parse, intermittently, with no clue why.
+- **`-u root`**, because `/var/run/docker.sock` is mode 660 and root-owned. A user who has not added
+  themselves to the `docker` group would otherwise get a permission error that reads as the engine
+  being absent.
+- **stderr is drained and kept.** A pipe nobody reads fills, and a relay blocked writing to stderr
+  stops relaying — the connection would hang with no explanation anywhere. It is also where the
+  explanation lives: a distro with no `docker` binary produces an empty stream on stdout and the
+  reason on stderr.
+
+**The cost is one process per connection.** The handler does not pool, so every request not already
+on an open connection starts a relay. It is the same bargain the Docker CLI makes for `ssh://`. It
+matters less than it sounds like it should, because the expensive things here are the long-lived
+ones — the event stream, a log follow, a stats stream — and each of those is a single connection
+held open for as long as it is watched.
+
+**Verified.** The transport was exercised end to end against a real engine on macOS, with `docker
+system dial-stdio` standing in for the WSL launcher — the mechanism is identical and only the
+program differs. Version and info probes, container and image lists, a hijacked exec with its exit
+code, the archive endpoint streaming a tar, and a held-open stats stream all work through it.
+
+Distro enumeration is `wsl.exe --list --verbose` with `WSL_UTF8=1`, which is the only way to get
+UTF-8 out of it; builds that predate that variable write UTF-16LE, which arrives with a NUL after
+every character and is recovered by dropping them. The table is localised — both the header and the
+state word — so the parser matches on shape rather than on words: the name is the first column, the
+version is the last and is a digit in every locale, and the state is whatever lies between. Reading
+the name backwards from the version instead is wrong, and was: French reports a running distro as
+"En cours", which made every distro on a French machine parse as `Ubuntu En`.
+
+Distros belonging to a desktop product — `docker-desktop`, `rancher-desktop`, `podman-machine-*` —
+are not offered. The storage-only ones run no engine at all, and the rest are already published on a
+named pipe, so offering both routes would list one engine twice in the picker whose entire job is to
+say which engine you are looking at.
+
+> **Still to do.** Show which distro a container's bind mounts actually live in. The `/mnt/c` versus
+> native-filesystem distinction is the top cause of "why is this so slow" on Windows and no GUI
+> surfaces it today.
+
+### 2.4b Windows setup, and the one switch worth having
+
+**Dray has no Windows-container mode, and should not grow one.** Both of Docker Desktop's engines
+run at once, each on its own pipe — `dockerDesktopLinuxEngine` and `dockerDesktopWindowsEngine` —
+and containers started in either keep running across a switch. Switching only changes which engine
+the *default* pipe and CLI context resolve to. Since Dray addresses engines by endpoint and its host
+picker is the first control in the sidebar, both simply appear as two hosts. The picker is the
+switch, and unlike Docker Desktop's it stops nothing.
+
+Docker Desktop normally registers both as the `desktop-linux` and `desktop-windows` contexts, which
+discovery reads. Both pipes are probed anyway, because it does not always manage to create
+`desktop-windows`, and a pipe that is not there just fails to connect.
+
+**What the user still needs is for their terminal to agree with the screen**, and that is a Docker
+context rather than a mode. `DockerCliContext` creates one if there is not one already, and points
+the CLI at it. A context and not `DOCKER_HOST`: compose, buildx and everything else resolve their
+endpoint the same way `docker` does, so a context covers the whole toolchain where an exported
+variable covers one shell. An existing context whose endpoint matches is reused rather than
+duplicated — the comparison normalises pipe spellings, because `npipe:////./pipe/x`,
+`npipe://./pipe/x` and `//./pipe/x` are one engine, and treating them as three would create a
+duplicate context on every press.
+
+A `wsl://` host is the exception and is offered no button at all. Its socket has no Windows-side
+address — the reason Dray relays into it in the first place — so there is nothing to put in a
+context. The panel says where the command already works instead.
+
+**Guided setup** (`WindowsSetupPlan`) is two independent tracks, because they are two independent
+engines: someone who only wants Linux containers is never shown a Windows feature to enable.
+
+Every check is non-elevated. The authoritative reads need administrator, and prompting on every
+launch to answer a question nobody has asked yet is worse than not knowing — so `SetupFact.Unknown`
+is common and is not a failure. What makes that safe is that every command offered is idempotent:
+DISM against an already-enabled feature reports exactly that and changes nothing. Dray therefore
+never has to guess in order to offer a step.
+
+The signal that overrides all inference is an engine answering. A machine where both kinds of
+container already work is shown no checklist, whatever the feature probes concluded.
+
+Elevation means `UseShellExecute`, which means the child's output cannot be redirected — so each
+step runs in its own visible window. A platform constraint that happens to be the right behaviour:
+the command is shown before it runs, and its output is visible while it does. DISM's 3010 is treated
+as success-plus-restart rather than as failure, and a dismissed UAC prompt is a decision rather than
+an error.
 
 ### 2.5 Compose
 

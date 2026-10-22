@@ -34,3 +34,6 @@ src/Dray.MacOS/Assets.xcassets/DrayMark.imageset/
 
 # Local design previews
 .preview/
+
+# Local verification: screenshots, probes and notes from driving the app
+.scratch/

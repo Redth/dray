@@ -20,6 +20,7 @@ public static class DockerStats
     public static async IAsyncEnumerable<ContainerStats> StreamAsync(
         DockerClient client,
         string containerId,
+        ContainerOs os = ContainerOs.Linux,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         // Docker.DotNet pushes through IProgress, so this bridges to the pull-based stream callers
@@ -35,7 +36,7 @@ public static class DockerStats
 
         var progress = new Progress<ContainerStatsResponse>(response =>
         {
-            if (Map(response) is { } sample) channel.Writer.TryWrite(sample);
+            if (Map(response, os) is { } sample) channel.Writer.TryWrite(sample);
         });
 
         var monitor = Task.Run(async () =>
@@ -66,16 +67,48 @@ public static class DockerStats
         }
     }
 
-    internal static ContainerStats? Map(ContainerStatsResponse r)
+    /// <summary>
+    /// The engine's own units for a container's cumulative CPU counter.
+    /// <para>
+    /// Linux reports nanoseconds. Windows reports 100-nanosecond intervals — the native unit of
+    /// every Windows kernel time API — through the same <c>total_usage</c> field, with nothing in
+    /// the payload saying so. Reading a Windows counter as nanoseconds under-reports CPU by a
+    /// factor of a hundred, which is the quietest possible wrong answer: a busy container draws as
+    /// a flat 1%.
+    /// </para>
+    /// </summary>
+    const int WindowsCpuTickNanoseconds = 100;
+
+    internal static ContainerStats? Map(ContainerStatsResponse r, ContainerOs os = ContainerOs.Linux)
     {
         if (r.CPUStats is null) return null;
+
+        // The response carries its own OSType on engines that set it. Trusting it over the
+        // capability is right: it describes the container this sample is of, while the capability
+        // describes the engine, and only the former can be wrong about a given container.
+        var sampleOs = r.OSType?.Trim().ToLowerInvariant() switch
+        {
+            "windows" => ContainerOs.Windows,
+            "linux" => ContainerOs.Linux,
+            _ => os,
+        };
+
+        var isWindows = sampleOs == ContainerOs.Windows;
 
         var containerDelta = CpuUsage.Delta(
             r.CPUStats.CPUUsage?.TotalUsage ?? 0,
             r.PreCPUStats?.CPUUsage?.TotalUsage ?? 0);
 
-        // OnlineCPUs is absent on some engines; the per-CPU array length is the same fact.
-        var onlineCpus = (int)(r.CPUStats.OnlineCPUs ?? (ulong)(r.CPUStats.CPUUsage?.PercpuUsage?.Count ?? 0));
+        // Delta() returns -1 for a counter reset, which Percent() reads as "no rate". Scaling that
+        // sentinel would turn it into -100 and lose the meaning, so only a real delta is converted.
+        if (isWindows && containerDelta > 0) containerDelta *= WindowsCpuTickNanoseconds;
+
+        // OnlineCPUs is absent on some engines; the per-CPU array length is the same fact. Windows
+        // reports neither and puts the processor count in NumProcs instead — the field `docker
+        // stats` itself uses for the ceiling on that platform.
+        var onlineCpus = isWindows
+            ? (int)r.NumProcs
+            : (int)(r.CPUStats.OnlineCPUs ?? (ulong)(r.CPUStats.CPUUsage?.PercpuUsage?.Count ?? 0));
 
         // The interval between the engine's own two readings, not between our two receipts —
         // a sample delayed in our queue must not read as a busier container.
@@ -86,13 +119,41 @@ public static class DockerStats
         return new ContainerStats(
             Timestamp: DockerTime.FromOrNow(r.Read),
             CpuPercent: CpuUsage.Percent(containerDelta, elapsed, onlineCpus),
-            MemoryBytes: WorkingSet(r.MemoryStats),
-            MemoryLimitBytes: (long)(r.MemoryStats?.Limit ?? 0),
+            MemoryBytes: isWindows ? WindowsWorkingSet(r.MemoryStats) : WorkingSet(r.MemoryStats),
+
+            // A Windows engine reports no memory limit, so there is no percentage to compute.
+            // ContainerStats reads a zero here as "no limit", which is exactly the truth.
+            MemoryLimitBytes: isWindows ? 0 : (long)(r.MemoryStats?.Limit ?? 0),
+
             NetworkRxBytes: r.Networks?.Values.Sum(n => (long)n.RxBytes) ?? 0,
             NetworkTxBytes: r.Networks?.Values.Sum(n => (long)n.TxBytes) ?? 0,
-            BlockReadBytes: BlockBytes(r.BlkioStats, "read"),
-            BlockWriteBytes: BlockBytes(r.BlkioStats, "write"),
-            ProcessCount: (int)(r.PidsStats?.Current ?? 0));
+
+            // Windows has no cgroups and so no blkio; the same numbers arrive under storage_stats.
+            BlockReadBytes: isWindows ? (long)(r.StorageStats?.ReadSizeBytes ?? 0) : BlockBytes(r.BlkioStats, "read"),
+            BlockWriteBytes: isWindows ? (long)(r.StorageStats?.WriteSizeBytes ?? 0) : BlockBytes(r.BlkioStats, "write"),
+
+            // num_procs is the host's processor count on Windows, not a process count, and there is
+            // no pids_stats. The absence is reported as an absence rather than as zero.
+            ProcessCount: isWindows ? null : (int?)(r.PidsStats?.Current ?? 0));
+    }
+
+    /// <summary>
+    /// Memory in use by a Windows container.
+    /// <para>
+    /// <c>docker stats</c> uses <c>privateworkingset</c> here, and the cgroup-shaped
+    /// <c>usage</c> / <c>inactive_file</c> arithmetic the Linux path does has no counterpart —
+    /// those fields are simply absent. Commit charge is the documented fallback, and is what the
+    /// engine compares a memory limit against when one is set.
+    /// </para>
+    /// </summary>
+    internal static long WindowsWorkingSet(MemoryStats? memory)
+    {
+        if (memory is null) return 0;
+
+        if (memory.PrivateWorkingSet is > 0 and var privateSet) return (long)privateSet;
+        if (memory.Commit is > 0 and var commit) return (long)commit;
+
+        return 0;
     }
 
     /// <summary>

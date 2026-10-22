@@ -19,6 +19,13 @@ builder.Services.AddSingleton<IPlatformTheme, GeneratedPaletteTheme>();
 // per-connection: switching browser tab must not tear down and re-seed the connection.
 builder.Services.AddSingleton<IDockerConfigSource, SystemDockerConfigSource>();
 builder.Services.AddSingleton<DockerContextReader>();
+
+// Windows setup and CLI-context help. Registered everywhere rather than behind an OS check: each
+// reports "not applicable" off Windows, and a service that exists only on one platform is one the
+// pages have to guard around.
+builder.Services.AddSingleton<WindowsSetupReader>();
+builder.Services.AddSingleton<SetupStepRunner>();
+builder.Services.AddSingleton<DockerCliContext>();
 // Two engines behind one seam. The composite dispatches on the endpoint's scheme, so an Apple
 // host in the picker gets Apple's runtime and everything else gets Docker's — and no page above
 // this line knows either exists.

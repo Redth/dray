@@ -111,7 +111,13 @@ public sealed class ShellState : IShellState
         // A host may still be showing an action the current page no longer declares — a stale
         // toolbar item mid-navigation. Dropping it is correct; routing it to whichever page
         // happens to be listening is not.
-        if (!Chrome.ActionList.Any(a => a.Id == actionId && a.IsEnabled)) return;
+        //
+        // Back is declared beside the actions rather than among them, so it is checked on its own.
+        // Missing that made every native back button a silent no-op.
+        var declared = Chrome.Back?.Id == actionId
+            || Chrome.ActionList.Any(a => a.Id == actionId && a.IsEnabled);
+
+        if (!declared) return;
 
         ActionInvoked?.Invoke(actionId);
     }

@@ -121,11 +121,6 @@
             }
         }
     </div>
-
-    @if (_creating)
-    {
-        <NetworkDialog Open="true" OpenChanged="open => _creating = open" OnCreated="LoadAsync" />
-    }
 </EngineScope>
 
 @code {
@@ -138,7 +133,6 @@
     string? _notice;
     bool _noticeOk;
     string _search = "";
-    bool _creating;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -244,6 +238,11 @@
                 ChromeAction.Secondary("hosts", "Switch engine…", IconRef.Host),
             ]);
 
+    async Task CreateAsync()
+    {
+        if (await NetworkDialog.ShowAsync(Shell)) await LoadAsync();
+    }
+
     async Task HandleAction(string id)
     {
         switch (id)
@@ -257,7 +256,7 @@
                 break;
 
             case "create":
-                _creating = true;
+                await CreateAsync();
                 break;
 
             case "prune":

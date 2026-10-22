@@ -39,7 +39,17 @@ and compose stacks — locally and on any host reachable through a Docker contex
 It manages the engine you already have. Dray does not ship a runtime, does not provision a VM, and
 does not compete with Docker Desktop, Colima, OrbStack, Rancher Desktop, or a bare `dockerd`. It
 connects to whichever of those is running, and to WSL2 distros on Windows, and to remote hosts over
-SSH. Runtime ownership is deliberately behind an interface seam (`IContainerRuntime`) so that Apple's
+SSH.
+
+**One deliberate exception, on Windows only.** Windows is the one platform where a developer can be
+left with no engine and no idea which of two unrelated things to install, because Windows containers
+and Linux containers are separate engines that share nothing. There, Dray names exactly what is
+missing and offers to run the documented command for it — showing the command first, running it only
+when asked, and elevating in the open. It stops short of installing an engine: which engine to run
+is a licensing decision as much as a technical one, and a half-finished engine install is a worse
+place to be left than no engine at all. Helping someone get an engine is not the same as owning one.
+
+Runtime ownership is deliberately behind an interface seam (`IContainerRuntime`) so that Apple's
 `container` framework and, if it ever earns its place, machine lifecycle management can land later
 without a rewrite.
 

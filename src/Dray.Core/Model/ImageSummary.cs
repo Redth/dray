@@ -211,12 +211,36 @@ public sealed record PullProgress(
 }
 
 /// <summary>What to create a network with. Only the fields Dray offers.</summary>
+/// <param name="Driver">
+/// The network driver, or null to let the engine's own default apply.
+/// <para>
+/// Null rather than <c>"bridge"</c>, because <c>bridge</c> does not exist on a Windows engine —
+/// the equivalent there is <c>nat</c>, and asking for a bridge gets the request rejected. Nothing
+/// above the runtime should have to know which engine it is talking to in order to make a network,
+/// so the name is resolved where the OS is known.
+/// </para>
+/// </param>
 public sealed record NetworkRequest(
     string Name,
-    string Driver = "bridge",
+    string? Driver = null,
     string? Subnet = null,
     string? Gateway = null,
     bool Internal = false);
+
+/// <summary>The default network driver, which is not the same word on both platforms.</summary>
+public static class NetworkDrivers
+{
+    /// <summary>Linux's default bridge driver.</summary>
+    public const string Bridge = "bridge";
+
+    /// <summary>
+    /// Windows's equivalent: a NAT network behind the host's adapter. What <c>docker network
+    /// create</c> makes on a Windows engine when asked for nothing in particular.
+    /// </summary>
+    public const string Nat = "nat";
+
+    public static string DefaultFor(ContainerOs os) => os == ContainerOs.Windows ? Nat : Bridge;
+}
 
 /// <summary>What to build.</summary>
 /// <param name="ContextDirectory">

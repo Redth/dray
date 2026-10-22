@@ -86,7 +86,9 @@ public static class DockerPrune
 
     static async Task<PrunePreview> PreviewNetworksAsync(DockerClient client, CancellationToken ct)
     {
-        var networks = await DockerNetworks.ListAsync(client, ct).ConfigureAwait(false);
+        // The driver name is only used for display here, and prune does not create anything,
+        // so the OS makes no difference to the preview.
+        var networks = await DockerNetworks.ListAsync(client, ct: ct).ConfigureAwait(false);
 
         var unused = networks
             .Where(n => !n.IsInUse && !n.IsPredefined)

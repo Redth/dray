@@ -113,6 +113,7 @@
                                browser rather than leaving the previous one's directory on screen. *@
                             <FileBrowser @key="container.Id"
                                          SourceKey="@container.Id"
+                                         Os="container.Os"
                                          ListAsync="(path, ct) => Engine.ListDirectoryAsync(container.Id, path, container.State == DockerState.Running, ct)"
                                          ReadAsync="(path, ct) => Engine.ReadFileAsync(container.Id, path, ct)"
                                          WriteAsync="(path, bytes, ct) => WriteAsync(container.Id, path, bytes, ct)" />

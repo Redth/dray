@@ -66,8 +66,27 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         // Podman reports itself in the components list and in a few info fields; Docker does not.
         var flavor = LooksLikePodman(version, info) ? EngineFlavor.Podman : EngineFlavor.Docker;
 
+        var containerOs = ReadContainerOs(info, version);
+
+        // Empty on a Linux engine, and on a Windows engine that declined to say. "" is not
+        // "process": a Windows engine whose default Dray does not know is one whose pause support
+        // Dray does not know either, and the flag below says so rather than guessing.
+        var isolation = containerOs == ContainerOs.Windows && !string.IsNullOrWhiteSpace(info.Isolation)
+            ? info.Isolation.Trim().ToLowerInvariant()
+            : null;
+
         return new RuntimeCapabilities
         {
+            ContainerOs = containerOs,
+            DefaultIsolation = isolation,
+
+            // Windows freezes a container by suspending its utility VM, so there is nothing to
+            // freeze under process isolation. Hyper-V isolation can, and says so.
+            //
+            // Unknown isolation is treated as unable rather than able: offering Pause and having
+            // it fail is the outcome ContainerAction.cs calls worse than no button at all.
+            SupportsPause = containerOs != ContainerOs.Windows || isolation == "hyperv",
+
             ApiVersion = version.APIVersion,
             EngineVersion = version.Version,
             Flavor = flavor,
@@ -102,6 +121,30 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         };
     }
 
+    /// <summary>
+    /// What the containers on this engine are.
+    /// <para>
+    /// <c>/info</c>'s <c>OSType</c> is the answer and the endpoint is not, because on Windows the
+    /// two local engines share a pipe name: podman's machine forwards its Linux API to
+    /// <c>//./pipe/docker_engine</c>, which is also where a native Windows <c>dockerd</c> serves.
+    /// </para>
+    /// <para>
+    /// An engine that reports neither <c>OSType</c> nor <c>/version</c>'s <c>Os</c> leaves this
+    /// Unknown, and every caller treats Unknown as "do not branch" rather than as Linux.
+    /// </para>
+    /// </summary>
+    static ContainerOs ReadContainerOs(SystemInfoResponse info, VersionResponse version)
+    {
+        var reported = !string.IsNullOrWhiteSpace(info.OSType) ? info.OSType : version.Os;
+
+        return reported?.Trim().ToLowerInvariant() switch
+        {
+            "windows" => ContainerOs.Windows,
+            "linux" => ContainerOs.Linux,
+            _ => ContainerOs.Unknown,
+        };
+    }
+
     static bool LooksLikePodman(VersionResponse version, SystemInfoResponse info)
         => (version.Components?.Any(c => c.Name?.Contains("podman", StringComparison.OrdinalIgnoreCase) == true) ?? false)
            || (info.Name?.Contains("podman", StringComparison.OrdinalIgnoreCase) ?? false)
@@ -127,9 +170,12 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     internal static bool IsUsersOwn(ContainerListResponse c)
         => c.Labels?.ContainsKey(DockerVolumeSession.HelperLabel) != true;
 
-    internal static ContainerSummary Map(ContainerListResponse c) => new()
+    ContainerSummary Map(ContainerListResponse c) => Map(c, Capabilities.ContainerOs);
+
+    internal static ContainerSummary Map(ContainerListResponse c, ContainerOs os) => new()
     {
         Id = c.ID,
+        Os = os,
 
         // Docker returns names with a leading slash, and a container can carry several; the first
         // is the one users recognise.
@@ -290,13 +336,13 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         => DockerLogStream.ReadAsync(Client, containerId, options, ct);
 
     public Task<DirectoryListing> ListDirectoryAsync(string containerId, string path, bool containerIsRunning, CancellationToken ct = default)
-        => DockerFileSystem.ListAsync(Client, containerId, path, containerIsRunning, ct);
+        => DockerFileSystem.ListAsync(Client, containerId, path, containerIsRunning, Capabilities.ContainerOs, ct);
 
     public Task<byte[]> ReadFileAsync(string containerId, string path, CancellationToken ct = default)
-        => DockerFileSystem.ReadFileAsync(Client, containerId, path, ct);
+        => DockerFileSystem.ReadFileAsync(Client, containerId, path, Capabilities.ContainerOs, ct);
 
     public Task WriteFileAsync(string containerId, string path, byte[] content, CancellationToken ct = default)
-        => DockerFileSystem.WriteFileAsync(Client, containerId, path, content, ct);
+        => DockerFileSystem.WriteFileAsync(Client, containerId, path, content, Capabilities.ContainerOs, ct);
 
     public Task<string> RunAsync(RunRequest request, CancellationToken ct = default)
         => DockerRun.RunAsync(Client, request, ct);
@@ -334,7 +380,7 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             // between the two shows the curated view without the raw one rather than failing.
             var raw = await ReadRawInspectAsync(containerId, ct).ConfigureAwait(false);
 
-            return DockerInspect.Map(response, raw);
+            return DockerInspect.Map(response, raw, Capabilities.ContainerOs);
         }
         catch (DockerApiException ex) when ((int)ex.StatusCode == 404)
         {
@@ -419,7 +465,7 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     {
         try
         {
-            return await DockerNetworks.ListAsync(Client, ct).ConfigureAwait(false);
+            return await DockerNetworks.ListAsync(Client, Capabilities.ContainerOs, ct).ConfigureAwait(false);
         }
         catch (DockerApiException ex)
         {
@@ -428,7 +474,7 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     }
 
     public Task CreateNetworkAsync(NetworkRequest request, CancellationToken ct = default)
-        => DockerNetworks.CreateAsync(Client, request, ct);
+        => DockerNetworks.CreateAsync(Client, request, Capabilities.ContainerOs, ct);
 
     public Task RemoveNetworkAsync(string networkId, CancellationToken ct = default)
         => DockerNetworks.RemoveAsync(Client, networkId, ct);
@@ -496,13 +542,13 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     }
 
     public async Task<IVolumeSession> OpenVolumeAsync(string volumeName, CancellationToken ct = default)
-        => await DockerVolumeSession.OpenAsync(Client, volumeName, ct).ConfigureAwait(false);
+        => await DockerVolumeSession.OpenAsync(Client, volumeName, Capabilities.ContainerOs, ct).ConfigureAwait(false);
 
     public IAsyncEnumerable<ContainerStats> StreamStatsAsync(string containerId, CancellationToken ct = default)
-        => DockerStats.StreamAsync(Client, containerId, ct);
+        => DockerStats.StreamAsync(Client, containerId, Capabilities.ContainerOs, ct);
 
     public Task<IExecSession> StartExecAsync(string containerId, ExecOptions options, CancellationToken ct = default)
-        => DockerExec.StartAsync(Client, containerId, options, ct);
+        => DockerExec.StartAsync(Client, containerId, options, Capabilities.ContainerOs, ct);
 
     public async Task<SystemInfo> GetSystemInfoAsync(CancellationToken ct = default)
     {

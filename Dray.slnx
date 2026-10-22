@@ -6,6 +6,7 @@
     <Project Path="src/Dray.Docker/Dray.Docker.csproj" />
     <Project Path="src/Dray.MacOS/Dray.MacOS.csproj" />
     <Project Path="src/Dray.Ui/Dray.Ui.csproj" />
+    <Project Path="src/Dray.Windows/Dray.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Dray.Core.Tests/Dray.Core.Tests.csproj" />

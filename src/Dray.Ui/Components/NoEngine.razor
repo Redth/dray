@@ -3,13 +3,62 @@
 
 <EmptyState Icon="IconRef.Host"
             Title="No container engine found"
-            Body="Dray looked at your Docker contexts, DOCKER_HOST, and the sockets Docker Desktop, OrbStack, Colima, Rancher Desktop and Podman use. Start one of those, or add a host to connect over SSH.">
+            Body="@LookedFor">
     <Actions>
         <Button Label="Look again" Icon="IconRef.Refresh" Variant="ButtonVariant.Primary" OnClick="OnRetry" />
         <Button Label="Add a host…" Icon="IconRef.Plus" />
     </Actions>
 </EmptyState>
 
+@if (OperatingSystem.IsWindows())
+{
+    @* Windows is the one platform where "install an engine" is two different answers, and a user
+       who does not know that will install the wrong one. The two kinds of container do not share
+       images, containers, volumes or networks, and nothing in Docker's own first-run explains it.
+       Dray does not install either — it is a client (PRODUCT.md) — but it can say what the choice
+       actually is. *@
+    <div class="panel noengine__windows">
+        <div class="panel__head"><span class="panel__title">Two kinds of engine on Windows</span></div>
+        <div class="panel__body">
+            <dl class="noengine__options">
+                <dt>Linux containers</dt>
+                <dd>
+                    Need a Linux kernel, so they run inside a virtual machine. WSL2 is the usual one:
+                    Docker Desktop, Rancher Desktop and <span class="mono">podman machine</span> each
+                    set one up, or you can install an engine inside a distro yourself and Dray will
+                    offer that distro as a host. This is what almost every image on Docker Hub is
+                    built for.
+                </dd>
+
+                <dt>Windows containers</dt>
+                <dd>
+                    Run directly on this machine's own kernel — no WSL2 and no Linux virtual machine.
+                    Windows ships the <span class="mono">Containers</span> feature that makes them
+                    possible, but not an engine to drive it, so one still has to be installed: Docker
+                    Desktop switched into Windows-container mode, or on Windows Server, Microsoft's
+                    <span class="mono">install-docker-ce.ps1</span> script. On Windows 11 this needs
+                    Pro or Enterprise with Hyper-V enabled. These are the images Microsoft publishes
+                    — Nano Server, Server Core, and the .NET Framework images built on them.
+                </dd>
+            </dl>
+
+            <p class="noengine__note muted">
+                The two are separate engines with separate images, containers, volumes and networks.
+                Switching between them does not convert anything; it changes which engine you are
+                looking at.
+            </p>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter] public EventCallback OnRetry { get; set; }
+
+    /// <summary>
+    /// What Dray actually looked at, named rather than summarised — a user who can see the list
+    /// can tell whether the thing they installed is on it.
+    /// </summary>
+    static string LookedFor => OperatingSystem.IsWindows()
+        ? "Dray looked at your Docker contexts, DOCKER_HOST, the named pipes Docker Desktop, a native Docker engine and Podman use, and your WSL2 distributions. Start one of those, or add a host to connect over SSH."
+        : "Dray looked at your Docker contexts, DOCKER_HOST, and the sockets Docker Desktop, OrbStack, Colima, Rancher Desktop and Podman use. Start one of those, or add a host to connect over SSH.";
 }

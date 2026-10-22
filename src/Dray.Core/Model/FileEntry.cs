@@ -13,35 +13,23 @@ public sealed record FileEntry(
     public bool IsSymlink => LinkTarget is not null;
 
     /// <summary>Parent directory, or null at the root.</summary>
-    public static string? ParentOf(string path)
-    {
-        path = Normalize(path);
-        if (path == "/") return null;
-
-        var slash = path.LastIndexOf('/');
-        return slash <= 0 ? "/" : path[..slash];
-    }
+    /// <param name="os">
+    /// The container's OS, not this machine's. Defaulted to Linux because that is what every
+    /// caller predating Windows-container support was looking at; the Windows paths pass it.
+    /// </param>
+    public static string? ParentOf(string path, ContainerOs os = ContainerOs.Linux)
+        => ContainerPath.ParentOf(path, os);
 
     /// <summary>Join a directory and a child name into an absolute container path.</summary>
-    public static string Combine(string directory, string name)
-        => Normalize(Normalize(directory) == "/" ? "/" + name : Normalize(directory) + "/" + name);
+    public static string Combine(string directory, string name, ContainerOs os = ContainerOs.Linux)
+        => ContainerPath.Combine(directory, name, os);
 
     /// <summary>
-    /// Container paths are always absolute and POSIX, whatever the host running Dray. Using
-    /// <c>System.IO.Path</c> here would produce backslashes on Windows and break every lookup.
+    /// Put a container path into its canonical form. See <see cref="ContainerPath"/> for why the
+    /// container's OS decides the shape and the host Dray runs on never does.
     /// </summary>
-    public static string Normalize(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return "/";
-
-        path = path.Replace('\\', '/').Trim();
-        if (!path.StartsWith('/')) path = "/" + path;
-
-        while (path.Contains("//", StringComparison.Ordinal))
-            path = path.Replace("//", "/", StringComparison.Ordinal);
-
-        return path.Length > 1 ? path.TrimEnd('/') : "/";
-    }
+    public static string Normalize(string path, ContainerOs os = ContainerOs.Linux)
+        => ContainerPath.Normalize(path, os);
 }
 
 /// <summary>How a listing was obtained. Surfaced because the two have different costs and limits.</summary>

@@ -1,0 +1,62 @@
+.track + .track {
+    margin-top: var(--s5);
+    padding-top: var(--s5);
+    border-top: var(--border-width) solid var(--border);
+}
+
+.track__title {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin: 0 0 var(--s2);
+    font-size: var(--text-md);
+    font-weight: var(--weight-medium);
+}
+
+.track__done,
+.track__advice {
+    margin: 0;
+    max-width: 72ch;
+    font-size: var(--text-sm);
+}
+
+.track__advice {
+    margin-top: var(--s3);
+}
+
+.track__step + .track__step {
+    margin-top: var(--s4);
+}
+
+.track__stephead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+}
+
+.track__steptitle {
+    font-weight: var(--weight-medium);
+}
+
+.track__why {
+    margin: var(--s1) 0 var(--s2);
+    max-width: 72ch;
+    font-size: var(--text-sm);
+}
+
+/* The command reads as something to be run, and is selectable so it can be copied — one of the
+   places DESIGN.md 2.6 keeps selection on, because the range is the unit of interest. */
+.track__cmd {
+    padding: var(--s2) var(--s3);
+    background: var(--surface-sunken);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    user-select: text;
+}
+
+.track__cost {
+    margin: var(--s2) 0 0;
+    font-size: var(--text-sm);
+}

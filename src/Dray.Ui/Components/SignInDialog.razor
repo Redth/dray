@@ -3,67 +3,88 @@
    docs/CREDENTIALS.md §1.4: Dray takes a username and a token, hands both to the helper's `store`,
    and forgets them. The secret lives in a local for the length of one call — never rendered, never
    logged, never held in a field that survives this dialog. *@
+@inherits DialogBody
 @inject RegistryReader Reader
 
-<Dialog Title="@($"Sign in to {Registry.DisplayName}")" Open="Open" OpenChanged="OpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="signin-user">Username</label>
-            <input id="signin-user" class="input" @bind="_username" @bind:event="oninput"
-                   autocomplete="off" spellcheck="false" disabled="@_saving" />
-        </div>
+<div class="field">
+    <label class="field__label" for="signin-user">Username</label>
+    <input id="signin-user" class="input" @bind="_username" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" disabled="@_saving" />
+</div>
 
-        <div class="field">
-            <label class="field__label" for="signin-secret">
-                Token <span class="muted">— prefer an access token over your password</span>
-            </label>
-            <input id="signin-secret" class="input" type="password"
-                   @bind="_secret" @bind:event="oninput"
-                   autocomplete="off" spellcheck="false" disabled="@_saving" />
-        </div>
+<div class="field">
+    <label class="field__label" for="signin-secret">
+        Token <span class="muted">— prefer an access token over your password</span>
+    </label>
+    <input id="signin-secret" class="input" type="password"
+           @bind="_secret" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" disabled="@_saving" />
+</div>
 
-        @if (_problem is { } problem)
-        {
-            <p class="signin__problem">@problem</p>
-        }
-        else
-        {
-            <p class="signin__hint muted">
-                This goes straight to <span class="mono">@("docker-credential-" + Registry.Helper)</span>,
-                the same store the <span class="mono">docker</span> command uses. Dray keeps no copy.
-            </p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => OpenChanged.InvokeAsync(false)" />
-        <Button Label="Sign in" Variant="ButtonVariant.Primary" Busy="_saving"
-                Disabled="@(_saving || _username.Length == 0 || _secret.Length == 0)"
-                OnClick="SubmitAsync" />
-    </Footer>
-</Dialog>
+@if (_problem is { } problem)
+{
+    <p class="signin__problem">@problem</p>
+}
+else
+{
+    <p class="signin__hint muted">
+        This goes straight to <span class="mono">@("docker-credential-" + Registry.Helper)</span>,
+        the same store the <span class="mono">docker</span> command uses. Dray keeps no copy.
+    </p>
+}
 
 @code {
+    /// <summary>
+    /// Open it. True once the helper has stored the credential. Deliberately carries no credential
+    /// out: the page learns that it worked and nothing else.
+    /// </summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell, RegistryEntry registry)
+    {
+        var dialog = new DialogController();
+        await shell.ShowDialogAsync(new DialogRequest(
+            $"Sign in to {registry.DisplayName}",
+            typeof(SignInDialog),
+            Parameters: new Dictionary<string, object?> { [nameof(Registry)] = registry },
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("signin", "Sign in")],
+            Controller: dialog));
+
+        return dialog.Result == "signin";
+    }
+
     [Parameter, EditorRequired] public RegistryEntry Registry { get; set; } = default!;
-
-    [Parameter] public bool Open { get; set; }
-
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
-
-    /// <summary>Raised with the server on success. Deliberately carries no credential.</summary>
-    [Parameter] public EventCallback<string> OnSignedIn { get; set; }
 
     string _username = "";
     string _secret = "";
     string? _problem;
     bool _saving;
 
-    protected override void OnParametersSet()
-    {
-        if (!Open) return;
+    // Prefilled with the username already stored, because signing in again to refresh a token is
+    // the common case and retyping it is friction for nothing. Once, when the dialog opens: the
+    // host re-renders the body whenever a button changes, and a cleared field must stay cleared.
+    protected override void OnInitialized() => _username = Registry.Username ?? "";
 
-        // Prefilled with the username already stored, because signing in again to refresh a token
-        // is the common case and retyping it is friction for nothing.
-        if (_username.Length == 0) _username = Registry.Username ?? "";
+    protected override void DeclareButtons()
+    {
+        Button("cancel", "Cancel");
+        Button("signin", "Sign in",
+            enabled: !_saving && _username.Length > 0 && _secret.Length > 0, busy: _saving);
+    }
+
+    protected override async Task<bool> OnButtonAsync(string buttonId)
+    {
+        if (buttonId == "signin")
+        {
+            await SubmitAsync();
+
+            // No helper to store into is refused before anything is asked, and sets the problem
+            // without passing the re-render in SubmitAsync's finally.
+            StateHasChanged();
+
+            // A sign-in closes the dialog itself, and only once the helper has stored it.
+            return false;
+        }
+
+        return true;
     }
 
     async Task SubmitAsync()
@@ -77,15 +98,15 @@
         _saving = true;
         _problem = null;
 
+        // Submitted from the head's button, and only an event handler re-renders by itself — so
+        // the buttons learn they are busy from here.
+        StateHasChanged();
+
         try
         {
             _problem = await Reader.StoreAsync(helper, Registry.Server, _username.Trim(), _secret);
 
-            if (_problem is null)
-            {
-                await OnSignedIn.InvokeAsync(Registry.DisplayName);
-                await OpenChanged.InvokeAsync(false);
-            }
+            if (_problem is null) Close("signin");
         }
         finally
         {
@@ -93,6 +114,7 @@
             // component field for the rest of the session.
             _secret = "";
             _saving = false;
+            StateHasChanged();
         }
     }
 }

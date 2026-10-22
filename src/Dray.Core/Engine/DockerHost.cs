@@ -1,3 +1,5 @@
+using Dray.Core.Model;
+
 namespace Dray.Core.Engine;
 
 /// <summary>Where Dray learned about a host. Decides ordering and what the user may edit.</summary>
@@ -69,6 +71,33 @@ public sealed record RuntimeCapabilities
 
     public string? Architecture { get; init; }
 
+    /// <summary>
+    /// What the containers on this engine are. Read from <c>/info</c>'s <c>OSType</c>, never
+    /// inferred from the endpoint.
+    /// <para>
+    /// Inferring it is specifically wrong on Windows: podman's machine forwards its API to
+    /// <c>//./pipe/docker_engine</c>, which is the same pipe a native Windows <c>dockerd</c>
+    /// serves. One of those runs Linux containers and the other runs Windows containers, and the
+    /// name they share does not say which.
+    /// </para>
+    /// </summary>
+    public ContainerOs ContainerOs { get; init; } = ContainerOs.Unknown;
+
+    /// <summary>
+    /// The isolation a Windows engine uses when a run does not ask for one: <c>process</c> or
+    /// <c>hyperv</c>. Null on a Linux engine, which has no such concept.
+    /// <para>
+    /// Load-bearing rather than informational — it decides <see cref="SupportsPause"/>, because
+    /// Windows can only freeze a container that has its own utility VM.
+    /// </para>
+    /// </summary>
+    public string? DefaultIsolation { get; init; }
+
+    /// <summary>
+    /// True when this engine runs Windows containers. The one branch everything else keys off.
+    /// </summary>
+    public bool IsWindowsContainers => ContainerOs == ContainerOs.Windows;
+
     /// <summary><c>docker compose</c> is available for this host.</summary>
     public bool SupportsCompose { get; init; }
 
@@ -82,7 +111,9 @@ public sealed record RuntimeCapabilities
     public bool SupportsEvents { get; init; } = true;
 
     /// <summary>
-    /// Pause and resume. Absent on Apple's runtime, where a container is a VM with no freezer.
+    /// Pause and resume. Absent on Apple's runtime, where a container is a VM with no freezer, and
+    /// absent on a Windows engine defaulting to process isolation, where there is no utility VM to
+    /// suspend — Windows implements pause only for Hyper-V-isolated containers.
     /// <para>
     /// A capability rather than a caught exception, because the alternative is a Pause button that
     /// always fails. ContainerAction.cs is explicit about why that is worse than no button:

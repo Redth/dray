@@ -9,7 +9,7 @@ namespace Dray.Docker;
 public static class DockerNetworks
 {
     public static async Task<IReadOnlyList<NetworkSummary>> ListAsync(
-        DockerClient client, CancellationToken ct = default)
+        DockerClient client, ContainerOs os = ContainerOs.Linux, CancellationToken ct = default)
     {
         var responses = await client.Networks.ListNetworksAsync(new NetworksListParameters(), ct)
             .ConfigureAwait(false);
@@ -20,7 +20,7 @@ public static class DockerNetworks
 
         foreach (var network in responses)
         {
-            detailed.Add(await DescribeAsync(client, network, ct).ConfigureAwait(false));
+            detailed.Add(await DescribeAsync(client, network, os, ct).ConfigureAwait(false));
         }
 
         return
@@ -34,25 +34,25 @@ public static class DockerNetworks
     }
 
     static async Task<NetworkSummary> DescribeAsync(
-        DockerClient client, NetworkResponse listed, CancellationToken ct)
+        DockerClient client, NetworkResponse listed, ContainerOs os, CancellationToken ct)
     {
         try
         {
-            return Map(await client.Networks.InspectNetworkAsync(listed.ID, ct).ConfigureAwait(false));
+            return Map(await client.Networks.InspectNetworkAsync(listed.ID, ct).ConfigureAwait(false), os);
         }
         catch (Exception ex) when (ex is DockerApiException or HttpRequestException)
         {
             // Removed between the list and the inspect, or an engine that will not inspect it.
             // The list entry is still worth showing, just without its members.
-            return Map(listed);
+            return Map(listed, os);
         }
     }
 
-    internal static NetworkSummary Map(NetworkResponse n) => new()
+    internal static NetworkSummary Map(NetworkResponse n, ContainerOs os = ContainerOs.Linux) => new()
     {
         Id = n.ID,
         Name = n.Name,
-        Driver = string.IsNullOrWhiteSpace(n.Driver) ? "bridge" : n.Driver,
+        Driver = string.IsNullOrWhiteSpace(n.Driver) ? NetworkDrivers.DefaultFor(os) : n.Driver,
         Scope = string.IsNullOrWhiteSpace(n.Scope) ? null : n.Scope,
         Created = DockerTime.From(n.Created),
         IsInternal = n.Internal,
@@ -82,12 +82,18 @@ public static class DockerNetworks
     };
 
     public static async Task CreateAsync(
-        DockerClient client, NetworkRequest request, CancellationToken ct = default)
+        DockerClient client, NetworkRequest request, ContainerOs os = ContainerOs.Linux, CancellationToken ct = default)
     {
         var parameters = new NetworksCreateParameters
         {
             Name = request.Name,
-            Driver = request.Driver,
+
+            // Resolved here because this is the first place that knows which engine is listening.
+            // A Windows engine has no bridge driver and rejects the name outright.
+            Driver = string.IsNullOrWhiteSpace(request.Driver)
+                ? NetworkDrivers.DefaultFor(os)
+                : request.Driver,
+
             Internal = request.Internal,
         };
 

@@ -110,11 +110,23 @@ public static class Icons
     /// <summary>Adwaita icon name, for GTK chrome.</summary>
     public static string GtkName(IconRef icon) => GtkNames[icon];
 
-    /// <summary>
-    /// Sprite fragment id for the WebView (and for Windows chrome, which renders the same
-    /// geometry rather than guessing at Segoe Fluent codepoints).
-    /// </summary>
+    /// <summary>Sprite fragment id, for the WebView.</summary>
     public static string SpriteId(IconRef icon) => "i-" + SpriteSlugs[icon];
+
+    /// <summary>
+    /// The sprite geometry as a standalone SVG document, stroked in <paramref name="stroke"/>.
+    /// <para>
+    /// For Windows chrome, which renders the same geometry rather than guessing at Segoe Fluent
+    /// codepoints. A native image has no <c>currentColor</c> to inherit, so the head passes the
+    /// colour it resolved from the generated palette for the theme it is drawing.
+    /// </para>
+    /// </summary>
+    public static string Svg(IconRef icon, string stroke) =>
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='${geometry.viewBox}' fill='none' " +
+        "stroke='" + stroke + "' stroke-width='${geometry.strokeWidth}' " +
+        "stroke-linecap='${geometry.linecap}' stroke-linejoin='${geometry.linejoin}'>" +
+        SvgBodies[icon] + "</svg>";
+
 
     public static readonly IReadOnlyDictionary<IconRef, string> SfSymbols = new Dictionary<IconRef, string>
     {
@@ -124,6 +136,11 @@ ${table('sf')}
     public static readonly IReadOnlyDictionary<IconRef, string> GtkNames = new Dictionary<IconRef, string>
     {
 ${table('gtk')}
+    };
+
+    static readonly IReadOnlyDictionary<IconRef, string> SvgBodies = new Dictionary<IconRef, string>
+    {
+${table('svg')}
     };
 
     internal static readonly IReadOnlyDictionary<IconRef, string> SpriteSlugs = new Dictionary<IconRef, string>
@@ -161,19 +178,23 @@ const markTemplateContents = JSON.stringify(
 
 // ------------------------------------------------------------------ write / check
 
+// `ignored` marks the outputs that are gitignored. A fresh checkout has none of them, which is not
+// staleness — CI's design job checks before anything has generated them, and the build job
+// generates them before compiling. A tracked output is checked whether or not it exists.
 const outputs = [
-  [join(repoRoot, 'src/Dray.Ui/wwwroot/icons/sprite.svg'), sprite],
-  [join(repoRoot, 'src/Dray.Ui/Components/IconSprite.razor'), spriteRazor],
-  [join(repoRoot, 'src/Dray.Core/Shell/Icons.g.cs'), cs],
-  [join(repoRoot, imageset, 'DrayMark.svg'), markTemplateSvg],
-  [join(repoRoot, imageset, 'Contents.json'), markTemplateContents],
+  [join(repoRoot, 'src/Dray.Ui/wwwroot/icons/sprite.svg'), sprite, { ignored: true }],
+  [join(repoRoot, 'src/Dray.Ui/Components/IconSprite.razor'), spriteRazor, { ignored: false }],
+  [join(repoRoot, 'src/Dray.Core/Shell/Icons.g.cs'), cs, { ignored: true }],
+  [join(repoRoot, imageset, 'DrayMark.svg'), markTemplateSvg, { ignored: true }],
+  [join(repoRoot, imageset, 'Contents.json'), markTemplateContents, { ignored: true }],
 ];
 
 let stale = 0;
-for (const [path, content] of outputs) {
+for (const [path, content, { ignored }] of outputs) {
   const rel = path.slice(repoRoot.length + 1);
   const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
   if (current === content) continue;
+  if (check && current === null && ignored) continue;
   if (check) {
     console.error(`  \x1b[31mSTALE\x1b[0m ${rel}`);
     stale++;

@@ -383,6 +383,31 @@ Three things about the macOS half that were learned by running it:
 The body declares nothing about chrome. `DialogSurface` renders the component and nothing else — no
 title, no buttons — which is the rule in one file.
 
+### 4.6 Forms: a body that drives its buttons
+
+A question has fixed answers and closes on the first button pressed. A form does not. Its commit
+button is disabled until the fields are valid, reads "Pulling…" while it works, keeps the dialog
+open while it does, and closes only on success. Before `DialogController` existed, every form in
+the app (Pull, Build, Run, Push, Tag, Rename, Sign in, New volume, New network) solved that by
+becoming a web `<dialog>` with its own HTML title and buttons, which is the bug this section
+forbids.
+
+`DialogRequest.Controller` is the channel. The body inherits `DialogBody`, states its buttons in
+`DeclareButtons()` after every render, and answers presses in `OnButtonAsync`: true closes, false
+keeps the dialog open. A long piece of work is started there and left running. The page opens the
+dialog through a static `ShowAsync` on the body, and refreshes once it closes. No callback crosses
+into the dialog's WebView.
+
+| Head | How the controller is projected |
+|---|---|
+| Web | `DialogHost` draws the button row from `DialogRequest.Current(button)` and routes presses through the controller. Escape presses cancel, and the dialog reopens if the body refuses. |
+| macOS | Each alert button's target is pointed at the controller instead of at `NSAlert`, which would end the sheet on any press. The sheet ends only when the body says so. Titles and enabled states follow `Changed`. |
+| Windows | Each `ContentDialog` button click holds a deferral while the body decides, and cancels the click to stay open. Escape arrives in `Closing` as a close with no button and is put to the body as its cancel button. |
+
+A destructive commit button is marked the platform's way. macOS uses `HasDestructiveAction`.
+Windows has no destructive style, so `WinDanger` draws the danger tokens through the button's
+lightweight-styling resources. The web head uses `btn--primary btn--danger`.
+
 ### 4.4 Consequences for how a feature is written
 
 - Anything that would be a modal in a web app is asked for through the shell, not built in the page.
@@ -393,3 +418,180 @@ title, no buttons — which is the rule in one file.
 - Nothing about the frame is in the shared code. The page says what it wants — a title, a body, a
   set of choices — and the head decides what that is made of, exactly as `PageChrome` does for the
   toolbar.
+
+---
+
+## 5. Windows — as built, not yet run
+
+`src/Dray.Windows` (namespace `Dray.WinUI`). Written on a Mac, so **nothing in this section has been
+seen on screen.** What has been checked: every source file compiles, with warnings as errors, against
+the real Windows SDK, Windows App SDK, WebView2 and MAUI reference assemblies. That is a scratch
+project with the XAML and PRI steps switched off, because those are Windows executables. What has
+not been checked is everything that happens at runtime. §5.4 lists the claims to verify first.
+
+### 5.1 Shape
+
+```
+DrayWinApp (MAUI Application)
+└── Window — Mica backdrop where the OS has it
+    ├── TitleBar (MAUI, 48 high)
+    │   └── TitleBarNavigation ──handler──▶ Back + pane toggle   WinTitleBar
+    └── ContentPage (transparent)
+        └── NativeShell ──handler──▶ NavigationView          WinSidebar: items from NavigationManifest
+                                     └── Grid
+                                         ├── toolbar row     WinToolbarProjector: PageChrome
+                                         └── WebView2        + native ProgressRing until ready
+```
+
+MAUI has no element for a `NavigationView` with real items. Its `FlyoutPage` on Windows puts a MAUI
+page in the pane, which would make the sidebar a web list inside a native frame. So `NativeShell` is
+an empty MAUI `View`, and `NativeShellHandler` builds the WinUI tree around the one MAUI element in it:
+the `BlazorWebView`. That element is what brings Blazor hosting with it (services, dispatcher, static
+assets), so it stays a MAUI element and is converted with `ToPlatform`.
+
+| PageChrome | Windows |
+|---|---|
+| `Title`, `Subtitle` | Title and caption text at the leading edge of the toolbar row |
+| `Back` | WinUI's back button, in its own style, at the leading edge of the title bar beside the pane toggle, as in Settings and File Explorer. Shown only when the page declares one, its tooltip names the destination (`ChromeBack.Label`), and it invokes through `IShellState.InvokeAction`. The `NavigationView`'s own back and toggle are hidden: in the pane they took a row that came and went with the page and moved every sidebar item under the pointer |
+| `Filters` | `DropDownButton` with radio menu items |
+| `Search` | `AutoSuggestBox` |
+| Primary action | Accent button, text only (the accent fill is the system's, and an ink-stroked icon would match neither it nor its text) |
+| Other actions | `AppBarButton`s in a `CommandBar`, which folds them into overflow when the window is narrow |
+
+The rebuild rule is the one `MacToolbarProjector` uses: rebuild only when `PageChrome.Signature`
+changes, and update everything else in place.
+
+### 5.2 Icons are the sprite, not Segoe Fluent
+
+`Icons.Svg(icon, stroke)` (generated, like the rest of `Icons.g.cs`) returns each icon's sprite
+geometry as a standalone SVG document. `WinIcons` renders it through `SvgImageSource`, stroked in the
+palette's ink for the current theme, and redraws it when the theme changes. `RasterizePixelWidth`
+is in physical pixels, so it follows the display's `RasterizationScale`: at a fixed 16 every icon
+was drawn at 16 and stretched to 32 on a 200% display.
+
+The pane opens at 220 and the user can drag its edge between 180 and 360 (`WinPaneResizer`). The
+width is remembered. The grip sits beside the WebView, not over it, because WebView2 sets the
+pointer for its own area. Items are 32 high: MAUI sets `NavigationViewItemOnLeftMinHeight` to 0,
+which left them as tall as their label. `IconSvgTests` parses
+every icon, because `SvgImageSource` draws nothing for a malformed document and raises no error.
+
+### 5.3 Making the seam invisible on Windows
+
+WKWebView is quiet by default. WebView2 is Edge and arrives with Edge's furniture. `WebViewSetup`
+applies all of the following to every WebView2, including the dialog bodies:
+
+- **Transparent, which takes two settings and a matching ground.** Measured on WinAppSDK 1.8 and
+  WebView2 runtime 155, in a standalone WinUI 3 window as well as in Dray:
+  - `DefaultBackgroundColor = Transparent` alone is not transparent. WinUI's `WebView2` hands the
+    browser the theme's `SolidBackgroundFillColorBase` instead, so the page sits on an opaque
+    #F3F3F3 (#202020 dark) whatever it paints. `WebViewSetup.MakeTransparent` overrides that one
+    resource on the control, before it creates its controller; the brush of the same name has no
+    effect, and either is too late once the controller exists. Opaque colours pass through as given.
+  - `WEBVIEW2_DEFAULT_BACKGROUND_COLOR` does nothing here. WinUI's control is created at
+    `#FFFFFFFF` with or without it, so Dray does not set it.
+  - A transparent pixel shows the **window's backdrop**, never the XAML beneath the control: over
+    an opaque blue panel a transparent page shows white, over a translucent one it shows Mica. So
+    the page cannot be transparent onto the `NavigationView`'s content layer the toolbar row sits
+    on. Instead it paints that layer itself: `--ground` is `LayerFillColorDefault`, translucent, and
+    composites over Mica exactly as the native layer does. Measured across the toolbar/page edge,
+    the two match to within 1 in each channel, in both themes.
+  - MAUI's window root is a `NavigationView` of its own, whose content grid paints a second layer
+    under everything. `NativeShellHandler` clears it, so the sidebar sits on Mica and the content
+    area on one layer, which is the one the page can match.
+  - Only the shell's WebView is made transparent. In a dialog it would show the window behind the
+    dialog, so dialog bodies keep an opaque ground.
+- **No white frame at launch.** Measured by sampling the screen from the moment the window
+  exists, three sources, each fixed where it starts:
+  - The window itself is white for 125–250 ms before XAML's first frame and the Mica backdrop.
+    `WinFirstFrame` cloaks it with DWM until the shell has loaded and drawn twice (or 3 s pass).
+  - WinUI creates the control at opaque white, and opaque colours reach the browser unchanged.
+    `WebViewSetup.Apply` sets Transparent on `HandlerChanged`, before the controller exists.
+  - Blazor's first render is in the generated palette, because `PlatformThemeSync` applies the
+    platform's tokens only after it. The reveal showed that frame, a near-white ground with warm
+    cards, once per launch. `WebViewSetup.SeedTheme` applies the same tokens from a
+    document-created script, so the first paint is already in the Windows palette.
+- **No browser furniture.** Ctrl+wheel zoom, pinch zoom, swipe navigation and the link status bar
+  are off. Browser accelerator keys (F5, Ctrl+R, Ctrl+F, Ctrl+P) are off in Release.
+- **A context menu trimmed, not removed.** `AreDefaultContextMenusEnabled = false` would also take
+  Cut, Copy and Paste out of every text field. Instead, the menu is suppressed except on editable
+  text or a selection, and there it is cut down to editing commands. A page's own context menu
+  prevents WebView2's and is unaffected.
+- **No password autosave or autofill.** Otherwise WebView2 would offer to save a registry password
+  into its own profile on disk, which breaks docs/CREDENTIALS.md.
+- **User data under `%LOCALAPPDATA%\Dray\WebView2`.** The default location is beside the exe, which
+  is read-only under Program Files, and WebView2 fails to start there without saying why. Set
+  through the loader's `WEBVIEW2_USER_DATA_FOLDER`, not `BlazorWebViewInitializing`: MAUI 10.0.100
+  builds an environment from that event's `UserDataFolder` and `EnvironmentOptions`, then calls
+  `EnsureCoreWebView2Async()` without it, so neither reaches the browser. Until that was found the
+  profile was in fact beside the exe. Check with the browser process's command line
+  (`--user-data-dir`), not with the event.
+- **Overlay scrollbars.** `--enable-features=OverlayScrollbar`, through
+  `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` for the same reason. Chromium's default bar has arrow
+  buttons and a gutter that takes width from every scroller. Edge's own
+  `msOverlayScrollbarWinStyle` changed nothing on runtime 155. With the overlay, a scroller's
+  `clientWidth` equals its `offsetWidth`.
+
+`WinTheme` reads WinUI's theme dictionaries by name for an explicit theme (`"Default"` is WinUI's
+name for dark), not through `Application.Resources[key]`: that answers for the theme the app
+started in. The card fills are composited to opaque, and the result is contrast-checked against
+Dray's ink at runtime. If any pair falls below 4.5:1, the generated surfaces stay instead.
+
+The other macOS lessons that carry over: the three exception hooks (AppDomain, TaskScheduler and
+WinUI's own `UnhandledException`), the 15-second reveal timer, and keeping the ready signal across
+the gap where Blazor finishes before the shell's handler connects. A WinUI app is a GUI-subsystem
+exe, so stderr goes nowhere. `CrashLog` also writes to `%LOCALAPPDATA%\Dray\logs\last-run.log`.
+
+### 5.4 To verify first, on a Windows machine
+
+1. **Mica reaches the content.** Verified: the content area shows Mica through one layer, and
+   samples straight across the toolbar/page edge match within 1 per channel in light and dark.
+   A regression shows as a flat #F3F3F3 / #202020 under the page (the resource override in
+   `WebViewSetup.MakeTransparent` is missing or late) or a seam under the toolbar row (a second
+   layer is back, or `--ground` no longer equals the native layer).
+2. **No double title bar.** MAUI draws its own title bar row. `NavigationView` has
+   `IsTitleBarAutoPaddingEnabled = false` so it does not pad for one as well.
+3. **`--bg` approximates the content layer.** It is the composite of `LayerFillColorDefault` over
+   `SolidBackgroundFillColorBase`, the flat colour `color-mix()` needs. Over Mica the real layer
+   is tinted by the wallpaper, so a sampled pixel differs by a few units (light 249 249 249 against
+   about 248 250 252). That is expected. The page's ground is `--ground`, not `--bg`.
+4. **Icons render.** Any that do not are named in `last-run.log` with their `SvgImageSource` status.
+5. **Dialogs.** A Large body fits within the lifted `ContentDialogMaxWidth`. Escape returns the
+   cancel id. A confirmation raised from inside a dialog body waits for that dialog to close instead
+   of throwing.
+6. **Pickers in an unpackaged app**, including the save picker's `"."` all-files choice.
+7. **Toasts** register at runtime without a package identity, and clicking one brings the window
+   forward instead of starting a second instance.
+8. **Theme switch at runtime** repaints the sidebar icons, the toolbar icons and the WebView tokens
+   together.
+
+### 5.5 Deliberately absent
+
+- **Taskbar badge.** It needs package identity. It arrives with MSIX in Phase 7, and `SetBadge` is
+  a documented no-op until then.
+- **A XAML-free `App`.** `Platforms/Windows/App.xaml` is the only XAML in Dray and contains no UI.
+  It is there so the XAML compiler generates the metadata provider and the `XamlControlsResources`
+  hookup. `Main` is no longer generated: it is `Platforms/Windows/Program.cs` (§5.6).
+
+### 5.6 The notification area, and one instance
+
+`WinTray` is the counterpart of `MacStatusItem`, with the same menu: the running count, up to ten
+running containers with Open in Dray, Stop and Restart one level in, then All containers and Stacks.
+Windows adds Open Dray (the default, bold, and what a left click does), two remembered choices, and
+Quit Dray. A notification-area icon cannot carry text, so the count is in the tooltip and the menu's
+first line.
+
+- **Closing the window** hides it and Dray keeps running ("Keep running when the window is closed",
+  on by default). The first time, a notification says where it went. **Minimizing** does the same
+  when "Minimize to the notification area" is on (off by default).
+- **The icon** is the container glyph from the sprite, rasterized with Win2D at the notification
+  area's size for the display, in ink for the *taskbar's* light or dark (`SystemUsesLightTheme`),
+  which is set apart from the apps' one. Redrawn on `ImmersiveColorSet`, re-added on
+  `TaskbarCreated` after an Explorer restart.
+- **The menu** is a native popup menu, in Dray's light or dark through uxtheme's unnamed
+  `SetPreferredAppMode` (ordinal 135), which is undocumented but what every dark Win32 menu uses.
+  Without it, it stays light.
+- **New icons start in the overflow (^)** on Windows 11. No supported API promotes an icon; the user
+  drags it out or turns it on in Settings.
+- **One instance.** With the window able to vanish, a second launch is how people look for it.
+  `Program.Main` registers the key "Dray" with `AppInstance` before WinUI starts; a later launch
+  redirects its activation to the first, which shows its window, and exits.

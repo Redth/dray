@@ -49,7 +49,7 @@
                             : "This engine has no images. Pull one to get started.")">
                 <Actions>
                     <Button Label="Pull an image…" Icon="IconRef.Pull" Variant="ButtonVariant.Primary"
-                            OnClick="() => _pulling = true" />
+                            OnClick="PullAsync" />
                 </Actions>
             </EmptyState>
         }
@@ -69,36 +69,6 @@
                        Placeholder="No images" />
         }
     </div>
-
-    @if (_tagging is { } tagging)
-    {
-        <TagDialog @key="tagging.Id" Image="tagging" Open="true"
-                   OpenChanged="open => _tagging = open ? tagging : null" OnTagged="LoadAsync" />
-    }
-
-    @if (_pushing is { } pushing)
-    {
-        <PushDialog @key="pushing" Reference="pushing" Open="true"
-                    OpenChanged="open => _pushing = open ? pushing : null" />
-    }
-
-    @if (_runFrom is { } runFrom)
-    {
-        @* Keyed on the reference so opening it for a second image rebuilds the form rather than
-           leaving the first image's ports and environment behind. *@
-        <RunDialog @key="runFrom" Image="runFrom" Open="true"
-                   OpenChanged="open => _runFrom = open ? runFrom : null" />
-    }
-
-    @if (_pulling)
-    {
-        <PullDialog Open="true" OpenChanged="open => _pulling = open" OnPulled="LoadAsync" />
-    }
-
-    @if (_buildDialog)
-    {
-        <BuildDialog Open="true" OpenChanged="open => _buildDialog = open" OnBuilt="LoadAsync" />
-    }
 </EngineScope>
 
 @code {
@@ -112,9 +82,7 @@
     bool _noticeOk;
     string _search = "";
     int _danglingFilter;
-    bool _pulling;
 
-    /// <summary>The image reference the run dialog was opened for, or null when it is closed.</summary>
     /// <summary>
     /// What can be done with one image, most common first. Run leads because it is the point of
     /// having an image; a dangling one has no reference to run or push, so it gets neither.
@@ -147,45 +115,54 @@
     Task RunRowActionAsync((string Row, string Action) chosen)
         => ById(chosen.Row) is { } image ? RunRowAsync(chosen.Action, image) : Task.CompletedTask;
 
+    /// <summary>Pull, then refresh: the dialog may have pulled any number of images before closing.</summary>
+    async Task PullAsync()
+    {
+        await PullDialog.ShowAsync(Shell);
+        await LoadAsync();
+    }
+
+    /// <summary>Build, then refresh: the dialog may have built any number of images before closing.</summary>
+    async Task BuildAsync()
+    {
+        await BuildDialog.ShowAsync(Shell);
+        await LoadAsync();
+    }
+
     void OpenById(string id)
     {
         if (ById(id) is { } image) Nav.NavigateTo($"/images/{Uri.EscapeDataString(image.Id)}");
     }
 
-    Task RunRowAsync(string id, ImageSummary image)
+    async Task RunRowAsync(string id, ImageSummary image)
     {
         switch (id)
         {
             case "run":
-                _runFrom = image.Tags[0].Display;
+                await RunDialog.ShowAsync(Shell, image.Tags[0].Display);
                 break;
 
             case "tag":
-                _tagging = image;
+                if (await TagDialog.ShowAsync(Shell, image)) await LoadAsync();
                 break;
 
             case "push":
-                _pushing = image.Tags[0].Display;
+                await PushDialog.ShowAsync(Shell, image.Tags[0].Display);
                 break;
 
             case "save":
-                return SaveAsync(image);
+                await SaveAsync(image);
+                break;
 
             case "copy-id":
-                return Shell.WriteClipboardAsync(image.Id);
+                await Shell.WriteClipboardAsync(image.Id);
+                break;
 
             case "remove":
-                return RemoveAsync(image);
+                await RemoveAsync(image);
+                break;
         }
-
-        return Task.CompletedTask;
     }
-
-    string? _runFrom;
-
-    ImageSummary? _tagging;
-    string? _pushing;
-    bool _buildDialog;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -390,11 +367,11 @@
                 break;
 
             case "pull":
-                _pulling = true;
+                await PullAsync();
                 break;
 
             case "build":
-                _buildDialog = true;
+                await BuildAsync();
                 break;
 
             case "load":

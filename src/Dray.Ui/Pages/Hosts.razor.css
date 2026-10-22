@@ -28,3 +28,11 @@
 .hosts__suggest {
     margin-top: var(--s4);
 }
+
+/* Which kind of container this engine runs, above the capability list. It sits apart from the
+   capabilities because it is not one: those say what an engine can do, and this says what it is —
+   and on Windows it is the fact that decides everything below it. */
+.hosts__mode {
+    margin: 0 0 var(--s3);
+    font-size: var(--text-sm);
+}

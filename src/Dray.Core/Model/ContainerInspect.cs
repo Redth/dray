@@ -212,7 +212,10 @@ public sealed record ContainerInspect
     /// </summary>
     public string RawJson { get; init; } = "";
 
-    public ContainerStatus Status => ContainerStatusVocabulary.Resolve(State, Health, ExitCode);
+    /// <summary>What this container runs. See <see cref="ContainerSummary.Os"/> for why it rides along.</summary>
+    public ContainerOs Os { get; init; } = ContainerOs.Linux;
+
+    public ContainerStatus Status => ContainerStatusVocabulary.Resolve(State, Health, ExitCode, Os);
 
     public string ShortId => Id.Length <= 12 ? Id : Id[..12];
 

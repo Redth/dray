@@ -42,6 +42,11 @@ jobs:
       - name: Token lint
         run: node build/lint-tokens.mjs
 
+      # The vendor checks compare wwwroot/lib against node_modules, which a fresh checkout does not
+      # have. Build-time tooling only — nothing installed here ships.
+      - name: Install build tooling
+        run: npm ci
+
       - name: Vendored Tabulator is current
         run: node build/vendor-tabulator.mjs --check
 
@@ -71,14 +76,27 @@ jobs:
         with:
           node-version: '22'
 
+      # Each app head needs its platform's workloads, and builds as a no-op on the other two OSes
+      # (build/SkipHeadOnOtherOS.targets), which is what lets every runner build one solution.
+      - name: Install workloads (macOS)
+        if: runner.os == 'macOS'
+        run: dotnet workload install maui macos
+
+      - name: Install workloads (Windows)
+        if: runner.os == 'Windows'
+        run: dotnet workload install maui-windows
+
       # Generated sources are gitignored, so they must be produced before build.
       - name: Generate tokens and icons
         run: |
           node build/gen-tokens.mjs
           node build/gen-icons.mjs
 
+      # Restored for the configuration it is built in. The app heads choose their runtime
+      # identifiers by configuration (a Release macOS build is universal, a Windows one is
+      # RID-specific), and an assets file restored for Debug has no targets for those.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore -p:Configuration=Release
 
       - name: Build
         run: dotnet build --no-restore -c Release

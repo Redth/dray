@@ -107,6 +107,12 @@ public sealed class DockerVolumeSession : IVolumeSession
     /// </summary>
     internal const string MountPath = "/dray-volume";
 
+    /// <summary>
+    /// The same mount point for a Windows container. A bare <c>\dray-volume</c> would be rejected:
+    /// the Windows engine requires a mount destination to name a drive.
+    /// </summary>
+    internal const string WindowsMountPath = @"C:\dray-volume";
+
     internal const string HelperLabel = "codes.redth.dray.helper";
 
     /// <summary>Pulled only when the host has no image at all to borrow. Small and universally available.</summary>
@@ -114,20 +120,29 @@ public sealed class DockerVolumeSession : IVolumeSession
 
     readonly DockerClient _client;
     readonly string _helperId;
+    readonly ContainerOs _os;
 
-    DockerVolumeSession(DockerClient client, string volumeName, string helperId)
+    DockerVolumeSession(DockerClient client, string volumeName, string helperId, ContainerOs os)
     {
         _client = client;
         VolumeName = volumeName;
         _helperId = helperId;
+        _os = os;
     }
 
     public string VolumeName { get; }
 
+    /// <summary>Where this session's helper has the volume mounted.</summary>
+    internal string HelperMountPath => MountPathFor(_os);
+
+    internal static string MountPathFor(ContainerOs os)
+        => os == ContainerOs.Windows ? WindowsMountPath : MountPath;
+
     public static async Task<DockerVolumeSession> OpenAsync(
-        DockerClient client, string volumeName, CancellationToken ct = default)
+        DockerClient client, string volumeName, ContainerOs os, CancellationToken ct = default)
     {
-        var image = await ChooseImageAsync(client, ct).ConfigureAwait(false);
+        var image = await ChooseImageAsync(client, os, ct).ConfigureAwait(false);
+        var mountPath = MountPathFor(os);
 
         try
         {
@@ -143,8 +158,8 @@ public sealed class DockerVolumeSession : IVolumeSession
                     Image = image,
 
                     // Never executed. Present because some engines reject a container with no
-                    // command at all, and `true` is the most inert thing to name.
-                    Cmd = ["/bin/true"],
+                    // command at all, and this is the most inert thing each platform has to name.
+                    Cmd = os == ContainerOs.Windows ? ["cmd", "/c", "exit"] : ["/bin/true"],
 
                     Labels = new Dictionary<string, string>
                     {
@@ -153,7 +168,7 @@ public sealed class DockerVolumeSession : IVolumeSession
                     },
                     HostConfig = new HostConfig
                     {
-                        Binds = [$"{volumeName}:{MountPath}"],
+                        Binds = [$"{volumeName}:{mountPath}"],
 
                         // Belt and braces: if this container is ever started by accident, it exits
                         // immediately and removes itself rather than lingering.
@@ -162,7 +177,7 @@ public sealed class DockerVolumeSession : IVolumeSession
                 },
                 ct).ConfigureAwait(false);
 
-            return new DockerVolumeSession(client, volumeName, created.ID);
+            return new DockerVolumeSession(client, volumeName, created.ID, os);
         }
         catch (DockerApiException ex)
         {
@@ -180,7 +195,7 @@ public sealed class DockerVolumeSession : IVolumeSession
     /// less alarming to find named after one of those than after the user's production image.
     /// </para>
     /// </summary>
-    static async Task<string> ChooseImageAsync(DockerClient client, CancellationToken ct)
+    static async Task<string> ChooseImageAsync(DockerClient client, ContainerOs os, CancellationToken ct)
     {
         IList<ImagesListResponse> images;
 
@@ -192,7 +207,7 @@ public sealed class DockerVolumeSession : IVolumeSession
         }
         catch (DockerApiException)
         {
-            return await PullFallbackAsync(client, ct).ConfigureAwait(false);
+            return await PullFallbackAsync(client, os, ct).ConfigureAwait(false);
         }
 
         var tagged = images
@@ -203,7 +218,7 @@ public sealed class DockerVolumeSession : IVolumeSession
             .Where(i => !i.Tag.Contains("<none>", StringComparison.Ordinal))
             .ToList();
 
-        if (tagged.Count == 0) return await PullFallbackAsync(client, ct).ConfigureAwait(false);
+        if (tagged.Count == 0) return await PullFallbackAsync(client, os, ct).ConfigureAwait(false);
 
         // Matched on the repository, not the whole reference: "library/nginx:alpine" contains
         // "alpine" and is emphatically not a scratch image to borrow.
@@ -256,8 +271,21 @@ public sealed class DockerVolumeSession : IVolumeSession
         return $"dray-browse-{cleaned}-{suffix}";
     }
 
-    static async Task<string> PullFallbackAsync(DockerClient client, CancellationToken ct)
+    static async Task<string> PullFallbackAsync(DockerClient client, ContainerOs os, CancellationToken ct)
     {
+        // There is no equivalent of alpine to fall back on for Windows containers. A Windows base
+        // image's tag has to match the host's build number under process isolation, so there is no
+        // one reference that is right on every machine — `nanoserver:ltsc2022` is correct on Server
+        // 2022 and refuses to run on Server 2019. Pulling a guess would cost the user a gigabyte
+        // and then fail, so Dray says what it needs instead of guessing.
+        if (os == ContainerOs.Windows)
+        {
+            throw new RuntimeConnectionException(
+                "Opening a volume needs an image to mount it into, and this engine has none. "
+                + "Pull any Windows image built for this host — for example "
+                + "mcr.microsoft.com/windows/nanoserver with the tag matching your Windows build — and try again.");
+        }
+
         try
         {
             await client.Images.CreateImageAsync(
@@ -276,23 +304,40 @@ public sealed class DockerVolumeSession : IVolumeSession
         }
     }
 
-    /// <summary>Map a volume-relative path onto the helper's mount point.</summary>
-    internal static string ToHelperPath(string path)
+    /// <summary>
+    /// Map a volume-relative path onto the helper's mount point.
+    /// <para>
+    /// Volume paths are POSIX above this class whatever the engine is, because a volume has no
+    /// drive letter of its own — it is a tree that gets mounted somewhere. The translation into
+    /// the container's shape happens here and nowhere else.
+    /// </para>
+    /// </summary>
+    internal static string ToHelperPath(string path, ContainerOs os)
     {
-        var normalized = FileEntry.Normalize(path);
-        return normalized == "/" ? MountPath : MountPath + normalized;
+        var mount = MountPathFor(os);
+        var relative = ContainerPath.Normalize(path, ContainerOs.Linux);
+
+        if (relative == "/") return mount;
+
+        return os == ContainerOs.Windows
+            ? ContainerPath.Normalize(mount + relative.Replace('/', '\\'), os)
+            : mount + relative;
     }
 
     /// <summary>Map a helper path back, so nothing above this class ever sees the mount point.</summary>
-    internal static string ToVolumePath(string helperPath)
+    internal static string ToVolumePath(string helperPath, ContainerOs os)
     {
-        var normalized = FileEntry.Normalize(helperPath);
+        var mount = MountPathFor(os);
+        var normalized = ContainerPath.Normalize(helperPath, os);
+        var comparison = os == ContainerOs.Windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-        if (normalized == MountPath) return "/";
+        if (string.Equals(normalized, mount, comparison)) return "/";
 
-        return normalized.StartsWith(MountPath + "/", StringComparison.Ordinal)
-            ? normalized[MountPath.Length..]
-            : normalized;
+        if (!normalized.StartsWith(mount + ContainerPath.Separator(os), comparison)) return normalized;
+
+        var tail = normalized[mount.Length..];
+
+        return os == ContainerOs.Windows ? tail.Replace('\\', '/') : tail;
     }
 
     public async Task<DirectoryListing> ListDirectoryAsync(string path, CancellationToken ct = default)
@@ -300,13 +345,13 @@ public sealed class DockerVolumeSession : IVolumeSession
         // The helper is never started, so exec is not an option and the archive route is the only
         // one. Saying so up front avoids a guaranteed-to-fail exec attempt per directory.
         var listing = await DockerFileSystem
-            .ListAsync(_client, _helperId, ToHelperPath(path), containerIsRunning: false, ct)
+            .ListAsync(_client, _helperId, ToHelperPath(path, _os), containerIsRunning: false, _os, ct)
             .ConfigureAwait(false);
 
         return listing with
         {
-            Path = ToVolumePath(listing.Path),
-            Entries = [.. listing.Entries.Select(e => e with { Path = ToVolumePath(e.Path) })],
+            Path = ToVolumePath(listing.Path, _os),
+            Entries = [.. listing.Entries.Select(e => e with { Path = ToVolumePath(e.Path, _os) })],
 
             // The archive route's note explains that the container is not running, which is true
             // and meaningless here: the helper is an implementation detail the user never sees and
@@ -317,10 +362,10 @@ public sealed class DockerVolumeSession : IVolumeSession
     }
 
     public Task<byte[]> ReadFileAsync(string path, CancellationToken ct = default)
-        => DockerFileSystem.ReadFileAsync(_client, _helperId, ToHelperPath(path), ct);
+        => DockerFileSystem.ReadFileAsync(_client, _helperId, ToHelperPath(path, _os), _os, ct);
 
     public Task WriteFileAsync(string path, byte[] content, CancellationToken ct = default)
-        => DockerFileSystem.WriteFileAsync(_client, _helperId, ToHelperPath(path), content, ct);
+        => DockerFileSystem.WriteFileAsync(_client, _helperId, ToHelperPath(path, _os), content, _os, ct);
 
     /// <summary>
     /// Remove helper containers left behind by a previous run.

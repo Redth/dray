@@ -10,6 +10,20 @@ public interface IDockerConfigSource
 {
     string? DockerConfigDirectory { get; }
 
+    /// <summary>
+    /// Whether discovery should look for Windows' engines: named pipes and WSL distros.
+    /// <para>
+    /// Part of the source rather than read from <c>OperatingSystem</c> by the reader, because which
+    /// platform is being discovered is as much the environment as <c>~/.docker</c> is. Reading it
+    /// directly made every discovery test on a Windows machine find that machine's real pipes and
+    /// run its real <c>wsl.exe</c> — five hosts where a test expected one.
+    /// </para>
+    /// </summary>
+    bool IsWindows { get; }
+
+    /// <summary>Whether discovery should look for Apple's runtime, which only exists on macOS.</summary>
+    bool IsMacOS { get; }
+
     string? GetEnvironmentVariable(string name);
 
     bool FileExists(string path);
@@ -47,6 +61,10 @@ public interface IDockerConfigSource
 /// <summary>Reads the real <c>~/.docker</c> and process environment.</summary>
 public sealed class SystemDockerConfigSource : IDockerConfigSource
 {
+    public bool IsWindows => OperatingSystem.IsWindows();
+
+    public bool IsMacOS => OperatingSystem.IsMacOS();
+
     public string? DockerConfigDirectory
     {
         get
@@ -127,11 +145,89 @@ public sealed class DockerContextReader(IDockerConfigSource source)
         ("Podman", ".local/share/containers/podman/machine/podman.sock"),
     ];
 
-    static readonly string[] WellKnownNamedPipes =
+    /// <summary>
+    /// The pipes worth trying on Windows, in the order they should appear.
+    /// <para>
+    /// <c>docker_engine</c> is deliberately ambiguous and cannot be resolved from here. Docker
+    /// Desktop points it at whichever mode is switched on; a native <c>dockerd.exe</c> installed
+    /// without Docker Desktop serves Windows containers on it; and podman's machine forwards its
+    /// Linux API to the same name. The picker labels it for what it is — an engine — and
+    /// <c>/info</c>'s <c>OSType</c> says what it turned out to be once connected.
+    /// </para>
+    /// </summary>
+    static readonly (string Name, string Pipe)[] WellKnownNamedPipes =
     [
-        "//./pipe/dockerDesktopLinuxEngine",
-        "//./pipe/docker_engine",
+        // Docker Desktop publishes each engine under its own name, and both are live at once —
+        // switching modes changes which one the default pipe points at, not which daemons are
+        // running. Containers started in either mode keep running across a switch. So Dray offers
+        // both and needs no mode of its own: the host picker is the switch, and unlike Docker
+        // Desktop's it does not have to stop anything.
+        //
+        // Docker Desktop normally registers these as the `desktop-linux` and `desktop-windows`
+        // contexts, which discovery reads first. They are probed anyway because it does not always
+        // manage it — desktop-windows in particular is missing on some installs — and a pipe that
+        // is not there simply fails to connect.
+        ("Docker Desktop (Linux containers)", "//./pipe/dockerDesktopLinuxEngine"),
+        ("Docker Desktop (Windows containers)", "//./pipe/dockerDesktopWindowsEngine"),
+
+        ("Docker Engine", "//./pipe/docker_engine"),
+
+        // Podman's own name for a machine's API. Offered as well as docker_engine because podman
+        // only forwards to that one for its default rootful machine, and a second machine is
+        // reachable under this name alone.
+        ("Podman", "//./pipe/podman-machine-default"),
     ];
+
+    /// <summary>
+    /// Everything <see cref="Discover"/> finds, plus the WSL distributions that could be hosting
+    /// an engine of their own.
+    /// <para>
+    /// Async and separate because reaching WSL means running <c>wsl.exe</c>, and the rest of
+    /// discovery is filesystem reads that must not be made to wait on a subprocess. A machine
+    /// without WSL — which is every machine that is not Windows — gets the synchronous answer and
+    /// no process launch at all.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<DockerHost>> DiscoverAsync(
+        WslDistroReader? wsl = null, CancellationToken ct = default)
+    {
+        var hosts = Discover();
+
+        if (!source.IsWindows) return hosts;
+
+        var distros = await (wsl ?? new WslDistroReader()).ListAsync(ct).ConfigureAwait(false);
+
+        var combined = new List<DockerHost>(hosts);
+        var seen = new HashSet<string>(hosts.Select(h => h.Endpoint.Raw), StringComparer.OrdinalIgnoreCase);
+
+        // After the pipes, and never claiming the current slot. A machine with Docker Desktop and
+        // three distros should open on Docker Desktop, which is where its containers are; a distro
+        // costs a relay process per connection and is the deliberate choice, not the default.
+        //
+        // Running distros first, because a running one is far more likely to be the one with an
+        // engine in it — it is running for a reason.
+        foreach (var distro in distros
+            .Where(d => d.CanHostAnEngine)
+            .OrderByDescending(d => d.IsRunning)
+            .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (DockerEndpoint.Parse("wsl://" + distro.Name) is not { } endpoint) continue;
+            if (!seen.Add(endpoint.Raw)) continue;
+
+            combined.Add(new DockerHost
+            {
+                Id = "wsl:" + distro.Name,
+                Name = distro.Name,
+                Description = distro.IsRunning
+                    ? "WSL2 distribution, running"
+                    : "WSL2 distribution, stopped — connecting will start it",
+                Endpoint = endpoint,
+                Origin = HostOrigin.WslDistro,
+            });
+        }
+
+        return combined;
+    }
 
     public IReadOnlyList<DockerHost> Discover()
     {
@@ -203,10 +299,21 @@ public sealed class DockerContextReader(IDockerConfigSource source)
     /// What makes two endpoints the same engine. Unix sockets resolve through symlinks first;
     /// everything else is its own raw string.
     /// </summary>
-    string Identity(DockerEndpoint endpoint)
-        => endpoint is { Scheme: EndpointScheme.Unix, Path: { } path }
-            ? "unix:" + source.ResolveSocketPath(path)
-            : endpoint.Raw;
+    /// <summary>
+    /// What makes two endpoints the same engine.
+    /// <para>
+    /// A pipe is compared by its parsed path, never its raw spelling: Docker Desktop's
+    /// <c>desktop-linux</c> context says <c>npipe:////./pipe/dockerDesktopLinuxEngine</c> and the
+    /// probe says <c>//./pipe/dockerDesktopLinuxEngine</c>, and comparing those as strings put the
+    /// same engine in the picker twice on every machine with Docker Desktop.
+    /// </para>
+    /// </summary>
+    string Identity(DockerEndpoint endpoint) => endpoint switch
+    {
+        { Scheme: EndpointScheme.Unix, Path: { } path } => "unix:" + source.ResolveSocketPath(path),
+        { Scheme: EndpointScheme.NamedPipe, Path: { } pipe } => "npipe:" + pipe,
+        _ => endpoint.Raw,
+    };
 
     string? ReadCurrentContextName(string? configDir)
     {
@@ -329,7 +436,7 @@ public sealed class DockerContextReader(IDockerConfigSource source)
     {
         // Only exists on macOS, and only on Apple silicon. Probing elsewhere finds nothing and
         // costs a PATH walk on every launch.
-        if (!OperatingSystem.IsMacOS()) yield break;
+        if (!source.IsMacOS) yield break;
 
         if (FindOnPath("container") is not { } executable) yield break;
 
@@ -348,7 +455,14 @@ public sealed class DockerContextReader(IDockerConfigSource source)
         };
     }
 
-    /// <summary>The first directory on <c>PATH</c> holding an executable of this name, or null.</summary>
+    /// <summary>
+    /// The first directory on a Unix <c>PATH</c> holding an executable of this name, or null.
+    /// <para>
+    /// Joined with '/' rather than <c>Path.Combine</c>. This only ever searches macOS's PATH, and
+    /// <c>Path.Combine</c> takes its separator from whichever machine the code runs on — which
+    /// made the macOS discovery tests produce <c>/opt/homebrew/bin\container</c> on Windows.
+    /// </para>
+    /// </summary>
     string? FindOnPath(string executable)
     {
         var path = source.GetEnvironmentVariable("PATH");
@@ -356,7 +470,7 @@ public sealed class DockerContextReader(IDockerConfigSource source)
 
         foreach (var directory in path.Split(':', StringSplitOptions.RemoveEmptyEntries))
         {
-            var candidate = Path.Combine(directory, executable);
+            var candidate = directory.TrimEnd('/') + "/" + executable;
             if (source.FileExists(candidate)) return candidate;
         }
 
@@ -365,9 +479,9 @@ public sealed class DockerContextReader(IDockerConfigSource source)
 
     IEnumerable<DockerHost> ProbeWellKnown()
     {
-        if (OperatingSystem.IsWindows())
+        if (source.IsWindows)
         {
-            foreach (var pipe in WellKnownNamedPipes)
+            foreach (var (name, pipe) in WellKnownNamedPipes)
             {
                 // Named pipes are not files; existence is decided by connecting, so these are
                 // always offered and the connection attempt decides.
@@ -376,7 +490,7 @@ public sealed class DockerContextReader(IDockerConfigSource source)
                     yield return new DockerHost
                     {
                         Id = "discovered:" + pipe,
-                        Name = pipe.Contains("DesktopLinux", StringComparison.Ordinal) ? "Docker Desktop" : "Docker Engine",
+                        Name = name,
                         Endpoint = endpoint,
                         Origin = HostOrigin.Discovered,
                     };

@@ -1,0 +1,108 @@
+@* Pointing the user's own docker command at the host on screen.
+
+   This is the only "switch" Dray offers, and it is deliberately not a mode. Both of Docker
+   Desktop's engines run at once on their own pipes, so Dray shows them as two hosts and has no
+   mode of its own — what a user still needs is for their terminal to agree with what they are
+   looking at.
+
+   A Docker context rather than DOCKER_HOST, because a context is what the whole toolchain reads:
+   compose, buildx and anything else that speaks to an engine resolve it the same way docker does,
+   where a variable would only cover the shell it was exported in. *@
+@inject DockerCliContext Cli
+
+@if (Host is { } host)
+{
+    <div class="panel cli">
+        <div class="panel__head"><span class="panel__title">Command line</span></div>
+        <div class="panel__body">
+            @if (!DockerCliContext.CanTarget(host.Endpoint))
+            {
+                @* A relayed endpoint has no address the CLI can dial — that is the whole reason
+                   Dray relays into it. Offering a button that cannot work would teach the user the
+                   UI is guessing, so this says where the command already works instead. *@
+                <p class="cli__note muted">
+                    The <span class="mono">docker</span> command has no way to address this host from
+                    Windows — its socket only exists inside the distribution. It already works in
+                    there:
+                </p>
+                <div class="cli__cmd">
+                    <code class="mono">wsl -d @host.Name docker ps</code>
+                </div>
+            }
+            else
+            {
+                <p class="cli__note muted">
+                    @if (_current is { } current)
+                    {
+                        <span>
+                            Your <span class="mono">docker</span> command currently uses the
+                            <span class="mono">@current</span> context.
+                        </span>
+                    }
+                    else
+                    {
+                        <span>Point <span class="mono">docker</span> at this host.</span>
+                    }
+                    <span>
+                        <span class="mono">docker compose</span> follows the same context, so it moves with it.
+                    </span>
+                </p>
+
+                <div class="cli__actions">
+                    <Button Label="@($"Use {host.Name} in my terminal")"
+                            Icon="IconRef.Terminal"
+                            Variant="ButtonVariant.Secondary"
+                            Busy="_working"
+                            Disabled="_working"
+                            OnClick="UseAsync" />
+                </div>
+
+                @if (_error is { } error)
+                {
+                    <p class="cli__error">
+                        <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                        @error
+                    </p>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public DockerHost? Host { get; set; }
+
+    string? _current;
+    string? _error;
+    bool _working;
+
+    /// <summary>Which host the context was read for, so it is never shown against a different one.</summary>
+    string? _readFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Host is null || _readFor == Host.Id) return;
+
+        _readFor = Host.Id;
+        _error = null;
+        _current = await Cli.CurrentAsync();
+    }
+
+    async Task UseAsync()
+    {
+        if (Host is null) return;
+
+        _working = true;
+        _error = null;
+
+        try
+        {
+            _error = await Cli.UseAsync(Host);
+            _current = await Cli.CurrentAsync();
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+}
