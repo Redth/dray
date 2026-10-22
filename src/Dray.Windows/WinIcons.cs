@@ -25,20 +25,40 @@ public static class WinIcons
 
     public static Xaml.Controls.ImageIcon Create(IconRef icon, DrayTheme theme)
     {
-        var source = new SvgImageSource
-        {
-            RasterizePixelWidth = Size,
-            RasterizePixelHeight = Size,
-        };
-
-        _ = LoadAsync(source, icon, theme);
-
-        return new Xaml.Controls.ImageIcon
+        var source = new SvgImageSource();
+        var image = new Xaml.Controls.ImageIcon
         {
             Source = source,
             Width = Size,
             Height = Size,
         };
+
+        // The rasterize size is in physical pixels, and the icon is laid out in effective ones. At
+        // a fixed 16 the SVG was drawn at 16 pixels and stretched to 32 on a 200% display, so every
+        // icon was soft beside the text next to it. It follows the scale of the display the icon
+        // is actually on, including after the window moves to another monitor.
+        void Rasterize()
+        {
+            var pixels = Math.Ceiling(Size * (image.XamlRoot?.RasterizationScale ?? 1));
+            if (source.RasterizePixelWidth == pixels) return;
+            source.RasterizePixelWidth = pixels;
+            source.RasterizePixelHeight = pixels;
+        }
+
+        void OnRootChanged(Xaml.XamlRoot sender, Xaml.XamlRootChangedEventArgs e) => Rasterize();
+
+        image.Loaded += (_, _) =>
+        {
+            Rasterize();
+            if (image.XamlRoot is { } root) root.Changed += OnRootChanged;
+        };
+        image.Unloaded += (_, _) =>
+        {
+            if (image.XamlRoot is { } root) root.Changed -= OnRootChanged;
+        };
+
+        _ = LoadAsync(source, icon, theme);
+        return image;
     }
 
     static async Task LoadAsync(SvgImageSource source, IconRef icon, DrayTheme theme)

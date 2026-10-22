@@ -142,7 +142,8 @@ public sealed class WinTheme : IPlatformTheme
         // The toolbar row is a native sibling above the WebView, not an overlay on it, so there is
         // nothing to reserve. The inset is the shell's own, shared with that row.
         overrides["chrome-top"] = "0px";
-        overrides["chrome-inset"] = $"{NativeShellHandler.ContentInset:0}px";
+        // The WebView itself starts a grip's width in, beside the pane's resize grip.
+        overrides["chrome-inset"] = $"{NativeShellHandler.ContentInset - WinPaneResizer.GripWidth:0}px";
 
         // Windows' type ramp: Body is 14 and Caption is 12, in effective pixels. Dray's own scale is
         // a point smaller, sized for macOS, and text one size off the platform's reads as subtly

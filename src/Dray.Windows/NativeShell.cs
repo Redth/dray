@@ -63,14 +63,20 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
 
     protected override Xaml.Controls.NavigationView CreatePlatformView()
     {
-        return new Xaml.Controls.NavigationView
+        var nav = new Xaml.Controls.NavigationView
         {
             PaneDisplayMode = Xaml.Controls.NavigationViewPaneDisplayMode.Auto,
             IsSettingsVisible = false,
             IsBackButtonVisible = Xaml.Controls.NavigationViewBackButtonVisible.Collapsed,
             IsTitleBarAutoPaddingEnabled = false,
-            OpenPaneLength = 256,
+            OpenPaneLength = WinPaneResizer.SavedWidth,
         };
+
+        // MAUI sets this to 0 in the app's resources, which left each item as tall as its label: a
+        // 19-pixel selection highlight with no room around the icon and text. 32 gives them some,
+        // a little under WinUI's own 36. Scoped to this pane.
+        nav.Resources["NavigationViewItemOnLeftMinHeight"] = 32.0;
+        return nav;
     }
 
     protected override void ConnectHandler(Xaml.Controls.NavigationView nav)
@@ -98,7 +104,10 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
 
         _loadingOverlay = BuildLoadingOverlay();
 
-        var body = new Xaml.Controls.Grid();
+        // Clear of the pane's resize grip, which has to be beside the WebView to own the cursor.
+        // The page's inset is the same amount smaller (WinTheme), so its content still starts
+        // where the toolbar row's does.
+        var body = new Xaml.Controls.Grid { Margin = new Xaml.Thickness(WinPaneResizer.GripWidth, 0, 0, 0) };
         body.Children.Add(_webView);
         body.Children.Add(_loadingOverlay);
 
@@ -109,6 +118,11 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
         Xaml.Controls.Grid.SetRow(body, 1);
         content.Children.Add(toolbarRow);
         content.Children.Add(body);
+
+        // Last, so it is above the WebView: the pane's edge is the content area's leading edge.
+        var resizer = new WinPaneResizer(nav);
+        Xaml.Controls.Grid.SetRowSpan(resizer, 2);
+        content.Children.Add(resizer);
 
         nav.Content = content;
         nav.Loaded += (_, _) =>

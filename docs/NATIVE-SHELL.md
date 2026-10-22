@@ -465,7 +465,14 @@ changes, and update everything else in place.
 
 `Icons.Svg(icon, stroke)` (generated, like the rest of `Icons.g.cs`) returns each icon's sprite
 geometry as a standalone SVG document. `WinIcons` renders it through `SvgImageSource`, stroked in the
-palette's ink for the current theme, and redraws it when the theme changes. `IconSvgTests` parses
+palette's ink for the current theme, and redraws it when the theme changes. `RasterizePixelWidth`
+is in physical pixels, so it follows the display's `RasterizationScale`: at a fixed 16 every icon
+was drawn at 16 and stretched to 32 on a 200% display.
+
+The pane opens at 220 and the user can drag its edge between 180 and 360 (`WinPaneResizer`). The
+width is remembered. The grip sits beside the WebView, not over it, because WebView2 sets the
+pointer for its own area. Items are 32 high: MAUI sets `NavigationViewItemOnLeftMinHeight` to 0,
+which left them as tall as their label. `IconSvgTests` parses
 every icon, because `SvgImageSource` draws nothing for a malformed document and raises no error.
 
 ### 5.3 Making the seam invisible on Windows
