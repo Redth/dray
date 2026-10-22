@@ -70,6 +70,10 @@ public static class WebViewSetup
         settings.IsPasswordAutosaveEnabled = false;
         settings.IsGeneralAutofillEnabled = false;
 
+        // MAUI's BlazorWebView switches the default menus off before this event, which takes Cut,
+        // Copy and Paste out of every field and means ContextMenuRequested is never raised. On
+        // again, so the handler below can trim the menu rather than nothing showing at all.
+        settings.AreDefaultContextMenusEnabled = true;
         core.ContextMenuRequested += OnContextMenuRequested;
     }
 
