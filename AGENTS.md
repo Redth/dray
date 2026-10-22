@@ -73,9 +73,11 @@ and should stay that small.
 
 ```bash
 node build/gen-tokens.mjs              # regenerate tokens.css, Tokens.g.cs, DESIGN.md tables
-node build/gen-icons.mjs               # regenerate sprite.svg + Icons.g.cs
+node build/gen-icons.mjs               # regenerate sprite.svg, Icons.g.cs + the macOS menu-bar mark
 node build/gen-tokens.mjs --check      # fail if any generated file is stale
 node build/gen-icons.mjs --check
+node build/gen-app-icon.mjs            # app tile + macOS icon PNGs from the mark (needs Chrome or Edge)
+node build/gen-app-icon.mjs --check    # fail if the committed PNGs predate the mark or palette
 node build/verify-contrast.mjs         # contrast + gamut + stale-exception report
 node build/lint-tokens.mjs             # raw colour / type / z-index literals
 

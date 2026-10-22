@@ -569,10 +569,21 @@ entirely. Both were tried. The heading stays in the content.
 
 **Name.** Dray — the flatbed dray cart that hauls the load. Equipment, not a platform.
 
-**Mark.** A flatbed cart silhouette in profile, reduced to a horizontal deck line, two wheels, and a
-single stacked crate, drawn on a 24px grid with a 2px stroke so it survives being a 16px menu-bar
-template image. Monochrome (a template image on macOS); the terracotta appears only in the full app
-icon, never in chrome.
+**Mark.** The D-cart: a dray in profile — tow bar, deck, two wheels — whose load is the letter D.
+The bar gives it direction (a dray is pulled), and the D makes it Dray's rather than any cart. One
+stroke drawing on the 24px grid at a 2px stroke, so the same geometry is the 16pt menu-bar template
+image, the mark in the web sidebar and the artwork on the app tile. It lives once, in
+`design/icons.json` under `marks`; it has no `IconRef`, because no platform icon set has a name for
+it. In native chrome it is monochrome — a template image on macOS — and the terracotta fill
+belongs to the app tile, where the D is tinted for volume. The web sidebar, standing in for a native
+one, sets it in `--brand` beside the name.
+
+**App icon.** `node build/gen-app-icon.mjs` draws the tile from the mark and the palette — `--brand`
+into `--brand-hi` on Apple's 824-on-1024 grid — and renders every macOS size with whichever Chrome
+or Edge is installed. Renders of 32px and under use a heavier stroke, because at 16px the 2-unit
+stroke falls under a pixel and the mark dissolves. The PNGs are committed and stamped with a hash of
+what drew them; `--check` fails when the mark or the palette moves on without them. A dark master
+(`design/brand/app-icon-dark.svg`) is drawn for the first head that takes an appearance variant.
 
 **Anti-brief, stated plainly:** no whale, no shipping container, no cargo ship, no hexagon-and-node
 network diagram, no blue. The category reflex is Docker-blue-and-whale; the reflex one tier down is

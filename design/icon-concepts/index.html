@@ -1,0 +1,198 @@
+<!doctype html>
+<!--
+  Dray mark concepts — exploration sheet, not shipped. Open directly in a browser.
+  Every glyph is one stroke drawing on the 24px grid at a 2px stroke (DESIGN.md §10, icons.json
+  geometry), so the same geometry is the tray template, the header mark and the app-icon artwork.
+  Colours are the resolved hex of design/tokens.json primitives; this folder is outside the lint's
+  `src` scan because it is a sketchbook, not UI.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dray — mark concepts</title>
+<style>
+  :root {
+    --clay-100: #f8f5f4; --clay-200: #f0ecea; --clay-300: #ded9d8; --clay-500: #b74c1f; --clay-600: #9e3701;
+    --clay-700: #6f6764; --clay-900: #241c19; --coal-300: #a49c9a; --coal-600: #383433; --coal-700: #2a2726;
+    --coal-800: #201d1d; --coal-900: #131313; --ember-400: #e6814f; --ember-500: #f49665;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 40px 64px; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+         color: var(--clay-900); background: var(--clay-100); }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .lede { color: var(--clay-700); margin: 0 0 24px; max-width: 900px; }
+  svg.g { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
+
+  .lineup { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 36px; }
+  .lineup .cell { background: white; border: 1px solid var(--clay-300); border-radius: 10px; padding: 16px; text-align: center; }
+  .lineup .cell b { display: block; margin-top: 10px; }
+  .lineup .cell .row { display: flex; justify-content: center; align-items: end; gap: 14px; margin-top: 12px; color: var(--clay-900); }
+
+  section { background: white; border: 1px solid var(--clay-300); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
+            display: grid; grid-template-columns: 260px 1fr; gap: 28px; }
+  section h2 { font-size: 17px; margin: 0 0 6px; }
+  section p { margin: 0 0 8px; color: var(--clay-700); }
+  section .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--clay-200); margin: 0 4px 4px 0; }
+  .board { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+  .lbl { font-size: 11px; color: var(--clay-700); text-align: center; margin-top: 6px; }
+
+  .apps { display: flex; gap: 14px; align-items: end; }
+  .sizes { display: flex; gap: 14px; align-items: end; padding: 14px; border-radius: 8px; }
+  .sizes.light { background: white; border: 1px solid var(--clay-300); color: var(--clay-900); }
+  .sizes.dark { background: var(--coal-800); color: var(--clay-200); }
+
+  .pix { display: flex; gap: 10px; }
+  .pix canvas { width: 64px; height: 64px; image-rendering: pixelated; border-radius: 4px; }
+
+  .menubar { width: 300px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: flex-end; gap: 14px;
+             padding: 0 10px; font-size: 13px; }
+  .menubar.light { background: #ececec; color: #1d1d1d; }             /* macOS light menu bar */
+  .menubar.dark  { background: #2b2b2e; color: #f2f2f2; margin-top: 6px; } /* macOS dark menu bar */
+  .menubar .item { display: flex; align-items: center; gap: 4px; padding: 0 5px; height: 20px; border-radius: 4px; }
+  .menubar .item.sel { background: rgba(127,127,127,.28); }
+  .menubar .faux { width: 15px; height: 12px; border: 1.6px solid currentColor; border-radius: 3px; opacity: .85; }
+
+  .header { width: 300px; height: 44px; border-radius: 8px; display: flex; align-items: center; gap: 8px; padding: 0 14px; font-weight: 600; font-size: 15px; }
+  .header.light { background: var(--clay-100); border: 1px solid var(--clay-300); color: var(--clay-900); }
+  .header.light svg { color: var(--clay-500); }
+  .header.dark { background: var(--coal-800); color: var(--clay-200); margin-top: 6px; }
+  .header.dark svg { color: var(--ember-400); }
+  .header .crumb { font-weight: 400; color: var(--clay-700); }
+  .header.dark .crumb { color: var(--coal-300); }
+</style>
+</head>
+<body>
+<h1>Dray — mark concepts</h1>
+<p class="lede">
+  Five directions, all one 2px stroke drawing on the 24px grid so the same geometry serves the 16px
+  menu-bar template, the in-app header and the app icon. Terracotta only appears on the app tile
+  (DESIGN.md §10). The pixel strips are the glyph rasterised at true 16×16 then enlarged — what a
+  1× tray actually gets.
+</p>
+
+<div class="lineup" id="lineup"></div>
+<div id="sections"></div>
+
+<script>
+// One stroke drawing per concept, 24×24. `class="crate"` marks shapes the app tile fills for volume.
+const CONCEPTS = [
+  {
+    id: 'flatbed', name: 'A · Flatbed dray',
+    note: 'The literal brief: a dray in profile — drawbar, deck, two wheels, one crate. Reads as "cart that hauls a load" at every size.',
+    tags: ['closest to §10', 'strong at 16px'],
+    svg: `<path d="M2.5 11.5 5 16h16.5"/>
+          <rect class="crate" x="9" y="6.5" width="9.5" height="9.5" rx="1"/>
+          <path d="M13.75 6.5v3.25"/>
+          <circle cx="8" cy="19.5" r="2"/><circle cx="18.5" cy="19.5" r="2"/>`,
+  },
+  {
+    id: 'pushcart', name: 'B · Platform push cart',
+    note: 'The push-cart you asked about: a platform trolley with an upright handle. The handle gives it a clear silhouette and a sense of someone steering it.',
+    tags: ['"push cart"', 'clear silhouette'],
+    svg: `<path d="M2.5 17H18.5V5h2.5"/>
+          <rect class="crate" x="4.5" y="8" width="9.5" height="9" rx="1"/>
+          <path d="M9.25 8v3"/>
+          <circle cx="6.5" cy="20" r="1.75"/><circle cx="15.5" cy="20" r="1.75"/>`,
+  },
+  {
+    id: 'handtruck', name: 'C · Hand truck',
+    note: 'An upright dolly with a two-crate stack. Vertical, so it fills a square tile and a menu-bar slot better than a long flatbed does.',
+    tags: ['fills a square', 'stack = many'],
+    svg: `<path d="M3 3.5h3V19h12.5"/>
+          <rect class="crate" x="8.5" y="12" width="9" height="7" rx=".75"/>
+          <rect class="crate" x="9.5" y="5" width="7" height="7" rx=".75"/>
+          <circle cx="6" cy="19.5" r="2.5"/>`,
+  },
+  {
+    id: 'monogram', name: 'D · D-cart monogram',
+    note: 'The load is the letter: a D-shaped crate riding a deck on two wheels. Most ownable as a brand mark; the cart is secondary.',
+    tags: ['ownable', 'letterform'],
+    svg: `<path d="M2.5 16h19"/>
+          <path class="crate" d="M7 4.5h4.5a5.75 5.75 0 0 1 0 11.5H7z"/>
+          <circle cx="7" cy="19.5" r="2"/><circle cx="17" cy="19.5" r="2"/>`,
+  },
+  {
+    id: 'pyramid', name: 'E · Loaded flatbed',
+    note: 'Three crates stacked on the deck, the shape most of your references share. Says "manages many" — at 16px the crates start to merge.',
+    tags: ['from the moodboard', 'busiest'],
+    svg: `<path d="M2 17h20"/>
+          <rect class="crate" x="5" y="10" width="7" height="7" rx=".5"/>
+          <rect class="crate" x="12" y="10" width="7" height="7" rx=".5"/>
+          <rect class="crate" x="8.5" y="3" width="7" height="7" rx=".5"/>
+          <circle cx="6.5" cy="20" r="2"/><circle cx="17.5" cy="20" r="2"/>`,
+  },
+];
+
+const glyph = (c, size, extra = '') =>
+  `<svg class="g" viewBox="0 0 24 24" width="${size}" height="${size}" ${extra}>${c.svg}</svg>`;
+
+// macOS-style tile: 824 body on a 1024 canvas, glyph scaled to ~58% of the body.
+function appIcon(c, size, dark) {
+  const s = 21, off = 512 - 12 * s;
+  const bgA = dark ? 'var(--coal-600)' : '#c9582a';   // a touch above clay-500 for the top of the gradient
+  const bgB = dark ? 'var(--coal-900)' : 'var(--clay-600)';
+  const ink = dark ? 'var(--ember-400)' : 'white';
+  const crate = dark ? 'rgba(230,129,79,.18)' : 'rgba(255,255,255,.2)';
+  const gid = `g-${c.id}-${dark ? 'd' : 'l'}-${size}`;
+  return `<svg viewBox="0 0 1024 1024" width="${size}" height="${size}" style="display:block">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${bgA}"/><stop offset="1" stop-color="${bgB}"/></linearGradient></defs>
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#${gid})"/>
+    <rect x="100.5" y="100.5" width="823" height="823" rx="185" fill="none" stroke="white" stroke-opacity=".12"/>
+    <g transform="translate(${off} ${off + 6}) scale(${s})" fill="none" stroke="${ink}" stroke-width="1.9"
+       stroke-linecap="round" stroke-linejoin="round" style="--crate:${crate}">${c.svg.replaceAll('class="crate"', 'fill="' + crate + '"')}</g>
+  </svg>`;
+}
+
+// Rasterise at true pixel size, then show enlarged — the honest preview of a 1× tray icon.
+function pixelCanvas(c, px, ink, bg) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = px;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, px, px);
+  const src = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="${ink}"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${c.svg}</svg>`;
+  const img = new Image();
+  img.onload = () => ctx.drawImage(img, 0, 0, px, px);
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+  return cv;
+}
+
+const lineup = document.getElementById('lineup');
+const sections = document.getElementById('sections');
+
+for (const c of CONCEPTS) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.innerHTML = `<div style="display:flex;justify-content:center">${appIcon(c, 128, false)}</div><b>${c.name}</b>
+    <div class="row">${glyph(c, 32)}${glyph(c, 24)}${glyph(c, 16)}</div>`;
+  lineup.appendChild(cell);
+
+  const sec = document.createElement('section');
+  sec.innerHTML = `
+    <div><h2>${c.name}</h2><p>${c.note}</p>${c.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>
+    <div class="board">
+      <div><div class="apps">${appIcon(c, 192, false)}${appIcon(c, 192, true)}${appIcon(c, 64, false)}${appIcon(c, 32, false)}</div>
+           <div class="lbl">app icon — light · dark · 64 · 32</div></div>
+      <div><div class="sizes light">${glyph(c, 48)}${glyph(c, 32)}${glyph(c, 24)}${glyph(c, 16)}</div>
+           <div class="sizes dark" style="margin-top:6px">${glyph(c, 48)}${glyph(c, 32)}${glyph(c, 24)}${glyph(c, 16)}</div>
+           <div class="lbl">glyph 48 · 32 · 24 · 16</div></div>
+      <div><div class="pix" data-pix></div><div class="lbl">true 16px &amp; 22px raster, enlarged</div></div>
+      <div>
+        <div class="menubar light"><span class="faux"></span><span class="item sel">${glyph(c, 16)}<span>3</span></span><span>Wed 9:41</span></div>
+        <div class="menubar dark"><span class="faux"></span><span class="item">${glyph(c, 16)}<span>3</span></span><span>Wed 9:41</span></div>
+        <div class="lbl">menu-bar item with running count</div>
+      </div>
+      <div>
+        <div class="header light">${glyph(c, 20)}Dray <span class="crumb">/ Containers</span></div>
+        <div class="header dark">${glyph(c, 20)}Dray <span class="crumb">/ Containers</span></div>
+        <div class="lbl">in-app header</div>
+      </div>
+    </div>`;
+  const pix = sec.querySelector('[data-pix]');
+  pix.append(pixelCanvas(c, 16, '#1d1d1d', '#ececec'), pixelCanvas(c, 16, '#f2f2f2', '#2b2b2e'), pixelCanvas(c, 22, '#1d1d1d', '#ececec'));
+  sections.appendChild(sec);
+}
+</script>
+</body>
+</html>

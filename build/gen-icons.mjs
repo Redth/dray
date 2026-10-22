@@ -3,6 +3,7 @@
 //
 //   src/Dray.Core/Shell/Icons.g.cs         IconRef enum + per-platform resolution tables
 //   src/Dray.Ui/wwwroot/icons/sprite.svg   the vendored sprite the WebView references
+//   src/Dray.MacOS/Assets.xcassets/DrayMark.imageset   the mark as a menu-bar template image
 //
 // docs/NATIVE-SHELL.md section 2.3: shared code names an IconRef and each platform resolves it.
 // A missing mapping is a build error, never a blank button on Linux.
@@ -35,11 +36,20 @@ if (missing.length) {
 const pascal = (s) => s.split('-').map((p) => p[0].toUpperCase() + p.slice(1)).join('');
 const names = Object.keys(icons);
 
+// Dray's own mark: the same geometry rules, but no platform has a name for it, so it gets a
+// sprite symbol and a macOS template image instead of an IconRef. See icons.json `marks`.
+const marks = Object.fromEntries(Object.entries(src.marks ?? {}).filter(([k]) => !k.startsWith('$')));
+if (!marks.dray?.svg) {
+  console.error('\x1b[31mdesign/icons.json has no marks.dray.svg\x1b[0m — the app mark is drawn from it.');
+  process.exit(1);
+}
+
 // ------------------------------------------------------------------ sprite.svg
 
-const symbols = names
-  .map((n) => `  <symbol id="i-${n}" viewBox="${geometry.viewBox}">${icons[n].svg}</symbol>`)
-  .join('\n');
+const symbols = [
+  ...names.map((n) => `  <symbol id="i-${n}" viewBox="${geometry.viewBox}">${icons[n].svg}</symbol>`),
+  ...Object.entries(marks).map(([n, m]) => `  <symbol id="mark-${n}" viewBox="${geometry.viewBox}">${m.svg}</symbol>`),
+].join('\n');
 
 const spriteBody = `<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"
      fill="none" stroke="currentColor" stroke-width="${geometry.strokeWidth}"
@@ -123,12 +133,40 @@ ${names.map((n) => `        [IconRef.${pascal(n)}] = ${JSON.stringify(n)},`).joi
 }
 `;
 
+// ------------------------------------------------------------------ macOS menu-bar mark
+//
+// NSStatusItem takes an image, and the mark has no SF Symbol to name. A template image in the
+// asset catalog is what AppKit recolours for a light or dark menu bar and for the highlighted
+// state, so only its alpha matters and it is drawn in black. Kept as vector: the menu bar is 1x
+// on one display and 2x on the next, and one file serves both.
+
+const imageset = 'src/Dray.MacOS/Assets.xcassets/DrayMark.imageset';
+
+const markTemplateSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="${geometry.viewBox}"
+     fill="none" stroke="black" stroke-width="${geometry.strokeWidth}"
+     stroke-linecap="${geometry.linecap}" stroke-linejoin="${geometry.linejoin}">
+  ${marks.dray.svg}
+</svg>
+`;
+
+const markTemplateContents = JSON.stringify(
+  {
+    images: [{ filename: 'DrayMark.svg', idiom: 'universal' }],
+    info: { author: 'dray', version: 1 },
+    properties: { 'preserves-vector-representation': true, 'template-rendering-intent': 'template' },
+  },
+  null,
+  2
+) + '\n';
+
 // ------------------------------------------------------------------ write / check
 
 const outputs = [
   [join(repoRoot, 'src/Dray.Ui/wwwroot/icons/sprite.svg'), sprite],
   [join(repoRoot, 'src/Dray.Ui/Components/IconSprite.razor'), spriteRazor],
   [join(repoRoot, 'src/Dray.Core/Shell/Icons.g.cs'), cs],
+  [join(repoRoot, imageset, 'DrayMark.svg'), markTemplateSvg],
+  [join(repoRoot, imageset, 'Contents.json'), markTemplateContents],
 ];
 
 let stale = 0;

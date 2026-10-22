@@ -17,6 +17,10 @@
     <ApplicationDisplayVersion>$(AppVersion)</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
 
+    <!-- Assets.xcassets/AppIcon.appiconset, rendered by build/gen-app-icon.mjs. The set name,
+         not a path: actool looks it up in the compiled catalog. -->
+    <AppIcon>AppIcon</AppIcon>
+
     <EnableHardenedRuntime>true</EnableHardenedRuntime>
 
     <!-- The macOS SDK pack (26.0.11017) pins itself to Xcode 26.0 exactly, and the check fails on
@@ -57,6 +61,13 @@
          properties. Extra keys must be merged in through a partial manifest. -->
     <PartialAppManifest Include="PartialInfo.plist" />
   </ItemGroup>
+
+  <!-- The menu-bar mark is generated and gitignored, like the colorset. Without it the status
+       item would have no image at all, so a fresh clone fails here with the fix, not at launch. -->
+  <Target Name="_EnsureGeneratedAssets" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets.xcassets/DrayMark.imageset/DrayMark.svg')"
+           Text="Assets.xcassets/DrayMark.imageset is missing. Run: node build/gen-icons.mjs" />
+  </Target>
 
   <ItemGroup>
     <ProjectReference Include="../Dray.Ui/Dray.Ui.csproj" />

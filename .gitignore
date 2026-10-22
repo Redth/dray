@@ -25,6 +25,8 @@ src/Dray.Ui/wwwroot/icons/sprite.svg
 src/Dray.Core/Theme/Tokens.g.cs
 src/Dray.Core/Shell/Icons.g.cs
 src/Dray.MacOS/Assets.xcassets/AccentColor.colorset/Contents.json
+# ...and `node build/gen-icons.mjs`
+src/Dray.MacOS/Assets.xcassets/DrayMark.imageset/
 
 # macOS app bundles
 *.app/

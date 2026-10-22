@@ -33,6 +33,11 @@ jobs:
       - name: Check icons are current
         run: node build/gen-icons.mjs --check
 
+      # The committed app-icon PNGs must have been rendered from the current mark and palette.
+      # Needs no browser: it compares the masters and the render stamp, not pixels.
+      - name: Check app icon is current
+        run: node build/gen-app-icon.mjs --check
+
       # DESIGN.md section 11, gate 2 — no raw colour or type literals in UI source.
       - name: Token lint
         run: node build/lint-tokens.mjs

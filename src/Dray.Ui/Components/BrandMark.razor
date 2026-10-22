@@ -1,0 +1,29 @@
+@* Dray's mark — the D-cart — from the same inlined sprite as every icon. It is not an IconRef:
+   no platform icon set has a name for it, so there is nothing for a native head to resolve.
+   Coloured by currentColor like any icon; DESIGN.md section 10 says where it is brand-tinted. *@
+
+<svg class="icon @SizeClass @Class" aria-hidden="@(Label is null ? "true" : "false")"
+     role="@(Label is null ? null : "img")">
+    @if (Label is not null)
+    {
+        <title>@Label</title>
+    }
+    <use href="#mark-dray" />
+</svg>
+
+@code {
+    /// <summary>Accessible name. Leave null where the word "Dray" sits beside it.</summary>
+    [Parameter] public string? Label { get; set; }
+
+    [Parameter] public IconSize Size { get; set; } = IconSize.Lg;
+
+    [Parameter] public string? Class { get; set; }
+
+    string SizeClass => Size switch
+    {
+        IconSize.Sm => "icon--sm",
+        IconSize.Md => "icon--md",
+        IconSize.Xl => "icon--xl",
+        _ => "icon--lg",
+    };
+}
