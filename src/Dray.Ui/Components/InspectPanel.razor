@@ -92,8 +92,23 @@
                     <dt>Command</dt>
                     <dd class="mono inspect__cmd">@(Inspect.CommandLine.Length > 0 ? Inspect.CommandLine : "—")</dd>
 
-                    <dt>Working directory</dt><dd class="mono">@(Inspect.WorkingDirectory ?? "/")</dd>
-                    <dt>User</dt><dd class="mono">@(Inspect.User ?? "root")</dd>
+                    @* An unset working directory and user are the runtime's defaults, which differ by
+                       OS: Windows starts in C:\ (as the terminal prompt shows) and runs as the
+                       image's own user, which is not knowable from here, so it is not named. *@
+                    <dt>Working directory</dt><dd class="mono">@(Inspect.WorkingDirectory ?? (Inspect.Os == ContainerOs.Windows ? @"C:\" : "/"))</dd>
+                    <dt>User</dt>
+                    @if (Inspect.User is { } user)
+                    {
+                        <dd class="mono">@user</dd>
+                    }
+                    else if (Inspect.Os == ContainerOs.Windows)
+                    {
+                        <dd class="muted">the image's default</dd>
+                    }
+                    else
+                    {
+                        <dd class="mono">root</dd>
+                    }
                 </dl>
             </section>
 
