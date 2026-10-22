@@ -85,15 +85,27 @@ public sealed class DockerRawApi : IDisposable
                 if (endpoint.Tls is { } tls) ApplyTls(handler, tls);
                 break;
 
+            // Through the same relay the typed client uses: a process that has the socket, with
+            // HTTP over its stdio. This used to refuse both schemes — and since connecting builds
+            // one of these, every WSL and SSH host failed to connect after its version and info
+            // had already come back through the relay. Found the first time a real wsl.exe ran.
+            case EndpointScheme.Wsl or EndpointScheme.Ssh when Transport.RelayCommands.For(endpoint) is { } relay:
+                baseAddress = new Uri("http://localhost");
+                handler.ConnectCallback = (_, _) => ValueTask.FromResult<Stream>(Transport.ProcessRelayStream.Start(relay));
+                break;
+
             default:
-                throw new RuntimeConnectionException(
-                    $"The raw API cannot reach a {endpoint.Scheme} endpoint. SSH endpoints are tunnelled to a local socket first.");
+                throw new RuntimeConnectionException($"The raw API cannot reach a {endpoint.Scheme} endpoint.");
         }
 
         _http = new HttpClient(handler)
         {
             BaseAddress = baseAddress,
-            Timeout = timeout ?? DockerClientFactory.DefaultTimeout,
+
+            // A relay's first request may be booting a distribution, as for the typed client.
+            Timeout = timeout ?? (endpoint.Scheme is EndpointScheme.Wsl or EndpointScheme.Ssh
+                ? DockerClientFactory.RelayTimeout
+                : DockerClientFactory.DefaultTimeout),
         };
     }
 

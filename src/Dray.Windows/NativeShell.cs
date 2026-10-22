@@ -1,4 +1,6 @@
+using Dray.Core.Engine;
 using Dray.Core.Shell;
+using Dray.Ui.Services;
 using Microsoft.AspNetCore.Components.WebView.Maui;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui;
@@ -131,7 +133,14 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
         var titleBar = services.GetRequiredService<WinTitleBar>();
         titleBar.Attach(nav);
 
-        _sidebar = new WinSidebar(nav, shell, theme, debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
+        _sidebar = new WinSidebar(
+            nav,
+            shell,
+            theme,
+            services.GetRequiredService<EngineManager>(),
+            services.GetRequiredService<HostSwitcher>(),
+            services.GetRequiredService<IShellBridge>(),
+            debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
         _toolbar = new WinToolbarProjector(services.GetRequiredService<WinTitleBarToolbar>(), titleBar, _webView, shell, theme);
 
         services.GetRequiredService<WinShellReadySignal>().Attach(this);

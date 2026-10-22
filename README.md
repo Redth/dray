@@ -10,7 +10,8 @@ compose stacks — that treats a remote host exactly like the local one.
 
 Dray drives the Docker engine you already have — Docker Desktop, Colima, OrbStack, Rancher Desktop,
 Podman's compatible socket, a bare `dockerd`, a WSL2 distro, or a remote host over SSH. It does not
-ship a runtime and does not provision a VM.
+ship a runtime. When there is no engine, it installs one with the vendor's own installer, showing
+the command before it runs.
 
 On Windows that means both kinds of engine. Windows containers run on the machine's own kernel and
 need neither WSL2 nor Docker Desktop; Linux containers need a Linux kernel and so run in WSL2. They
@@ -22,7 +23,8 @@ Dray's host switcher is the first control in the sidebar, and every screen behin
 whether the engine is a Unix socket, a WSL2 distro, or an SSH tunnel to a box in a closet.
 
 - **macOS** — AppKit shell, native sidebar and toolbar
-- **Windows** — WinUI shell, WSL2 distro awareness, Windows-container mode
+- **Windows** — WinUI shell, WSL2 distros as hosts, guided setup from WSL to a running engine, and
+  Docker Desktop's Linux/Windows switch
 - **Linux** — GTK4 / libadwaita shell
 
 Content is one Blazor codebase shared by all three heads. The seam between native chrome and the

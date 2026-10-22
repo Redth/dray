@@ -164,6 +164,23 @@ public interface IProcessRunner
         => RunAsync(executable, arguments, workingDirectory, ct);
 
     /// <summary>
+    /// Run a program that is expected to take a while, and wait up to <paramref name="timeout"/>.
+    /// <para>
+    /// The other overloads are bounded for probes, which must never be the reason the app does not
+    /// start. Switching Docker Desktop's engine takes eleven seconds and starting it can take a
+    /// minute, so both would be killed half-way through by a probe's limit — and a mode switch cut
+    /// off in the middle is a worse state than one never begun.
+    /// </para>
+    /// </summary>
+    Task<ProcessResult> RunLongAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
+        => RunAsync(executable, arguments, null, environment, ct);
+
+    /// <summary>
     /// Run a program, writing <paramref name="input"/> to its stdin.
     /// <para>
     /// How the credential helper protocol works: the payload goes in on stdin, never on the command
@@ -205,17 +222,34 @@ public sealed class SystemProcessRunner : IProcessRunner
         string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct)
         => RunAsync(executable, arguments, workingDirectory, environment: null, ct);
 
-    public async Task<ProcessResult> RunAsync(
+    public Task<ProcessResult> RunAsync(
         string executable,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         IReadOnlyDictionary<string, string>? environment,
         CancellationToken ct)
+        => RunBoundedAsync(executable, arguments, workingDirectory, environment, ProbeTimeout, ct);
+
+    public Task<ProcessResult> RunLongAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
+        => RunBoundedAsync(executable, arguments, null, environment, timeout, ct);
+
+    static async Task<ProcessResult> RunBoundedAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        IReadOnlyDictionary<string, string>? environment,
+        TimeSpan limit,
+        CancellationToken ct)
     {
         using var process = Start(executable, arguments, workingDirectory, environment: environment);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(ProbeTimeout);
+        timeout.CancelAfter(limit);
 
         var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
         var stderr = process.StandardError.ReadToEndAsync(timeout.Token);

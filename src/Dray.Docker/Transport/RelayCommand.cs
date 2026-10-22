@@ -16,7 +16,21 @@ namespace Dray.Docker.Transport;
 /// <param name="Describe">
 /// What to call this in an error message, in the user's terms rather than the command line's.
 /// </param>
-public sealed record RelayCommand(string FileName, IReadOnlyList<string> Arguments, string Describe);
+public sealed record RelayCommand(string FileName, IReadOnlyList<string> Arguments, string Describe)
+{
+    /// <summary>What kind of relay this is, which decides how its failures read.</summary>
+    public RelayKind Kind { get; init; }
+
+    /// <summary>The distribution or host it reaches, as the user would name it.</summary>
+    public string? Target { get; init; }
+}
+
+public enum RelayKind
+{
+    Other,
+    Wsl,
+    Ssh,
+}
 
 /// <summary>
 /// How Dray reaches an engine that has no endpoint on this machine.
@@ -49,7 +63,11 @@ public static class RelayCommands
     public static RelayCommand ForWsl(string distro) => new(
         "wsl.exe",
         ["-d", distro, "-u", "root", "--exec", "docker", "system", "dial-stdio"],
-        $"the Docker engine inside the WSL distribution '{distro}'");
+        $"the Docker engine inside the WSL distribution '{distro}'")
+    {
+        Kind = RelayKind.Wsl,
+        Target = distro,
+    };
 
     /// <summary>
     /// Reach a remote engine over SSH.
@@ -76,8 +94,65 @@ public static class RelayCommands
 
         arguments.AddRange([target, "--", "docker", "system", "dial-stdio"]);
 
-        return new RelayCommand("ssh", arguments, $"the Docker engine on {target}");
+        return new RelayCommand("ssh", arguments, $"the Docker engine on {target}")
+        {
+            Kind = RelayKind.Ssh,
+            Target = target,
+        };
     }
+
+    /// <summary>
+    /// Why a relay closed without answering, from what it wrote to standard error.
+    /// <para>
+    /// The relay's own words are accurate and unreadable — <c>execvpe(docker) failed</c>, <c>dial
+    /// unix /var/run/docker.sock: connect: connection refused</c> — and each one has a different
+    /// fix. These are the ones measured against a real distribution and a real <c>ssh</c>; anything
+    /// else is passed through rather than guessed at.
+    /// </para>
+    /// </summary>
+    public static string Explain(RelayCommand command, string? stderr)
+    {
+        // wsl.exe's own messages are UTF-16 unless WSL_UTF8 is set, and the relay does not set it:
+        // a relay's stdout is the HTTP stream and must not have its encoding changed.
+        var said = (stderr ?? string.Empty).Replace("\0", string.Empty).Trim();
+
+        if (said.Length == 0) return $"Could not reach {command.Describe}: it closed without answering.";
+
+        var where = command.Kind == RelayKind.Wsl
+            ? $"the WSL distribution '{command.Target}'"
+            : command.Target ?? "the host";
+
+        if (Says(said, "execvpe(docker) failed") || Says(said, "docker: not found") || Says(said, "docker: command not found"))
+            return $"Docker is not installed in {where}.";
+
+        if (Says(said, "docker.sock") && (Says(said, "connection refused") || Says(said, "no such file or directory")))
+            return $"Docker is installed in {where}, but its engine is not running.";
+
+        if (Says(said, "docker.sock") && Says(said, "permission denied"))
+            return $"Permission denied on the Docker socket in {where}.";
+
+        if (command.Kind == RelayKind.Wsl
+            && (Says(said, "WSL_E_DISTRO_NOT_FOUND") || Says(said, "no distribution with the supplied name")))
+            return $"There is no WSL distribution called '{command.Target}' any more.";
+
+        if (command.Kind == RelayKind.Ssh)
+        {
+            // BatchMode means a password prompt is a refusal rather than a hang, so this is what a
+            // key the server does not accept looks like.
+            if (Says(said, "Permission denied"))
+                return $"{where} refused the SSH key. Dray uses your ssh agent and ~/.ssh/config, and cannot answer a password prompt.";
+
+            if (Says(said, "Host key verification failed"))
+                return $"{where}'s host key is not trusted yet. Connect once with ssh in a terminal to accept it.";
+
+            if (Says(said, "Could not resolve hostname"))
+                return $"{where} could not be found.";
+        }
+
+        return $"Could not reach {command.Describe}: {said.Split('\n')[0].Trim()}";
+    }
+
+    static bool Says(string text, string phrase) => text.Contains(phrase, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The command for an endpoint, or null when it does not need one.</summary>
     public static RelayCommand? For(DockerEndpoint endpoint) => endpoint.Scheme switch

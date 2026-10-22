@@ -228,4 +228,58 @@ public class WindowsEngineTests
     [InlineData("tcp://10.0.0.4:2375")]
     public void LeavesDirectlyReachableEndpointsAlone(string raw)
         => Assert.Null(RelayCommands.For(DockerEndpoint.Parse(raw)!));
+
+    /// <summary>
+    /// The relay's stderr, as a real Ubuntu 26.04 distribution and wsl.exe 2.6 wrote it, turned into
+    /// the sentence that says what to do. Each has a different fix, so each reads differently.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "<3>WSL (6943 - Relay) ERROR: CreateProcessCommon:798: execvpe(docker) failed: No such file or directory\n",
+        "Docker is not installed in the WSL distribution 'Ubuntu'.")]
+    [InlineData(
+        "failed to open the raw stream connection: dial unix /var/run/docker.sock: connect: connection refused\n",
+        "Docker is installed in the WSL distribution 'Ubuntu', but its engine is not running.")]
+    [InlineData(
+        "failed to open the raw stream connection: dial unix /var/run/docker.sock: connect: permission denied",
+        "Permission denied on the Docker socket in the WSL distribution 'Ubuntu'.")]
+    public void ExplainsWhyAWslRelayFailed(string stderr, string expected)
+        => Assert.Equal(expected, RelayCommands.Explain(RelayCommands.ForWsl("Ubuntu"), stderr));
+
+    /// <summary>
+    /// Connecting builds the raw API client, and it used to refuse relayed endpoints — so every WSL
+    /// and SSH host failed to connect after its version and info had already come back. Found the
+    /// first time a real wsl.exe ran; this keeps it found.
+    /// </summary>
+    [Theory]
+    [InlineData("wsl://Ubuntu")]
+    [InlineData("ssh://jon@nas")]
+    public void TheRawApiCanReachARelayedEngine(string raw)
+    {
+        using var api = new DockerRawApi(DockerEndpoint.Parse(raw)!, "1.44");
+    }
+
+    /// <summary>wsl.exe's own messages are UTF-16 on a relay, which does not set WSL_UTF8.</summary>
+    [Fact]
+    public void ReadsWslsOwnMessagesInUtf16()
+    {
+        var utf16 = string.Concat("There is no distribution with the supplied name.".Select(c => $"{c}\0"));
+
+        Assert.Equal(
+            "There is no WSL distribution called 'Ubuntu' any more.",
+            RelayCommands.Explain(RelayCommands.ForWsl("Ubuntu"), utf16));
+    }
+
+    [Fact]
+    public void ExplainsAnSshKeyRefusal()
+        => Assert.Contains(
+            "refused the SSH key",
+            RelayCommands.Explain(RelayCommands.ForSsh(DockerEndpoint.Parse("ssh://jon@nas")!), "jon@nas: Permission denied (publickey).\n"));
+
+    /// <summary>Anything not recognised is passed through rather than guessed at.</summary>
+    [Fact]
+    public void PassesAnUnknownFailureThrough()
+        => Assert.EndsWith(
+            "something unexpected",
+            RelayCommands.Explain(RelayCommands.ForWsl("Ubuntu"), "something unexpected\nmore detail"));
 }

@@ -25,7 +25,10 @@ builder.Services.AddSingleton<DockerContextReader>();
 // pages have to guard around.
 builder.Services.AddSingleton<WindowsSetupReader>();
 builder.Services.AddSingleton<SetupStepRunner>();
+builder.Services.AddSingleton<WslAccount>();
 builder.Services.AddSingleton<DockerCliContext>();
+builder.Services.AddSingleton<DockerDesktop>();
+builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
 // Two engines behind one seam. The composite dispatches on the endpoint's scheme, so an Apple
 // host in the picker gets Apple's runtime and everything else gets Docker's — and no page above
 // this line knows either exists.
@@ -42,6 +45,9 @@ builder.Services.AddSingleton<RegistryReader>();
 builder.Services.AddScoped<WebConfirmService>();
 builder.Services.AddScoped<WebDialogService>();
 builder.Services.AddScoped<IShellBridge, WebShellBridge>();
+
+// Scoped because the bridge it confirms through is.
+builder.Services.AddScoped<HostSwitcher>();
 
 var app = builder.Build();
 

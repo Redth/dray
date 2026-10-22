@@ -1,0 +1,115 @@
+@* Create the first account in a WSL distribution, without a console.
+
+   A distribution installed with --no-launch has only root until someone creates a user, and its own
+   first run would prompt for one in a terminal. This asks here instead, in the native dialog frame,
+   and Ubuntu's first run later finds the account and skips its prompt.
+
+   The password is a secret (docs/CREDENTIALS.md). It goes to chpasswd on stdin, lives in a field
+   for the length of one call, and is cleared whatever happened — never rendered back, never
+   logged, never carried out of this dialog. *@
+@inherits DialogBody
+@inject WslAccount Accounts
+
+<div class="field">
+    <label class="field__label" for="account-name">User name</label>
+    <input id="account-name" class="input mono" @bind="_name" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" disabled="@_saving" />
+</div>
+
+<div class="field">
+    <label class="field__label" for="account-password">Password <span class="muted">— sudo asks for it</span></label>
+    <input id="account-password" class="input" type="password" @bind="_password" @bind:event="oninput"
+           autocomplete="new-password" spellcheck="false" disabled="@_saving" />
+</div>
+
+<div class="field">
+    <label class="field__label" for="account-confirm">Password again</label>
+    <input id="account-confirm" class="input" type="password" @bind="_confirm" @bind:event="oninput"
+           autocomplete="new-password" spellcheck="false" disabled="@_saving" />
+</div>
+
+@if ((_problem ?? Mismatch) is { } problem)
+{
+    <p class="account__problem">@problem</p>
+}
+else
+{
+    <p class="account__hint muted">
+        The account you are when you open @Distro. It gets the same groups Ubuntu gives its first
+        user, including sudo. The password goes straight to @Distro and Dray keeps no copy.
+    </p>
+}
+
+@code {
+    /// <summary>Open it. The name created, or null if the dialog was dismissed.</summary>
+    public static async Task<string?> ShowAsync(IShellBridge shell, string distro)
+    {
+        var dialog = new DialogController();
+        await shell.ShowDialogAsync(new DialogRequest(
+            $"Create your account in {distro}",
+            typeof(LinuxAccountDialog),
+            Parameters: new Dictionary<string, object?> { [nameof(Distro)] = distro },
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create account")],
+            Controller: dialog));
+
+        return dialog.Result == "create" ? dialog.Value as string : null;
+    }
+
+    [Parameter, EditorRequired] public string Distro { get; set; } = "";
+
+    string _name = "";
+    string _password = "";
+    string _confirm = "";
+    string? _problem;
+    bool _saving;
+
+    /// <summary>Said as soon as both fields have something in them, rather than on submit.</summary>
+    string? Mismatch => _confirm.Length > 0 && _password != _confirm ? "The two passwords are different." : null;
+
+    bool CanSubmit => !_saving && WslAccount.IsValidName(_name.Trim()) && _password.Length > 0 && _password == _confirm;
+
+    // Prefilled with the Windows name, as Ubuntu's own first run does. Once, when the dialog opens:
+    // the host re-renders the body whenever a button changes, and the field must not fight typing.
+    protected override void OnInitialized() => _name = WslAccount.Suggest(Environment.UserName);
+
+    protected override void DeclareButtons()
+    {
+        Button("cancel", "Cancel");
+        Button("create", "Create account", enabled: CanSubmit, busy: _saving);
+    }
+
+    protected override async Task<bool> OnButtonAsync(string buttonId)
+    {
+        if (buttonId != "create") return true;
+
+        await SubmitAsync();
+        StateHasChanged();
+
+        // Closes itself, and only once the account exists.
+        return false;
+    }
+
+    async Task SubmitAsync()
+    {
+        _saving = true;
+        _problem = null;
+        StateHasChanged();
+
+        var name = _name.Trim();
+
+        try
+        {
+            _problem = await Accounts.CreateAsync(Distro, name, _password);
+            if (_problem is null) Close("create", name);
+        }
+        finally
+        {
+            // Cleared whatever happened. A failed attempt must not leave the password in a component
+            // field for the rest of the session.
+            _password = "";
+            _confirm = "";
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+}
