@@ -23,11 +23,6 @@ public partial class App : MauiWinUIApplication
         // XAML callback crosses back into the framework here, and nowhere else reports it.
         UnhandledException += (_, e) => CrashLog.Report("XAML", e.Exception);
 
-        // WebView2 paints white until its first navigation unless told otherwise, and this is read
-        // when the WebView is created — before any handler event could set it. Transparent, so the
-        // window's Mica shows through from the first frame rather than after a white flash.
-        Environment.SetEnvironmentVariable("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000");
-
         InitializeComponent();
     }
 

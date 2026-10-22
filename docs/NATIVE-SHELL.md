@@ -471,9 +471,26 @@ every icon, because `SvgImageSource` draws nothing for a malformed document and 
 WKWebView is quiet by default. WebView2 is Edge and arrives with Edge's furniture. `WebViewSetup`
 applies all of the following to every WebView2, including the dialog bodies:
 
-- **Transparent from the first frame.** `WEBVIEW2_DEFAULT_BACKGROUND_COLOR=00000000` is set in
-  `App`'s constructor, because the variable is read when the WebView is created, before any handler
-  event runs. `DefaultBackgroundColor = Transparent` keeps it transparent afterwards.
+- **Transparent, which takes two settings and a matching ground.** Measured on WinAppSDK 1.8 and
+  WebView2 runtime 155, in a standalone WinUI 3 window as well as in Dray:
+  - `DefaultBackgroundColor = Transparent` alone is not transparent. WinUI's `WebView2` hands the
+    browser the theme's `SolidBackgroundFillColorBase` instead, so the page sits on an opaque
+    #F3F3F3 (#202020 dark) whatever it paints. `WebViewSetup.MakeTransparent` overrides that one
+    resource on the control, before it creates its controller; the brush of the same name has no
+    effect, and either is too late once the controller exists. Opaque colours pass through as given.
+  - `WEBVIEW2_DEFAULT_BACKGROUND_COLOR` does nothing here. WinUI's control is created at
+    `#FFFFFFFF` with or without it, so Dray does not set it.
+  - A transparent pixel shows the **window's backdrop**, never the XAML beneath the control: over
+    an opaque blue panel a transparent page shows white, over a translucent one it shows Mica. So
+    the page cannot be transparent onto the `NavigationView`'s content layer the toolbar row sits
+    on. Instead it paints that layer itself: `--ground` is `LayerFillColorDefault`, translucent, and
+    composites over Mica exactly as the native layer does. Measured across the toolbar/page edge,
+    the two match to within 1 in each channel, in both themes.
+  - MAUI's window root is a `NavigationView` of its own, whose content grid paints a second layer
+    under everything. `NativeShellHandler` clears it, so the sidebar sits on Mica and the content
+    area on one layer, which is the one the page can match.
+  - Only the shell's WebView is made transparent. In a dialog it would show the window behind the
+    dialog, so dialog bodies keep an opaque ground.
 - **No browser furniture.** Ctrl+wheel zoom, pinch zoom, swipe navigation and the link status bar
   are off. Browser accelerator keys (F5, Ctrl+R, Ctrl+F, Ctrl+P) are off in Release.
 - **A context menu trimmed, not removed.** `AreDefaultContextMenusEnabled = false` would also take
@@ -497,13 +514,17 @@ exe, so stderr goes nowhere. `CrashLog` also writes to `%LOCALAPPDATA%\Dray\logs
 
 ### 5.4 To verify first, on a Windows machine
 
-1. **Mica reaches the content.** `DrayWinApp.ApplyBackdrop` clears the background of MAUI's root
-   view. If some other MAUI layer still paints, the window shows a flat colour where Mica should be.
+1. **Mica reaches the content.** Verified: the content area shows Mica through one layer, and
+   samples straight across the toolbar/page edge match within 1 per channel in light and dark.
+   A regression shows as a flat #F3F3F3 / #202020 under the page (the resource override in
+   `WebViewSetup.MakeTransparent` is missing or late) or a seam under the toolbar row (a second
+   layer is back, or `--ground` no longer equals the native layer).
 2. **No double title bar.** MAUI draws its own title bar row. `NavigationView` has
    `IsTitleBarAutoPaddingEnabled = false` so it does not pad for one as well.
-3. **`--bg` matches the content layer.** It is the composite of `LayerFillColorDefault` over
-   `SolidBackgroundFillColorBase`. Check with
-   `getComputedStyle(document.documentElement).getPropertyValue('--bg')` against a sampled pixel.
+3. **`--bg` approximates the content layer.** It is the composite of `LayerFillColorDefault` over
+   `SolidBackgroundFillColorBase`, the flat colour `color-mix()` needs. Over Mica the real layer
+   is tinted by the wallpaper, so a sampled pixel differs by a few units (light 249 249 249 against
+   about 248 250 252). That is expected. The page's ground is `--ground`, not `--bg`.
 4. **Icons render.** Any that do not are named in `last-run.log` with their `SvgImageSource` status.
 5. **Dialogs.** A Large body fits within the lifted `ContentDialogMaxWidth`. Escape returns the
    cancel id. A confirmation raised from inside a dialog body waits for that dialog to close instead

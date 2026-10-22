@@ -83,11 +83,15 @@ public sealed class WinTheme : IPlatformTheme
         var dictionary = theme == DrayTheme.Dark ? "Default" : "Light";
         var overrides = new Dictionary<string, string>();
 
-        // The ground. The WebView sits on the NavigationView's content layer, which is a
-        // translucent fill over the window's base; --bg is that composite, because it is what
-        // color-mix() blends against. With Mica the material itself shows through and is not a flat
-        // colour, so --ground stays transparent and nothing paints over it — the same reasoning as
-        // macOS 26's sidebar material.
+        // The ground. Natively, the content area is the NavigationView's content layer: a
+        // translucent fill over the window's base. --bg is that composite, because it is what
+        // color-mix() blends against.
+        //
+        // With Mica the WebView is transparent, but not onto that layer: a transparent pixel in
+        // WinUI's WebView2 shows the window's backdrop directly, never the XAML beneath the control
+        // (docs/NATIVE-SHELL.md section 5.3). So the page paints the layer itself, as the same
+        // translucent colour, and it composites over Mica exactly as the native layer does under
+        // the toolbar row: one surface, no seam where the toolbar row meets the page.
         var baseFill = ThemeColor(dictionary, "SolidBackgroundFillColorBase");
         var layer = ThemeColor(dictionary, "LayerFillColorDefault");
 
@@ -95,7 +99,7 @@ public sealed class WinTheme : IPlatformTheme
         {
             var bg = layer is { } l ? Over(l, ground) : ground;
             overrides["bg"] = Css(bg);
-            overrides["ground"] = WinBackdrop.IsMica ? "transparent" : Css(bg);
+            overrides["ground"] = !WinBackdrop.IsMica ? Css(bg) : layer is { } fill ? Css(fill) : "transparent";
 
             // Cards above the layer. Composited to opaque: a translucent --surface would let
             // scrolled rows show through every sticky header drawn with it.

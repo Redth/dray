@@ -29,6 +29,7 @@ public sealed class NativeShell : View
         });
 
         WebViewSetup.Apply(Body);
+        WebViewSetup.MakeTransparent(Body);
 
         // Lays out natively inside the shell's grid, but belongs to this element in MAUI's logical
         // tree, so it resolves its window and dispatcher the way any page content would.
@@ -108,6 +109,7 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
         content.Children.Add(body);
 
         nav.Content = content;
+        nav.Loaded += (_, _) => ClearHostLayer(nav);
 
         // Before the sidebar and toolbar draw their first icons, so they draw them in the theme
         // the NavigationView is actually in.
@@ -148,6 +150,29 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
             if (_loadingOverlay is not null) _loadingOverlay.Visibility = Xaml.Visibility.Collapsed;
             if (_webView is not null) _webView.Opacity = 1;
         });
+    }
+
+    /// <summary>
+    /// MAUI's window root is a NavigationView of its own, and its content grid paints a layer fill
+    /// with a border under everything this shell draws. That puts the sidebar on a layer rather
+    /// than on Mica, and the content area on two. The page cannot match two: the WebView's
+    /// transparent pixels show the window's backdrop, not the XAML beneath it, so it paints the
+    /// one layer the content area should have (<see cref="WinTheme"/>). Clearing MAUI's leaves
+    /// exactly that one, here and in the page alike.
+    /// <para>
+    /// A local value, so it outlasts the theme resource it replaces when the theme changes.
+    /// </para>
+    /// </summary>
+    static void ClearHostLayer(Xaml.Controls.NavigationView nav)
+    {
+        for (var o = Xaml.Media.VisualTreeHelper.GetParent(nav); o is not null; o = Xaml.Media.VisualTreeHelper.GetParent(o))
+        {
+            if (o is Xaml.Controls.Grid { Name: "ContentGrid" } grid)
+            {
+                grid.Background = null;
+                grid.BorderBrush = null;
+            }
+        }
     }
 
     /// <summary>

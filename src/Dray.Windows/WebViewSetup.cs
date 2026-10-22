@@ -31,6 +31,29 @@ public static class WebViewSetup
         "undo", "redo", "cut", "copy", "paste", "pasteAndMatchStyle", "selectAll", "emoji", "spellCheck",
     };
 
+    /// <summary>
+    /// Make the WebView truly transparent, so the window's backdrop is the ground the page is
+    /// drawn on. For the shell's WebView only: a transparent pixel shows the window's backdrop
+    /// directly, never the XAML beneath the control, so inside a dialog it would show the window
+    /// behind the dialog.
+    /// <para>
+    /// WinUI's WebView2 does not hand a transparent <c>DefaultBackgroundColor</c> to the browser
+    /// as it is. It substitutes the theme's <c>SolidBackgroundFillColorBase</c>, so the page sits on
+    /// that opaque light or dark grey whatever it paints. The colour is resolved once, when
+    /// the control creates its controller: overriding that one resource on the control before then
+    /// is what makes transparent mean transparent. The brush of the same name has no effect, and
+    /// setting either after initialisation is too late. docs/NATIVE-SHELL.md section 5.3.
+    /// </para>
+    /// </summary>
+    public static void MakeTransparent(BlazorWebView view)
+    {
+        view.HandlerChanged += (_, _) =>
+        {
+            if (view.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.WebView2 webView)
+                webView.Resources["SolidBackgroundFillColorBase"] = Microsoft.UI.Colors.Transparent;
+        };
+    }
+
     public static void Apply(BlazorWebView view)
     {
         view.BlazorWebViewInitializing += (_, e) =>
@@ -46,9 +69,8 @@ public static class WebViewSetup
     {
         var webView = e.WebView;
 
-        // Transparent, so the window's Mica — or the NavigationView's content layer over it — is
-        // the ground the page is drawn on. WEBVIEW2_DEFAULT_BACKGROUND_COLOR covers the frames
-        // before this runs; this is the setting that holds after.
+        // Transparent. On its own WinUI turns this into the theme's opaque base fill; the shell's
+        // WebView is truly transparent only with MakeTransparent as well.
         webView.DefaultBackgroundColor = Microsoft.UI.Colors.Transparent;
 
         var core = webView.CoreWebView2;
