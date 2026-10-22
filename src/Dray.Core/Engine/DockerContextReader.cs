@@ -455,7 +455,14 @@ public sealed class DockerContextReader(IDockerConfigSource source)
         };
     }
 
-    /// <summary>The first directory on <c>PATH</c> holding an executable of this name, or null.</summary>
+    /// <summary>
+    /// The first directory on a Unix <c>PATH</c> holding an executable of this name, or null.
+    /// <para>
+    /// Joined with '/' rather than <c>Path.Combine</c>. This only ever searches macOS's PATH, and
+    /// <c>Path.Combine</c> takes its separator from whichever machine the code runs on — which
+    /// made the macOS discovery tests produce <c>/opt/homebrew/bin\container</c> on Windows.
+    /// </para>
+    /// </summary>
     string? FindOnPath(string executable)
     {
         var path = source.GetEnvironmentVariable("PATH");
@@ -463,7 +470,7 @@ public sealed class DockerContextReader(IDockerConfigSource source)
 
         foreach (var directory in path.Split(':', StringSplitOptions.RemoveEmptyEntries))
         {
-            var candidate = Path.Combine(directory, executable);
+            var candidate = directory.TrimEnd('/') + "/" + executable;
             if (source.FileExists(candidate)) return candidate;
         }
 
