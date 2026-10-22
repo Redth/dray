@@ -84,7 +84,7 @@ public static class BulkActions
                 "They will be deleted. Anything written inside them that is not on a volume is lost.",
 
             ContainerAction.Kill =>
-                "Each is sent SIGKILL immediately, with no chance to shut down cleanly. A process mid-write can lose data.",
+                "Each is ended immediately, with no chance to shut down cleanly. A process mid-write can lose data.",
 
             _ => string.Empty,
         };

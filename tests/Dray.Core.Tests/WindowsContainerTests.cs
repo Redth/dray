@@ -49,6 +49,7 @@ public class WindowsContainerTests
     [InlineData(unchecked((int)0xC0000409), "stack buffer overrun")]
     [InlineData(unchecked((int)0xE0434352), "an unhandled .NET exception")]
     [InlineData(unchecked((int)0xC000013A), "interrupted (Ctrl+C)")]
+    [InlineData(-1, "force stopped")]
     [InlineData(1, "general error")]
     [InlineData(0, null)]
     public void ExplainsWindowsExitCodes(int code, string? expected)
@@ -78,6 +79,39 @@ public class WindowsContainerTests
 
         Assert.Equal("Exited 137 · killed (out of memory)", linux.Status.Label);
         Assert.Equal("Exited 137", windows.Status.Label);
+    }
+
+    /// <summary>
+    /// The engine writes an exit code as text in two places, a list row's status and a die event,
+    /// and on Windows writes the NTSTATUS unsigned. Found on a real engine: stopping a Nano Server
+    /// container reported 3221225786, int parsing dropped it, and the pill showed a clean exit.
+    /// </summary>
+    [Theory]
+    [InlineData("3221225786", unchecked((int)0xC000013A))]
+    [InlineData("-1073741510", unchecked((int)0xC000013A))]
+    [InlineData("137", 137)]
+    [InlineData(" 0 ", 0)]
+    [InlineData("4294967296", null)]
+    [InlineData("twelve", null)]
+    public void ParsesExitCodesAtFullWidth(string text, int? expected)
+        => Assert.Equal(expected, ContainerStatusVocabulary.ParseExitCode(text));
+
+    [Fact]
+    public void AStoppedWindowsContainerIsExplained()
+    {
+        var store = new EntityStore();
+        store.Reset([new ContainerSummary
+        {
+            Id = "w", Name = "nano", Image = "nanoserver",
+            State = DockerState.Running, Os = ContainerOs.Windows,
+        }]);
+
+        store.Apply(new RuntimeEvent(
+            RuntimeEntity.Container, "die", "w",
+            new Dictionary<string, string> { ["exitCode"] = "3221225786" },
+            DateTimeOffset.UnixEpoch));
+
+        Assert.Equal("Exited -1073741510 · interrupted (Ctrl+C)", store.Find("w")!.Status.Label);
     }
 
     // ---------------------------------------------------------------- capabilities

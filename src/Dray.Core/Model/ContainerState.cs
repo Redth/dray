@@ -114,6 +114,22 @@ public static class ContainerStatusVocabulary
     /// does not exist on that platform, which is worse than saying nothing.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// An exit code as the engine wrote it in text: in a list row's "Exited (n) …" or a die event's
+    /// <c>exitCode</c> attribute.
+    /// <para>
+    /// Windows writes an NTSTATUS there unsigned, so a stopped Windows container reports
+    /// 3221225786 (<c>0xC000013A</c>), which is beyond <see cref="int"/>. Parsed as an int, it
+    /// failed silently and the container showed as a clean exit with nothing to explain. Read at
+    /// full width and kept as the signed 32-bit value inspect gives, which
+    /// <see cref="ExplainExitCode"/> reads either way.
+    /// </para>
+    /// </summary>
+    public static int? ParseExitCode(ReadOnlySpan<char> text)
+        => long.TryParse(text.Trim(), out var value) && value is >= int.MinValue and <= uint.MaxValue
+            ? unchecked((int)value)
+            : null;
+
     public static string? ExplainExitCode(int code, ContainerOs os = ContainerOs.Linux)
         => os == ContainerOs.Windows ? ExplainWindowsExitCode(code) : ExplainLinuxExitCode(code);
 
@@ -162,6 +178,12 @@ public static class ContainerStatusVocabulary
         // a control event rather than a signal, and this is what a process that took it reports.
         0x40010004 => "ended by the runtime (shutdown)",
         0xC000013A => "interrupted (Ctrl+C)",
+
+        // What the compute service reports for a container it was told to terminate, which is
+        // what Force stop and `docker kill` do there. Measured: 4294967295 after a force stop of
+        // a Nano Server container. Without this it fell into "terminated by Windows" below, which
+        // reads as a crash the user did not ask for.
+        0xFFFFFFFF => "force stopped",
 
         0xC0000005 => "access violation",
         0xC0000017 => "out of memory",

@@ -96,7 +96,10 @@ public class ContainerActionTests
         Assert.Contains("lost", removeBody, StringComparison.OrdinalIgnoreCase);
 
         var (_, killBody) = ContainerActions.Confirmation(ContainerAction.Kill, "db");
-        Assert.Contains("SIGKILL", killBody, StringComparison.Ordinal);
+        Assert.Contains("lose data", killBody, StringComparison.Ordinal);
+
+        // Shown for Windows containers too, which are terminated rather than signalled.
+        Assert.DoesNotContain("SIG", killBody, StringComparison.Ordinal);
     }
 
     [Fact]

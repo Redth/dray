@@ -254,7 +254,7 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         var close = status.IndexOf(')');
         if (open < 0 || close <= open) return null;
 
-        return int.TryParse(status.AsSpan(open + 1, close - open - 1), out var code) ? code : null;
+        return ContainerStatusVocabulary.ParseExitCode(status.AsSpan(open + 1, close - open - 1));
     }
 
     static IReadOnlyList<Dray.Core.Model.PortBinding> MapPorts(IList<PortSummary>? ports)

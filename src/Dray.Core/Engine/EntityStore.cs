@@ -237,9 +237,7 @@ public sealed class EntityStore
     void Touch(string id) => _recentlyChanged[id] = _time.GetUtcNow();
 
     static int? ParseExitCode(RuntimeEvent e)
-        => e.Attributes.TryGetValue("exitCode", out var raw) && int.TryParse(raw, out var code)
-            ? code
-            : null;
+        => e.Attributes.TryGetValue("exitCode", out var raw) ? ContainerStatusVocabulary.ParseExitCode(raw) : null;
 
     static DockerHealth ParseHealth(RuntimeEvent e)
     {

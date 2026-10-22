@@ -114,9 +114,11 @@ public static class ContainerActions
             $"Remove {containerName}?",
             "The container will be deleted. Anything written inside it that is not on a volume is lost."),
 
+        // No signal named: a Windows container is terminated, not signalled, and this sentence is
+        // shown for both.
         ContainerAction.Kill => (
             $"Force stop {containerName}?",
-            "The container is sent SIGKILL immediately, with no chance to shut down cleanly. A process mid-write can lose data."),
+            "The container is ended immediately, with no chance to shut down cleanly. A process mid-write can lose data."),
 
         _ => ($"{Label(action)} {containerName}?", string.Empty),
     };
