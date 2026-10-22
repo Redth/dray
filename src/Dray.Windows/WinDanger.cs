@@ -53,6 +53,9 @@ public static class WinDanger
 
         dialog.Opened += (_, _) => Apply();
         dialog.ActualThemeChanged += (_, _) => Apply();
+
+        // The safe button is the default one, and must not be drawn as if it were the commit.
+        WinPalette.SecondaryDefault(dialog.Resources);
     }
 
     static void Set(Xaml.Controls.Button button, string part, WinColor rest, WinColor hover, WinColor pressed)

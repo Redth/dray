@@ -1196,6 +1196,21 @@ textarea,
   gap: 6px;
 }
 
+/* A form is a column of fields, and nothing else spaced them: a label sat directly under the box
+   above it, so every label read as belonging to the field before. The gap between fields is wider
+   than the one inside a field, which is what groups each label with its own box. */
+.field + .field,
+.field + .toggle,
+.toggle + .field {
+  margin-top: var(--s4);
+}
+
+/* Native checkboxes and radios in the brand rather than the engine's own blue. On macOS the system
+   accent already is the brand (DESIGN.md section 9.1); WebView2 and browsers draw Chromium's. */
+:root {
+  accent-color: var(--brand);
+}
+
 .field__label {
   font-size: var(--text-sm);
   font-weight: 500;

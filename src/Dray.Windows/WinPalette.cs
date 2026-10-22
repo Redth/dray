@@ -35,6 +35,9 @@ public static class WinPalette
 {
     static bool _installed;
 
+    /// <summary>The page's secondary button per theme, for <see cref="SecondaryDefault"/>.</summary>
+    static readonly Dictionary<DrayTheme, (WinColor Rest, WinColor PointerOver, WinColor Border, WinColor Text)> Secondary = new();
+
     public static void Install(WinTheme theme)
     {
         if (_installed || Xaml.Application.Current?.Resources is not { } resources) return;
@@ -96,6 +99,7 @@ public static class WinPalette
         // pointer, and the strong line around it. A dialog's Cancel, a filter's dropdown.
         States(d, "ButtonBackground", surface2, surface, surface);
         States(d, "ButtonBorderBrush", lineStrong, lineStrong, lineStrong);
+        Secondary[t] = (surface2, surface, lineStrong, Generated(t, DrayColor.Ink));
 
         // The toolbar's commands are the page's ghost buttons: nothing at rest, the raised surface
         // under the pointer.
@@ -111,6 +115,31 @@ public static class WinPalette
         d["NavigationViewItemBackgroundSelectedPressed"] = Brush(brand, 0.10);
 
         return d;
+    }
+
+    /// <summary>
+    /// Inside <paramref name="scope"/>, a button WinUI draws in the accent style is drawn as the
+    /// page's secondary instead.
+    /// <para>
+    /// For a destructive confirmation, whose default button is Cancel so that Enter is safe. WinUI
+    /// gives the default button the accent style, which is the brand: a filled terracotta Cancel
+    /// beside a filled danger Remove, two committing-looking buttons, one of them the brand on the
+    /// safe choice. The web head draws that Cancel as a secondary button, and so does this. The
+    /// danger button keeps its own colours, which <see cref="WinDanger"/> sets on the button itself.
+    /// </para>
+    /// </summary>
+    public static void SecondaryDefault(Xaml.ResourceDictionary scope)
+    {
+        foreach (var t in new[] { DrayTheme.Light, DrayTheme.Dark })
+        {
+            if (!Secondary.TryGetValue(t, out var s)) continue;
+
+            var d = new Xaml.ResourceDictionary();
+            States(d, "AccentButtonBackground", s.Rest, s.PointerOver, s.PointerOver);
+            States(d, "AccentButtonBorderBrush", s.Border, s.Border, s.Border);
+            States(d, "AccentButtonForeground", s.Text, s.Text, s.Text);
+            scope.ThemeDictionaries[WinTheme.DictionaryName(t)] = d;
+        }
     }
 
     static void States(Xaml.ResourceDictionary d, string key, WinColor rest, WinColor pointerOver, WinColor pressed)
