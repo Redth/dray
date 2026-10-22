@@ -111,14 +111,24 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
         content.Children.Add(body);
 
         nav.Content = content;
-        nav.Loaded += (_, _) => ClearHostLayer(nav);
+        nav.Loaded += (_, _) =>
+        {
+            ClearHostLayer(nav);
+            KeepContentUnderTitleBar(content);
+        };
+
 
         // Before the sidebar and toolbar draw their first icons, so they draw them in the theme
         // the NavigationView is actually in.
         (theme as WinTheme)?.Follow(nav);
 
+        // Back and the pane toggle live in the title bar, so nothing above the sidebar items comes
+        // and goes with the page.
+        var titleBar = services.GetRequiredService<WinTitleBar>();
+        titleBar.Attach(nav);
+
         _sidebar = new WinSidebar(nav, shell, theme, debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
-        _toolbar = new WinToolbarProjector(toolbarRow, nav, _webView, shell, theme);
+        _toolbar = new WinToolbarProjector(toolbarRow, titleBar, _webView, shell, theme);
 
         services.GetRequiredService<WinShellReadySignal>().Attach(this);
 
@@ -175,6 +185,39 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
                 grid.BorderBrush = null;
             }
         }
+    }
+
+    /// <summary>
+    /// The NavigationView pads its content grid by the title bar's height, on the assumption that
+    /// it is drawn under the title bar, and re-pads it whenever that height changes, even with
+    /// <c>IsTitleBarAutoPaddingEnabled</c> off. MAUI already lays the page out below its title bar,
+    /// so the padding left the content area a title bar's height lower than the sidebar beside it.
+    /// Held at zero, so the toolbar row starts where the sidebar does.
+    /// </summary>
+    static void KeepContentUnderTitleBar(Xaml.FrameworkElement content)
+    {
+        if (Ancestor(content, "ContentGrid") is not { } grid) return;
+
+        grid.Margin = new Xaml.Thickness(0);
+        grid.RegisterPropertyChangedCallback(Xaml.FrameworkElement.MarginProperty, (_, _) =>
+        {
+            if (grid.Margin != new Xaml.Thickness(0)) grid.Margin = new Xaml.Thickness(0);
+        });
+    }
+
+    /// <summary>
+    /// The nearest element above <paramref name="element"/> with this name: the NavigationView
+    /// template part that holds its content. Searched upward because the pane's items have parts
+    /// of the same name.
+    /// </summary>
+    static Xaml.FrameworkElement? Ancestor(Xaml.DependencyObject element, string name)
+    {
+        for (var o = Xaml.Media.VisualTreeHelper.GetParent(element); o is not null; o = Xaml.Media.VisualTreeHelper.GetParent(o))
+        {
+            if (o is Xaml.FrameworkElement { Name: var found } match && found == name) return match;
+        }
+
+        return null;
     }
 
     /// <summary>

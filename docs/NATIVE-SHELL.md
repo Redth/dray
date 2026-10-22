@@ -434,6 +434,8 @@ not been checked is everything that happens at runtime. §5.4 lists the claims t
 ```
 DrayWinApp (MAUI Application)
 └── Window — Mica backdrop where the OS has it
+    ├── TitleBar (MAUI, 48 high)
+    │   └── TitleBarNavigation ──handler──▶ Back + pane toggle   WinTitleBar
     └── ContentPage (transparent)
         └── NativeShell ──handler──▶ NavigationView          WinSidebar: items from NavigationManifest
                                      └── Grid
@@ -450,7 +452,7 @@ assets), so it stays a MAUI element and is converted with `ToPlatform`.
 | PageChrome | Windows |
 |---|---|
 | `Title`, `Subtitle` | Title and caption text at the leading edge of the toolbar row |
-| `Back` | The `NavigationView`'s own back button. It is the control every Windows app has in that place |
+| `Back` | WinUI's back button, in its own style, at the leading edge of the title bar beside the pane toggle, as in Settings and File Explorer. Shown only when the page declares one, its tooltip names the destination (`ChromeBack.Label`), and it invokes through `IShellState.InvokeAction`. The `NavigationView`'s own back and toggle are hidden: in the pane they took a row that came and went with the page and moved every sidebar item under the pointer |
 | `Filters` | `DropDownButton` with radio menu items |
 | `Search` | `AutoSuggestBox` |
 | Primary action | Accent button, text only (the accent fill is the system's, and an ink-stroked icon would match neither it nor its text) |

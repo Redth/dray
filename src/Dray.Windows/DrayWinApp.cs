@@ -32,6 +32,16 @@ public sealed class DrayWinApp(IServiceProvider services) : Application
             Height = 760,
             MinimumWidth = 720,
             MinimumHeight = 480,
+
+            // MAUI's title bar, which already owns the drag region and the caption buttons, with
+            // Back and the pane toggle at its leading edge. 48 is the height WinUI gives a title
+            // bar that carries a back button.
+            TitleBar = new TitleBar
+            {
+                Title = "Dray",
+                LeadingContent = new TitleBarNavigation(),
+                HeightRequest = 48,
+            },
         };
 
         window.HandlerChanged += (_, _) =>

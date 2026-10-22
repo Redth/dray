@@ -24,7 +24,10 @@ public static class WinProgram
         // than MAUI's FlyoutPage, whose Windows pane holds a MAUI page instead of real navigation
         // items — the sidebar would be a web list drawn in a native frame.
         builder.ConfigureMauiHandlers(handlers =>
-            handlers.AddHandler<NativeShell, NativeShellHandler>());
+        {
+            handlers.AddHandler<NativeShell, NativeShellHandler>();
+            handlers.AddHandler<TitleBarNavigation, TitleBarNavigationHandler>();
+        });
 
         // The Blazor services components resolve: NavigationManager, IJSRuntime and the rest.
         builder.Services.AddMauiBlazorWebView();
@@ -37,6 +40,7 @@ public static class WinProgram
         // The request a native dialog is presenting, read by the body in its own WebView.
         builder.Services.AddSingleton<NativeDialogState>();
         builder.Services.AddSingleton<IPlatformTheme, WinTheme>();
+        builder.Services.AddSingleton<WinTitleBar>();
 
         // The engine layer, same registrations as the other heads — less Apple's runtime, which has
         // no engine to find on this OS.

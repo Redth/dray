@@ -7,7 +7,7 @@ namespace Dray.WinUI;
 /// Projects the current <see cref="PageChrome"/> onto a row of native WinUI controls above the
 /// WebView: the page title, its filters as drop-down buttons, an <c>AutoSuggestBox</c> for search, the
 /// primary action as an accent button and the rest in a <c>CommandBar</c>, which folds them into
-/// its overflow menu when the window is narrow. Back is the <c>NavigationView</c>'s own button.
+/// its overflow menu when the window is narrow. Back is in the title bar (<see cref="WinTitleBar"/>).
 /// <para>
 /// Like the macOS projector it knows nothing about any page — it renders what the page declared
 /// (docs/NATIVE-SHELL.md section 2.1). It also uses the same rule for when to rebuild:
@@ -18,7 +18,7 @@ namespace Dray.WinUI;
 public sealed class WinToolbarProjector : IDisposable
 {
     readonly Xaml.Controls.Grid _host;
-    readonly Xaml.Controls.NavigationView _nav;
+    readonly WinTitleBar _titleBar;
     readonly Xaml.UIElement _content;
     readonly IShellState _shell;
     readonly IPlatformTheme _theme;
@@ -36,14 +36,13 @@ public sealed class WinToolbarProjector : IDisposable
     readonly Dictionary<string, Xaml.Controls.Primitives.ButtonBase> _actionItems = [];
     readonly Dictionary<string, FilterMenu> _filterMenus = [];
     Xaml.Controls.AutoSuggestBox? _search;
-    string? _backId;
     bool _disposed;
 
     public WinToolbarProjector(
-        Xaml.Controls.Grid host, Xaml.Controls.NavigationView nav, Xaml.UIElement content, IShellState shell, IPlatformTheme theme)
+        Xaml.Controls.Grid host, WinTitleBar titleBar, Xaml.UIElement content, IShellState shell, IPlatformTheme theme)
     {
         _host = host;
-        _nav = nav;
+        _titleBar = titleBar;
         _content = content;
         _shell = shell;
         _theme = theme;
@@ -111,7 +110,6 @@ public sealed class WinToolbarProjector : IDisposable
         Place(_primarySlot, 4);
         Place(_commands, 5);
 
-        _nav.BackRequested += OnBackRequested;
         _shell.ChromeChanged += OnChromeChanged;
         _theme.Changed += OnThemeChanged;
 
@@ -142,13 +140,9 @@ public sealed class WinToolbarProjector : IDisposable
         _subtitle.Text = chrome.Subtitle ?? string.Empty;
         _subtitle.Visibility = string.IsNullOrEmpty(chrome.Subtitle) ? Xaml.Visibility.Collapsed : Xaml.Visibility.Visible;
 
-        // Back is the NavigationView's own button, so a page that declares one gets the control
+        // Back is WinUI's back button, in the title bar, so a page that declares one gets the control
         // every Windows app has in that place rather than a second arrow in the toolbar.
-        _backId = chrome.Back?.Id;
-        _nav.IsBackEnabled = chrome.Back is not null;
-        _nav.IsBackButtonVisible = chrome.Back is not null
-            ? Xaml.Controls.NavigationViewBackButtonVisible.Visible
-            : Xaml.Controls.NavigationViewBackButtonVisible.Collapsed;
+        _titleBar.SetBack(chrome.Back);
 
         if (chrome.Signature != _signature)
         {
@@ -348,11 +342,6 @@ public sealed class WinToolbarProjector : IDisposable
         if (e.Reason == Xaml.Controls.AutoSuggestionBoxTextChangeReason.UserInput) _shell.SetSearchText(sender.Text);
     }
 
-    void OnBackRequested(Xaml.Controls.NavigationView sender, Xaml.Controls.NavigationViewBackRequestedEventArgs e)
-    {
-        if (_backId is { } id) _shell.InvokeAction(id);
-    }
-
     static T? Resource<T>(string key) where T : class
         => Xaml.Application.Current.Resources.TryGetValue(key, out var value) ? value as T : null;
 
@@ -363,7 +352,6 @@ public sealed class WinToolbarProjector : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        _nav.BackRequested -= OnBackRequested;
         _shell.ChromeChanged -= OnChromeChanged;
         _theme.Changed -= OnThemeChanged;
         if (_search is not null) _search.TextChanged -= OnSearchTextChanged;
