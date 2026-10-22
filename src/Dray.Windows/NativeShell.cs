@@ -87,6 +87,8 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
             MinHeight = 56,
         };
 
+        // Before ToPlatform, which is what starts the WebView initialising.
+        WebViewSetup.SeedTheme(VirtualView.Body, theme);
         _webView = (Xaml.FrameworkElement)VirtualView.Body.ToPlatform(MauiContext);
 
         // Hidden until Blazor has painted, then faded in, so the first thing on screen is the

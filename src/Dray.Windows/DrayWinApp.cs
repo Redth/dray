@@ -15,10 +15,11 @@ public sealed class DrayWinApp(IServiceProvider services) : Application
 {
     protected override Window CreateWindow(IActivationState? activationState)
     {
+        var shell = new NativeShell();
         var page = new ContentPage
         {
             Title = string.Empty,
-            Content = new NativeShell(),
+            Content = shell,
 
             // A page paints an opaque ground by default, which would cover the window's Mica.
             BackgroundColor = Colors.Transparent,
@@ -37,6 +38,7 @@ public sealed class DrayWinApp(IServiceProvider services) : Application
         {
             if (window.Handler?.PlatformView is not Xaml.Window native) return;
 
+            WinFirstFrame.HoldUntilDrawn(native, () => shell.Handler?.PlatformView as Xaml.FrameworkElement);
             ApplyBackdrop(native);
             WinWindow.TrackActivation(native);
         };

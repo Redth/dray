@@ -491,6 +491,16 @@ applies all of the following to every WebView2, including the dialog bodies:
     area on one layer, which is the one the page can match.
   - Only the shell's WebView is made transparent. In a dialog it would show the window behind the
     dialog, so dialog bodies keep an opaque ground.
+- **No white frame at launch.** Measured by sampling the screen from the moment the window
+  exists, three sources, each fixed where it starts:
+  - The window itself is white for 125–250 ms before XAML's first frame and the Mica backdrop.
+    `WinFirstFrame` cloaks it with DWM until the shell has loaded and drawn twice (or 3 s pass).
+  - WinUI creates the control at opaque white, and opaque colours reach the browser unchanged.
+    `WebViewSetup.Apply` sets Transparent on `HandlerChanged`, before the controller exists.
+  - Blazor's first render is in the generated palette, because `PlatformThemeSync` applies the
+    platform's tokens only after it. The reveal showed that frame, a near-white ground with warm
+    cards, once per launch. `WebViewSetup.SeedTheme` applies the same tokens from a
+    document-created script, so the first paint is already in the Windows palette.
 - **No browser furniture.** Ctrl+wheel zoom, pinch zoom, swipe navigation and the link status bar
   are off. Browser accelerator keys (F5, Ctrl+R, Ctrl+F, Ctrl+P) are off in Release.
 - **A context menu trimmed, not removed.** `AreDefaultContextMenusEnabled = false` would also take

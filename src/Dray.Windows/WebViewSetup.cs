@@ -1,3 +1,6 @@
+using System.Text.Json;
+using Dray.Core.Shell;
+using Dray.Core.Theme;
 using Microsoft.AspNetCore.Components.WebView;
 using Microsoft.AspNetCore.Components.WebView.Maui;
 using Microsoft.Web.WebView2.Core;
@@ -54,8 +57,56 @@ public static class WebViewSetup
         };
     }
 
+    /// <summary>
+    /// Give the page the platform's tokens before its first paint, not after.
+    /// <para>
+    /// <c>PlatformThemeSync</c> applies them over JS interop once Blazor has rendered, so the first
+    /// frame is drawn in the generated palette: an opaque near-white ground and warm cards. The
+    /// shell reveals the WebView after that first render, and on Windows the frame between the two
+    /// was on screen, measured as one white frame on every launch. A script that runs as each
+    /// document is created does what <c>theme.apply</c> does, with the values as they are now;
+    /// <c>PlatformThemeSync</c> then re-applies the same values and handles every later change.
+    /// </para>
+    /// </summary>
+    public static void SeedTheme(BlazorWebView view, IPlatformTheme theme)
+    {
+        view.BlazorWebViewInitialized += (_, e) =>
+        {
+            var mode = theme.Current == DrayTheme.Dark ? "dark" : "light";
+            var overrides = JsonSerializer.Serialize(theme.TokenOverrides());
+
+            // documentElement does not exist yet when a document-created script runs.
+            var script = $$"""
+                (() => {
+                  const apply = () => {
+                    const root = document.documentElement;
+                    root.setAttribute('data-theme', '{{mode}}');
+                    for (const [name, value] of Object.entries({{overrides}})) root.style.setProperty('--' + name, value);
+                  };
+                  if (document.documentElement) { apply(); return; }
+                  new MutationObserver((_, observer) => {
+                    if (!document.documentElement) return;
+                    observer.disconnect();
+                    apply();
+                  }).observe(document, { childList: true });
+                })();
+                """;
+
+            _ = e.WebView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(script);
+        };
+    }
+
     public static void Apply(BlazorWebView view)
     {
+        // WinUI creates the control at opaque white, and an opaque colour is handed to the browser
+        // as it is: the controller would start white and stay white until Configure runs, a flash
+        // in the middle of the page appearing. Transparent before the controller exists.
+        view.HandlerChanged += (_, _) =>
+        {
+            if (view.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.WebView2 webView)
+                webView.DefaultBackgroundColor = Microsoft.UI.Colors.Transparent;
+        };
+
         view.BlazorWebViewInitializing += (_, e) =>
         {
             Directory.CreateDirectory(UserDataFolder);
