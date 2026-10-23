@@ -84,9 +84,50 @@ public sealed class ComposeCli(
     ComposeCommand? _found;
     bool _probed;
 
+    /// <summary>What each WSL distribution answered, by name — compose there is its own install.</summary>
+    readonly Dictionary<string, ComposeCommand?> _inDistro = new(StringComparer.OrdinalIgnoreCase);
+
+    static readonly Dictionary<string, string> Utf8 = new() { ["WSL_UTF8"] = "1" };
+
     /// <summary>
-    /// Find a working compose, or null. Probed once and remembered — this shells out, and the
-    /// answer does not change while the app is running.
+    /// The compose that can drive <paramref name="endpoint"/>, or null.
+    /// <para>
+    /// For an engine inside a WSL distribution that is the distribution's own compose: its socket
+    /// has no address on Windows, so a Windows compose cannot reach it, and the paths compose
+    /// recorded on its containers are Linux paths that only mean something in there. For every
+    /// other engine it is this machine's compose, pointed at the engine by <c>DOCKER_HOST</c>.
+    /// Apple's engine has none.
+    /// </para>
+    /// </summary>
+    public async Task<ComposeCommand?> DetectAsync(DockerEndpoint? endpoint, CancellationToken ct = default)
+    {
+        if (endpoint?.Scheme == EndpointScheme.AppleContainer) return null;
+        if (endpoint is not { Scheme: EndpointScheme.Wsl, Distro: { } distro }) return await DetectAsync(ct).ConfigureAwait(false);
+
+        if (_inDistro.TryGetValue(distro, out var known)) return known;
+
+        ComposeCommand? found = null;
+
+        try
+        {
+            var result = await _runner
+                .RunLongAsync("wsl.exe", ["-d", distro, "--exec", "docker", "compose", "version", "--short"], TimeSpan.FromSeconds(60), Utf8, ct)
+                .ConfigureAwait(false);
+
+            var version = WslDistroReader.Decode(result.StandardOutput).Trim();
+            if (result.ExitCode == 0 && version.Length > 0) found = new ComposeCommand("docker", ["compose"], version);
+        }
+        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // No wsl.exe, or the distribution would not start: no compose there that Dray can use.
+        }
+
+        return _inDistro[distro] = found;
+    }
+
+    /// <summary>
+    /// Find a working compose on this machine, or null. Probed once and remembered — this shells
+    /// out, and the answer does not change while the app is running.
     /// </summary>
     public async Task<ComposeCommand?> DetectAsync(CancellationToken ct = default)
     {
@@ -151,12 +192,11 @@ public sealed class ComposeCli(
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         CancellationToken ct = default)
-        => _runner.StreamAsync(
-            command.Executable,
-            Arguments(command, target, project, files, arguments),
-            workingDirectory,
-            ComposeEnvironment.For(_environment(), target),
-            ct);
+    {
+        var run = Invocation(command, target, project, files, arguments, workingDirectory);
+
+        return _runner.StreamAsync(run.Executable, run.Arguments, run.WorkingDirectory, ComposeEnvironment.For(_environment(), target), ct);
+    }
 
     /// <summary>
     /// Ask compose what it makes of a stack: <c>compose config</c>, the same parse, merge,
@@ -237,8 +277,10 @@ public sealed class ComposeCli(
         IReadOnlyList<string> files,
         IReadOnlyList<string> arguments)
     {
-        var parts = new List<string> { command.Executable };
-        parts.AddRange(Arguments(command, target, project, files, arguments).Select(Quote));
+        var run = Invocation(command, target, project, files, arguments, null);
+
+        var parts = new List<string> { run.Executable };
+        parts.AddRange(run.Arguments.Select(Quote));
 
         // The environment is how the standalone binary is aimed; leaving it out of the shown command
         // would show a command that targets a different host when pasted.
@@ -279,6 +321,51 @@ public sealed class ComposeCli(
 
         return args;
     }
+
+    /// <summary>A compose run, fully decided: what to start, with what, and where.</summary>
+    internal sealed record ComposeRun(string Executable, IReadOnlyList<string> Arguments, string? WorkingDirectory);
+
+    /// <summary>
+    /// How one compose invocation runs, as a pure function — the thing the tests pin down.
+    /// <para>
+    /// Every engine but one gets this machine's compose, with the host on its command line
+    /// (<see cref="ComposeTarget"/>). An engine inside a WSL distribution is the exception: its
+    /// socket has no address on this side, and the paths compose recorded on its containers are
+    /// Linux paths that mean something only in there — so compose runs inside the distribution, in
+    /// the directory it recorded, as the distribution's default user so anything it writes belongs
+    /// to them. Verified on Windows: a stack in Ubuntu stopped and started through Dray.
+    /// </para>
+    /// </summary>
+    internal static ComposeRun Invocation(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory)
+    {
+        if (target.Distro is { } distro)
+        {
+            List<string> compose = [.. command.LeadingArguments, "-p", project];
+
+            foreach (var file in files)
+            {
+                compose.Add("-f");
+                compose.Add(file);
+            }
+
+            compose.AddRange(arguments);
+
+            // --cd takes the Linux path as compose recorded it. --exec, as for the relay, so a
+            // profile's greeting does not become part of compose's output.
+            return new ComposeRun(
+                "wsl.exe",
+                ["-d", distro, "--cd", workingDirectory is { Length: > 0 } wd ? wd : "~", "--exec", command.Executable, .. compose],
+                null);
+        }
+
+        return new ComposeRun(command.Executable, Arguments(command, target, project, files, arguments), workingDirectory);
+    }
 }
 
 /// <summary>The result of a process that ran to completion.</summary>
@@ -316,6 +403,23 @@ public interface IProcessRunner
         IReadOnlyDictionary<string, string>? environment,
         CancellationToken ct)
         => RunAsync(executable, arguments, workingDirectory, ct);
+
+    /// <summary>
+    /// Run a program that is expected to take a while, and wait up to <paramref name="timeout"/>.
+    /// <para>
+    /// The other overloads are bounded for probes, which must never be the reason the app does not
+    /// start. Switching Docker Desktop's engine takes eleven seconds and starting it can take a
+    /// minute, so both would be killed half-way through by a probe's limit — and a mode switch cut
+    /// off in the middle is a worse state than one never begun.
+    /// </para>
+    /// </summary>
+    Task<ProcessResult> RunLongAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
+        => RunAsync(executable, arguments, null, environment, ct);
 
     /// <summary>
     /// Run a program, writing <paramref name="input"/> to its stdin.
@@ -380,17 +484,34 @@ public sealed class SystemProcessRunner : IProcessRunner
         string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct)
         => RunAsync(executable, arguments, workingDirectory, environment: null, ct);
 
-    public async Task<ProcessResult> RunAsync(
+    public Task<ProcessResult> RunAsync(
         string executable,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         IReadOnlyDictionary<string, string>? environment,
         CancellationToken ct)
+        => RunBoundedAsync(executable, arguments, workingDirectory, environment, ProbeTimeout, ct);
+
+    public Task<ProcessResult> RunLongAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
+        => RunBoundedAsync(executable, arguments, null, environment, timeout, ct);
+
+    static async Task<ProcessResult> RunBoundedAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        IReadOnlyDictionary<string, string>? environment,
+        TimeSpan limit,
+        CancellationToken ct)
     {
         using var process = Start(executable, arguments, workingDirectory, environment: environment);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(ProbeTimeout);
+        timeout.CancelAfter(limit);
 
         var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
         var stderr = process.StandardError.ReadToEndAsync(timeout.Token);

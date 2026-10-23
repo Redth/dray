@@ -36,6 +36,178 @@ public sealed class SetupStepRunner
     /// <summary>What Windows returns when the user dismissed the User Account Control prompt.</summary>
     const int ElevationCancelled = 1223;
 
+    /// <summary>What <c>pkexec</c> returns when the user dismissed polkit's password dialog.</summary>
+    const int PolkitDismissed = 126;
+
+    /// <summary>
+    /// Run a step inside Dray, handing each line of its output to <paramref name="output"/> as it
+    /// arrives.
+    /// <para>
+    /// For the steps that do not need Dray itself elevated: installing a distribution, installing an
+    /// engine inside one as its root, installers that raise their own prompt. Their output is the
+    /// only sign that a long step is moving, so it is shown rather than hidden behind a spinner —
+    /// and stdout and stderr together, in arrival order, because these tools report progress on one
+    /// and results on the other.
+    /// </para>
+    /// </summary>
+    public async Task<SetupStepResult> RunInAppAsync(SetupStep step, Action<string> output, CancellationToken ct = default)
+    {
+        var info = new ProcessStartInfo(step.FileName)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        foreach (var argument in step.Arguments) info.ArgumentList.Add(argument);
+
+        // wsl.exe writes UTF-16 without it. Harmless to everything else, which ignores it.
+        info.Environment["WSL_UTF8"] = "1";
+
+        foreach (var (key, value) in step.Environment ?? new Dictionary<string, string>()) info.Environment[key] = value;
+
+        var restartDistro = false;
+
+        void Line(string? line)
+        {
+            if (line is null) return;
+
+            // Builds of wsl.exe that ignore WSL_UTF8 arrive with a NUL after every character.
+            line = WslDistroReader.Decode(line);
+
+            if (line.Trim() == WindowsSetupPlan.RestartDistroMarker)
+            {
+                restartDistro = true;
+                return;
+            }
+
+            output(line);
+        }
+
+        try
+        {
+            using var process = Process.Start(info);
+            if (process is null) return new SetupStepResult(false, false, $"Could not start {step.FileName}.");
+
+            process.OutputDataReceived += (_, e) => Line(e.Data);
+            process.ErrorDataReceived += (_, e) => Line(e.Data);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            try
+            {
+                await process.WaitForExitAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Unlike a step in its own window, this one is Dray's, and nobody else can see it
+                // to stop it. An install abandoned half-way is still better ended than orphaned.
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (Exception)
+                {
+                    // Already exited between the cancellation and the kill.
+                }
+
+                return new SetupStepResult(false, false, "Stopped. Whatever it had finished stays done; running it again picks up from there.");
+            }
+
+            // pkexec's code for a dismissed password dialog: a decision, said as one, like a
+            // declined User Account Control prompt.
+            if (process.ExitCode == PolkitDismissed && step.FileName.EndsWith("pkexec", StringComparison.Ordinal))
+                return SetupStepResult.Cancelled;
+
+            if (process.ExitCode != 0)
+                return new SetupStepResult(false, false, $"{Path.GetFileNameWithoutExtension(step.FileName)} exited with code {process.ExitCode}. Its output is above.");
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return new SetupStepResult(false, false, $"Could not run {step.FileName}: {ex.Message}");
+        }
+
+        // Switching on systemd takes effect when the distribution next starts, and the engine is
+        // started by systemd. Stopping it now means the next connection starts it properly.
+        if (restartDistro && step.Distro is { } distro)
+        {
+            output($"Restarting {distro} so the engine starts with it…");
+
+            using var terminate = Process.Start(new ProcessStartInfo("wsl.exe", ["--terminate", distro]) { CreateNoWindow = true, UseShellExecute = false });
+            if (terminate is not null) await terminate.WaitForExitAsync(ct).ConfigureAwait(false);
+        }
+
+        return new SetupStepResult(true, step.NeedsRestart, step.NeedsRestart ? "Done. Restart Windows to finish it." : "Done.");
+    }
+
+    /// <summary>
+    /// Open a new Terminal window on macOS running <see cref="SetupStep.Script"/>.
+    /// <para>
+    /// For an installer that prompts for a password. The prompt is the installer's and the system's,
+    /// in a terminal the user can see — never a field in Dray. Terminal gives no exit code back to
+    /// the app that asked, so this cannot report success; it says where the step is running, and
+    /// Look again finds out what it did.
+    /// </para>
+    /// </summary>
+    public async Task<SetupStepResult> RunInTerminalAsync(SetupStep step, CancellationToken ct = default)
+    {
+        if (!OperatingSystem.IsMacOS() || step.Script is not { } script)
+            return new SetupStepResult(false, false, "This step runs in macOS's Terminal.");
+
+        var info = new ProcessStartInfo("/usr/bin/osascript") { UseShellExecute = false, CreateNoWindow = true };
+
+        // AppleScript string literal: backslashes and quotes escaped, nothing else interpreted.
+        var quoted = script.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        info.ArgumentList.Add("-e");
+        info.ArgumentList.Add("tell application \"Terminal\" to activate");
+        info.ArgumentList.Add("-e");
+        info.ArgumentList.Add($"tell application \"Terminal\" to do script \"{quoted}\"");
+
+        try
+        {
+            using var process = Process.Start(info);
+            if (process is null) return new SetupStepResult(false, false, "Could not open Terminal.");
+
+            await process.WaitForExitAsync(ct).ConfigureAwait(false);
+
+            return process.ExitCode == 0
+                ? new SetupStepResult(true, false, "Running in Terminal. Follow its prompts, then press Look again when it has finished.")
+                : new SetupStepResult(false, false, "Could not open Terminal. The command is shown above to run yourself.");
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return new SetupStepResult(false, false, $"Could not open Terminal: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Turn on <see cref="WslConfig"/>'s setting in the user's .wslconfig, keeping everything else in
+    /// it, then shut WSL down so it starts again with the setting in force.
+    /// </summary>
+    public async Task<SetupStepResult> ApplyWslSettingAsync(SetupStep step, Action<string> output, CancellationToken ct = default)
+    {
+        var path = WslConfig.PathFor(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+        try
+        {
+            var existing = File.Exists(path) ? await File.ReadAllTextAsync(path, ct).ConfigureAwait(false) : null;
+            await File.WriteAllTextAsync(path, WslConfig.WithDistributionsKeptRunning(existing), ct).ConfigureAwait(false);
+            output($"Updated {path}.");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return new SetupStepResult(false, false, $"Could not write {path}: {e.Message}");
+        }
+
+        output("Restarting WSL so it applies…");
+        var restarted = await RunInAppAsync(step, output, ct).ConfigureAwait(false);
+
+        return restarted.Succeeded
+            ? new SetupStepResult(true, false, "WSL keeps your distributions running now, with or without a terminal open.")
+            : restarted;
+    }
+
     public async Task<SetupStepResult> RunAsync(SetupStep step, CancellationToken ct = default)
     {
         if (!OperatingSystem.IsWindows())

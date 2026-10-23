@@ -58,3 +58,9 @@
     text-align: center;
     word-break: break-word;
 }
+
+.gal__sub {
+    margin: var(--s4) 0 var(--s2);
+    font-size: var(--text-md);
+    font-weight: var(--text-md-weight);
+}

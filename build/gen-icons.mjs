@@ -3,6 +3,7 @@
 //
 //   src/Dray.Core/Shell/Icons.g.cs         IconRef enum + per-platform resolution tables
 //   src/Dray.Ui/wwwroot/icons/sprite.svg   the vendored sprite the WebView references
+//   src/Dray.MacOS/Assets.xcassets/DrayMark.imageset   the mark as a menu-bar template image
 //
 // docs/NATIVE-SHELL.md section 2.3: shared code names an IconRef and each platform resolves it.
 // A missing mapping is a build error, never a blank button on Linux.
@@ -35,11 +36,20 @@ if (missing.length) {
 const pascal = (s) => s.split('-').map((p) => p[0].toUpperCase() + p.slice(1)).join('');
 const names = Object.keys(icons);
 
+// Dray's own mark: the same geometry rules, but no platform has a name for it, so it gets a
+// sprite symbol and a macOS template image instead of an IconRef. See icons.json `marks`.
+const marks = Object.fromEntries(Object.entries(src.marks ?? {}).filter(([k]) => !k.startsWith('$')));
+if (!marks.dray?.svg) {
+  console.error('\x1b[31mdesign/icons.json has no marks.dray.svg\x1b[0m — the app mark is drawn from it.');
+  process.exit(1);
+}
+
 // ------------------------------------------------------------------ sprite.svg
 
-const symbols = names
-  .map((n) => `  <symbol id="i-${n}" viewBox="${geometry.viewBox}">${icons[n].svg}</symbol>`)
-  .join('\n');
+const symbols = [
+  ...names.map((n) => `  <symbol id="i-${n}" viewBox="${geometry.viewBox}">${icons[n].svg}</symbol>`),
+  ...Object.entries(marks).map(([n, m]) => `  <symbol id="mark-${n}" viewBox="${geometry.viewBox}">${m.svg}</symbol>`),
+].join('\n');
 
 const spriteBody = `<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"
      fill="none" stroke="currentColor" stroke-width="${geometry.strokeWidth}"
@@ -100,11 +110,33 @@ public static class Icons
     /// <summary>Adwaita icon name, for GTK chrome.</summary>
     public static string GtkName(IconRef icon) => GtkNames[icon];
 
-    /// <summary>
-    /// Sprite fragment id for the WebView (and for Windows chrome, which renders the same
-    /// geometry rather than guessing at Segoe Fluent codepoints).
-    /// </summary>
+    /// <summary>Sprite fragment id, for the WebView.</summary>
     public static string SpriteId(IconRef icon) => "i-" + SpriteSlugs[icon];
+
+    /// <summary>
+    /// The sprite geometry as a standalone SVG document, stroked in <paramref name="stroke"/>.
+    /// <para>
+    /// For Windows chrome, which renders the same geometry rather than guessing at Segoe Fluent
+    /// codepoints. A native image has no <c>currentColor</c> to inherit, so the head passes the
+    /// colour it resolved from the generated palette for the theme it is drawing.
+    /// </para>
+    /// </summary>
+    public static string Svg(IconRef icon, string stroke) =>
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='${geometry.viewBox}' fill='none' " +
+        "stroke='" + stroke + "' stroke-width='${geometry.strokeWidth}' " +
+        "stroke-linecap='${geometry.linecap}' stroke-linejoin='${geometry.linejoin}'>" +
+        SvgBodies[icon] + "</svg>";
+
+    /// <summary>
+    /// Dray's own mark as a standalone SVG document, for a native image that has no SF Symbol
+    /// or Adwaita name to reach for — the Windows notification area. Same contract as
+    /// <see cref="Svg"/>; DESIGN.md section 10.
+    /// </summary>
+    public static string MarkSvg(string stroke) =>
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='${geometry.viewBox}' fill='none' " +
+        "stroke='" + stroke + "' stroke-width='${geometry.strokeWidth}' " +
+        "stroke-linecap='${geometry.linecap}' stroke-linejoin='${geometry.linejoin}'>" +
+        ${JSON.stringify(marks.dray.svg)} + "</svg>";
 
     public static readonly IReadOnlyDictionary<IconRef, string> SfSymbols = new Dictionary<IconRef, string>
     {
@@ -116,6 +148,11 @@ ${table('sf')}
 ${table('gtk')}
     };
 
+    static readonly IReadOnlyDictionary<IconRef, string> SvgBodies = new Dictionary<IconRef, string>
+    {
+${table('svg')}
+    };
+
     internal static readonly IReadOnlyDictionary<IconRef, string> SpriteSlugs = new Dictionary<IconRef, string>
     {
 ${names.map((n) => `        [IconRef.${pascal(n)}] = ${JSON.stringify(n)},`).join('\n')}
@@ -123,19 +160,51 @@ ${names.map((n) => `        [IconRef.${pascal(n)}] = ${JSON.stringify(n)},`).joi
 }
 `;
 
+// ------------------------------------------------------------------ macOS menu-bar mark
+//
+// NSStatusItem takes an image, and the mark has no SF Symbol to name. A template image in the
+// asset catalog is what AppKit recolours for a light or dark menu bar and for the highlighted
+// state, so only its alpha matters and it is drawn in black. Kept as vector: the menu bar is 1x
+// on one display and 2x on the next, and one file serves both.
+
+const imageset = 'src/Dray.MacOS/Assets.xcassets/DrayMark.imageset';
+
+const markTemplateSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="${geometry.viewBox}"
+     fill="none" stroke="black" stroke-width="${geometry.strokeWidth}"
+     stroke-linecap="${geometry.linecap}" stroke-linejoin="${geometry.linejoin}">
+  ${marks.dray.svg}
+</svg>
+`;
+
+const markTemplateContents = JSON.stringify(
+  {
+    images: [{ filename: 'DrayMark.svg', idiom: 'universal' }],
+    info: { author: 'dray', version: 1 },
+    properties: { 'preserves-vector-representation': true, 'template-rendering-intent': 'template' },
+  },
+  null,
+  2
+) + '\n';
+
 // ------------------------------------------------------------------ write / check
 
+// `ignored` marks the outputs that are gitignored. A fresh checkout has none of them, which is not
+// staleness — CI's design job checks before anything has generated them, and the build job
+// generates them before compiling. A tracked output is checked whether or not it exists.
 const outputs = [
-  [join(repoRoot, 'src/Dray.Ui/wwwroot/icons/sprite.svg'), sprite],
-  [join(repoRoot, 'src/Dray.Ui/Components/IconSprite.razor'), spriteRazor],
-  [join(repoRoot, 'src/Dray.Core/Shell/Icons.g.cs'), cs],
+  [join(repoRoot, 'src/Dray.Ui/wwwroot/icons/sprite.svg'), sprite, { ignored: true }],
+  [join(repoRoot, 'src/Dray.Ui/Components/IconSprite.razor'), spriteRazor, { ignored: false }],
+  [join(repoRoot, 'src/Dray.Core/Shell/Icons.g.cs'), cs, { ignored: true }],
+  [join(repoRoot, imageset, 'DrayMark.svg'), markTemplateSvg, { ignored: true }],
+  [join(repoRoot, imageset, 'Contents.json'), markTemplateContents, { ignored: true }],
 ];
 
 let stale = 0;
-for (const [path, content] of outputs) {
+for (const [path, content, { ignored }] of outputs) {
   const rel = path.slice(repoRoot.length + 1);
   const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
   if (current === content) continue;
+  if (check && current === null && ignored) continue;
   if (check) {
     console.error(`  \x1b[31mSTALE\x1b[0m ${rel}`);
     stale++;

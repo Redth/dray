@@ -103,3 +103,29 @@ public sealed class SshStackFiles(SshShell shell) : IStackFiles
         return result.ExitCode == 0;
     }
 }
+
+/// <summary>
+/// Files inside a WSL distribution, opened from Windows through <c>\\wsl.localhost</c>.
+/// <para>
+/// The paths stay the distribution's own — compose runs in there and reads them as recorded — and
+/// are translated only at the moment this machine opens one (<see cref="EnginePaths"/>). Measured
+/// on Windows: opened untranslated, every WSL stack's compose file read as missing.
+/// </para>
+/// </summary>
+public sealed class WslStackFiles(DockerEndpoint endpoint) : IStackFiles
+{
+    public bool IsRemote => true;
+
+    public string Where => endpoint.Distro ?? "the distribution";
+
+    string Local(string path) => EnginePaths.ToLocal(endpoint, path);
+
+    public Task<byte[]?> ReadAsync(string path, CancellationToken ct = default) => LocalStackFiles.Instance.ReadAsync(Local(path), ct);
+
+    public Task<string?> WriteAsync(string path, byte[] content, CancellationToken ct = default) => LocalStackFiles.Instance.WriteAsync(Local(path), content, ct);
+
+    public Task<bool> CanWriteAsync(string path, CancellationToken ct = default) => LocalStackFiles.Instance.CanWriteAsync(Local(path), ct);
+
+    /// <summary>Whether every one of <paramref name="paths"/> is there, as Windows reaches it.</summary>
+    public bool AllExist(IReadOnlyList<string> paths) => paths.Count > 0 && paths.All(p => File.Exists(Local(p)));
+}

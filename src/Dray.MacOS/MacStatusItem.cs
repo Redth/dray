@@ -44,8 +44,12 @@ public sealed class MacStatusItem : IDisposable
         _shell = shell;
 
         _item = NSStatusBar.SystemStatusBar.CreateStatusItem(NSStatusItemLength.Variable);
-        _item.Button.Image = NSImage.GetSystemSymbol("shippingbox", null);
-        _item.Button.Image!.Template = true;
+        // The Dray mark, generated into the asset catalog as a template image by
+        // build/gen-icons.mjs; the build fails without it, so a null here is a broken bundle.
+        var mark = NSImage.ImageNamed("DrayMark")
+            ?? throw new InvalidOperationException("DrayMark is missing from the asset catalog.");
+        mark.Template = true;
+        _item.Button.Image = mark;
         _item.Button.ImagePosition = NSCellImagePosition.ImageLeading;
 
         Rebuild();

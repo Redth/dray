@@ -1,9 +1,17 @@
 /* The body fills the accessory view the platform gave it, and scrolls inside it. The alert has
    already decided how big that is — see MacDialogSheet on why the size is asked for rather than
-   measured. */
+   measured.
+
+   The insets are the frame's own margins, handed over by a head whose WebView runs edge to edge
+   between the title and the button row (WinDialog). Padding the scroller rather than the WebView is
+   what lets the content scroll under the whole width of the dialog, its scrollbar at the dialog's
+   edge, instead of inside a box inset from it. A head that insets the WebView itself sets none. */
 .surface {
     height: 100%;
     overflow: auto;
+    padding:
+        var(--dialog-inset-top, 0px) var(--dialog-inset-right, 0px)
+        var(--dialog-inset-bottom, 0px) var(--dialog-inset-left, 0px);
     color: var(--ink);
     font-size: var(--text-base);
 }

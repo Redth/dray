@@ -87,6 +87,10 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             // it fail is the outcome ContainerAction.cs calls worse than no button at all.
             SupportsPause = containerOs != ContainerOs.Windows || isolation == "hyperv",
 
+            // Which engine answered, as opposed to which address was dialled. On Windows those
+            // differ: docker_engine is whichever of Docker Desktop's engines is current.
+            EngineId = string.IsNullOrWhiteSpace(info.ID) ? null : info.ID,
+
             ApiVersion = version.APIVersion,
             EngineVersion = version.Version,
             Flavor = flavor,

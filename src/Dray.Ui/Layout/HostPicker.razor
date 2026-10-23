@@ -1,0 +1,75 @@
+@* The host picker for the web head, which has no native sidebar to put one in.
+
+   The same control as the Windows sidebar's: the selected engine and what it is, and a menu of every
+   engine. The menu is the shared OverflowMenu — a menu stays in the page on every head (AGENTS.md),
+   and one menu component means one look for every menu. Choosing goes through HostSwitcher, so
+   switching Docker Desktop asks first here exactly as it does natively. *@
+@implements IDisposable
+@inject EngineManager Engine
+@inject HostSwitcher Switcher
+@inject NavigationManager Nav
+
+<button type="button" class="picker" title="@Tooltip" aria-label="@($"Engine: {Tooltip}")" @onclick="OpenAsync">
+    <Icon Name="IconRef.Host" Size="IconSize.Md" />
+    <span class="picker__text">
+        <span class="picker__name">@(Engine.Selected?.Name ?? "No engine")</span>
+        <span class="picker__detail">@Detail</span>
+    </span>
+</button>
+
+<OverflowMenu @ref="_menu" Trigger="false" Label="Engines" Actions="Actions" OnAction="ChooseAsync" />
+
+@if (_problem is { } problem)
+{
+    <p class="picker__problem" role="alert">@problem</p>
+}
+
+@code {
+    const string ManageId = "manage";
+
+    OverflowMenu? _menu;
+    string? _problem;
+
+    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
+
+    void OnEngineChanged() => _ = InvokeAsync(StateHasChanged);
+
+    string Detail => Engine.Transition
+        ?? (Engine.Selected is { } selected ? Switcher.Describe(selected) : "Choose or set one up");
+
+    string Tooltip => Engine.Selected is { } selected ? $"{selected.Name} — {Detail}" : Detail;
+
+    /// <summary>
+    /// One item per engine, the selected one marked with a check rather than a colour, then the way
+    /// to the Hosts page. Disabled while Docker Desktop is switching, so a second switch cannot be
+    /// started on top of the first.
+    /// </summary>
+    IReadOnlyList<RowAction> Actions =>
+    [
+        .. Engine.Hosts.Select(h => new RowAction(
+            h.Id,
+            $"{h.Name} · {Switcher.Describe(h)}",
+            Engine.Selected?.Id == h.Id ? IconRef.Check : IconRef.Host,
+            Disabled: Engine.Transition is not null)),
+        new RowAction(ManageId, "Hosts and setup…", IconRef.Host),
+    ];
+
+    async Task OpenAsync(MouseEventArgs e)
+    {
+        _problem = null;
+        if (_menu is not null) await _menu.OpenAtAsync(e.ClientX, e.ClientY);
+    }
+
+    async Task ChooseAsync(string id)
+    {
+        if (id == ManageId)
+        {
+            Nav.NavigateTo("/hosts");
+            return;
+        }
+
+        _problem = await Switcher.ChooseAsync(id);
+    }
+
+    public void Dispose() => Engine.Changed -= OnEngineChanged;
+}

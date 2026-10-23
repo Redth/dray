@@ -1,0 +1,344 @@
+@* Getting an engine, all the way to one Dray is connected to, on whichever platform this is.
+
+   PRODUCT.md: Dray helps install what it drives. Every step is shown before it runs and runs only
+   when asked. The ones that need Dray itself elevated run in their own window, and the ones whose
+   installer asks for a password run where that installer can ask — Terminal on a Mac, polkit's
+   dialog on Linux. The rest run here, with their output on screen, because an eight-minute install
+   with nothing to watch looks like a hang. *@
+@implements IDisposable
+@inject WindowsSetupReader Reader
+@inject MacSetupReader MacReader
+@inject LinuxSetupReader LinuxReader
+@inject SetupStepRunner Runner
+@inject EngineManager Engine
+@inject IShellBridge Shell
+
+@if (UnixRoutes is { Count: > 0 } unixRoutes)
+{
+    <div class="panel setup">
+        <div class="panel__head">
+            <span class="panel__title">Set up a container engine</span>
+        </div>
+        <div class="panel__body">
+            <p class="setup__intro muted">
+                @if (OperatingSystem.IsMacOS())
+                {
+                    <span>
+                        Containers run on Linux, so a Mac runs them in a small virtual machine. Each of these
+                        provides one and an engine inside it. Dray drives whichever you choose, and they can be
+                        installed side by side.
+                    </span>
+                }
+                else
+                {
+                    <span>Docker's engine runs directly on this machine's own kernel — no virtual machine needed.</span>
+                }
+            </p>
+
+            @foreach (var route in unixRoutes)
+            {
+                <Track @key="route.Id" Route="route" Alternatives="@(unixRoutes.Count > 1)"
+                       Running="@_running" OutputFor="@_outputFor" Output="_output" StartedAt="_startedAt"
+                       OnRun="RunAsync" />
+            }
+
+            @if (_result is { } result)
+            {
+                <p class="setup__result @(result.Succeeded ? "is-ok" : "is-bad")">
+                    <Icon Name="@(result.Succeeded ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                    @result.Detail
+                </p>
+            }
+        </div>
+    </div>
+}
+else if (_state is { } state && !state.IsComplete)
+{
+    <div class="panel setup">
+        <div class="panel__head">
+            <span class="panel__title">Set up containers on this machine</span>
+        </div>
+        <div class="panel__body">
+            <p class="setup__intro muted">
+                Windows runs two kinds of container from two separate engines that share no images,
+                containers, volumes or networks. Dray shows each engine as its own host in the
+                picker, so this is about getting them working, not about choosing one for good.
+            </p>
+
+            <section class="setup__kind">
+                <h3 class="setup__kindtitle">
+                    @if (state.HasLinuxEngine)
+                    {
+                        <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+                    }
+                    Linux containers
+                </h3>
+
+                @if (state.HasLinuxEngine)
+                {
+                    <p class="setup__done muted">@Connected(ContainerOs.Linux)</p>
+
+                    @* Working, but only while something is attached: WSL stops the distribution,
+                       and its containers, once the last terminal closes. *@
+                    @if (WindowsSetupPlan.KeepAlive(state) is { } keepAlive)
+                    {
+                        <Track Route="@(new SetupRoute("linux.keepalive", "Keep it running", "One setting stands between this engine and containers that keep running after you close Dray.", [keepAlive], Recommended: true))"
+                               Running="@_running" OutputFor="@_outputFor" Output="_output" StartedAt="_startedAt"
+                               OnRun="RunAsync" />
+                    }
+                }
+                else
+                {
+                    var routes = WindowsSetupPlan.LinuxRoutes(state);
+                    @foreach (var route in routes)
+                    {
+                        <Track @key="route.Id" Route="route" Alternatives="@(routes.Count > 1)"
+                               Running="@_running" OutputFor="@_outputFor" Output="_output" StartedAt="_startedAt"
+                               OnRun="RunAsync" />
+                    }
+                }
+            </section>
+
+            <section class="setup__kind">
+                <h3 class="setup__kindtitle">
+                    @if (state.HasWindowsEngine)
+                    {
+                        <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+                    }
+                    Windows containers
+                </h3>
+
+                @if (state.HasWindowsEngine)
+                {
+                    <p class="setup__done muted">@Connected(ContainerOs.Windows)</p>
+                }
+                else if (WindowsSetupPlan.EngineAdvice(state) is { } advice)
+                {
+                    <p class="setup__done muted">@advice</p>
+                }
+                else
+                {
+                    @foreach (var route in WindowsSetupPlan.WindowsRoutes(state))
+                    {
+                        <Track @key="route.Id" Route="route"
+                               Running="@_running" OutputFor="@_outputFor" Output="_output" StartedAt="_startedAt"
+                               OnRun="RunAsync" />
+                    }
+                }
+            </section>
+
+            @if (_result is { } result)
+            {
+                <p class="setup__result @(result.Succeeded ? "is-ok" : "is-bad")">
+                    <Icon Name="@(result.Succeeded ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                    @result.Detail
+                </p>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    WindowsSetupState? _state;
+    MacSetupState? _mac;
+    LinuxSetupState? _linux;
+    SetupStepResult? _result;
+
+    /// <summary>The Mac's or the Linux machine's routes; null on Windows, which has its own two tracks.</summary>
+    IReadOnlyList<SetupRoute>? UnixRoutes => _mac is { } mac
+        ? MacSetupPlan.Routes(mac)
+        : _linux is { } linux ? LinuxSetupPlan.Routes(linux) : null;
+    string? _running;
+    string? _outputFor;
+    DateTimeOffset? _startedAt;
+
+    /// <summary>
+    /// The running step's output, newest last. Bounded: an install can print thousands of lines,
+    /// and the last screenful is what explains a failure.
+    /// </summary>
+    readonly List<string> _output = [];
+    const int MaxOutputLines = 400;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Engine.Changed += OnEngineChanged;
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Re-read the machine. Only ever from an explicit trigger — the page opening, a step ending —
+    /// because this shells out to wsl.exe and docker, and doing it on a timer would be the polling
+    /// the design exists to avoid.
+    /// </summary>
+    public async Task RefreshAsync()
+    {
+        if (OperatingSystem.IsWindows()) _state = await Reader.ReadAsync(Engine.Hosts);
+        else if (OperatingSystem.IsMacOS()) _mac = MacReader.Read(Engine.Hosts);
+        else if (OperatingSystem.IsLinux()) _linux = await LinuxReader.ReadAsync(Engine.Hosts);
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    bool AnyAnswering => Engine.Hosts.Any(h => h.State == HostConnectionState.Connected);
+
+    /// <summary>
+    /// An engine connecting is what finishes a track, and the engine manager already knows the
+    /// moment it happens. Recomputed from what it holds, with no process launched — so this can
+    /// follow every change without becoming a poll.
+    /// </summary>
+    void OnEngineChanged()
+    {
+        if (_mac is { } macState && macState.HasEngine != AnyAnswering)
+        {
+            _mac = macState with { HasEngine = AnyAnswering };
+            _ = InvokeAsync(StateHasChanged);
+        }
+
+        if (_linux is { } linuxState && linuxState.HasEngine != AnyAnswering)
+        {
+            _linux = linuxState with { HasEngine = AnyAnswering };
+            _ = InvokeAsync(StateHasChanged);
+        }
+
+        if (_state is not { } state) return;
+
+        var linux = Answering(ContainerOs.Linux) is not null;
+        var windows = Answering(ContainerOs.Windows) is not null;
+        var inWsl = Answering(ContainerOs.Linux) is { Endpoint.Scheme: EndpointScheme.Wsl };
+        if (linux == state.HasLinuxEngine && windows == state.HasWindowsEngine && inWsl == state.LinuxEngineInWsl) return;
+
+        _state = state with { HasLinuxEngine = linux, HasWindowsEngine = windows, LinuxEngineInWsl = inWsl };
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    DockerHost? Answering(ContainerOs os)
+        => Engine.Hosts.FirstOrDefault(h => h.State == HostConnectionState.Connected && h.Capabilities.ContainerOs == os);
+
+    string Connected(ContainerOs os) => Answering(os) is { } host
+        ? $"Connected to {host.Name}{(host.Capabilities.EngineVersion is { } v ? $", Docker {v}" : "")}."
+        : "An engine running these is connected.";
+
+    async Task RunAsync(SetupStep step)
+    {
+        _running = step.Id;
+        _result = null;
+
+        if (step.Kind is SetupStepKind.InApp or SetupStepKind.WslSetting)
+        {
+            _output.Clear();
+            _outputFor = step.Id;
+        }
+
+        _startedAt = DateTimeOffset.Now;
+        StateHasChanged();
+
+        try
+        {
+            _result = step.Kind switch
+            {
+                SetupStepKind.Window => await Runner.RunAsync(step),
+                SetupStepKind.InApp => await Runner.RunInAppAsync(step, Append),
+                SetupStepKind.CreateLinuxUser => await CreateAccountAsync(step),
+                SetupStepKind.DockerDesktop => await DesktopAsync(step),
+                SetupStepKind.Connect => await ConnectAsync(step),
+                SetupStepKind.Terminal => await Runner.RunInTerminalAsync(step),
+                SetupStepKind.WslSetting => await Runner.ApplyWslSettingAsync(step, Append),
+                SetupStepKind.OpenUrl => await OpenAsync(step),
+                SetupStepKind.Manual => await CopyAsync(step),
+                _ => null,
+            };
+        }
+        finally
+        {
+            _running = null;
+            _startedAt = null;
+        }
+
+        // A dismissed account dialog is not an outcome worth a sentence.
+        if (_result is null)
+        {
+            StateHasChanged();
+            return;
+        }
+
+        // Re-discover rather than assume: a new distribution is a new host, and an engine just
+        // installed in one is the reason for all of this. Then connect to it, so the last step of
+        // setup is the app showing the engine rather than a message saying it could.
+        await Engine.InitializeAsync();
+
+        if (_result.Succeeded && step.Distro is { } distro && step.Id.StartsWith("engine.", StringComparison.Ordinal))
+        {
+            await Engine.ConnectNowAsync("wsl:" + distro);
+        }
+
+        // On a Mac or Linux the engine a step started is the one the Docker CLI now points at —
+        // Colima and OrbStack make their context current as they start. If what is selected is not
+        // answering, that is the engine to show; leaving the selection where it was would end setup
+        // on the same unreachable host it began on. Not after starting Docker Desktop, which has
+        // already selected its own engine and may still be connecting to it.
+        if (_result.Succeeded && !OperatingSystem.IsWindows() && step.Kind != SetupStepKind.DockerDesktop
+            && Engine.Selected is not { State: HostConnectionState.Connected }
+            && Engine.Hosts.FirstOrDefault(h => h.IsCurrent) is { } current)
+        {
+            await Engine.ConnectNowAsync(current.Id);
+        }
+
+        // WSL restarted under the selected engine; connect again now rather than after the pump's backoff.
+        if (_result.Succeeded && step.Kind == SetupStepKind.WslSetting && Engine.Selected is { Endpoint.Scheme: EndpointScheme.Wsl } selected)
+        {
+            await Engine.ConnectNowAsync(selected.Id);
+        }
+
+        // Re-read rather than assume the step worked. A step needing a restart has changed nothing
+        // yet, and saying so is the whole reason the result carries that distinction.
+        await RefreshAsync();
+    }
+
+    void Append(string line) => _ = InvokeAsync(() =>
+    {
+        _output.Add(line);
+        if (_output.Count > MaxOutputLines) _output.RemoveRange(0, _output.Count - MaxOutputLines);
+        StateHasChanged();
+    });
+
+    async Task<SetupStepResult?> CreateAccountAsync(SetupStep step)
+    {
+        if (step.Distro is not { } distro) return null;
+
+        var name = await LinuxAccountDialog.ShowAsync(Shell, distro);
+        return name is null ? null : new SetupStepResult(true, false, $"{name} is set up in {distro}, and is the account it opens as.");
+    }
+
+    async Task<SetupStepResult> DesktopAsync(SetupStep step)
+    {
+        var problem = step.Id == "desktop.start"
+            ? await Engine.StartDesktopAsync(step.DesktopMode)
+            : await Engine.SwitchDesktopAsync(step.DesktopMode!.Value);
+
+        return problem is null
+            ? new SetupStepResult(true, false, step.Id == "desktop.start" ? "Docker Desktop is running." : $"Docker Desktop is running {DockerDesktop.Label(step.DesktopMode!.Value)}.")
+            : new SetupStepResult(false, false, problem);
+    }
+
+    async Task<SetupStepResult> OpenAsync(SetupStep step)
+    {
+        if (step.Url is not { } url) return new SetupStepResult(false, false, "There is no page to open.");
+
+        await Shell.OpenExternalAsync(url);
+        return new SetupStepResult(true, false, "Opened in your browser. Once it is installed, press Look again.");
+    }
+
+    async Task<SetupStepResult> CopyAsync(SetupStep step)
+    {
+        await Shell.WriteClipboardAsync(step.Script ?? step.CommandLine);
+        return new SetupStepResult(true, false, "Copied. Run it in a terminal, then press Look again.");
+    }
+
+    async Task<SetupStepResult> ConnectAsync(SetupStep step)
+    {
+        await Engine.ConnectNowAsync("wsl:" + step.Distro);
+        return new SetupStepResult(true, false, $"Connecting to the engine in {step.Distro}.");
+    }
+
+    public void Dispose() => Engine.Changed -= OnEngineChanged;
+}

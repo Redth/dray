@@ -367,6 +367,11 @@
     /// every container it creates. Falls back to the compose file's own folder, which is the same
     /// place in all but the unusual case of `-f` pointing elsewhere.
     /// </summary>
+    /// <para>
+    /// As compose recorded it. For a stack on the engine's host — over SSH, or in a WSL
+    /// distribution — that is the host's path, and <see cref="Files"/> is what opens it from here
+    /// (<see cref="EnginePaths"/> for WSL).
+    /// </para>
     string? WorkingDirectory
         => Stack?.WorkingDirectory is { Length: > 0 } recorded
             ? recorded

@@ -104,9 +104,12 @@ public class ComposeCliTests
     }
 
     [Fact]
+    public void AWslEngineIsReachedFromInsideItsDistribution()
+        => Assert.Equal("Ubuntu", ComposeTarget.For(Host("wsl:Ubuntu", "wsl://Ubuntu", HostOrigin.WslDistro), Plugin)!.Distro);
+
+    [Fact]
     public void EnginesComposeCannotReachHaveNoTarget()
     {
-        Assert.Null(ComposeTarget.For(Host("wsl:Ubuntu", "wsl://Ubuntu", HostOrigin.WslDistro), Plugin));
         var apple = new DockerHost
         {
             Id = "apple:container",

@@ -25,6 +25,12 @@ body {
   height: 100%;
 }
 
+/* A native dialog's body document mounts here, and its surface is what scrolls: without a height
+   the surface grows to its content and the document scrolls instead, past the body's insets. */
+#dialog {
+  height: 100%;
+}
+
 body {
   /* The platform's own UI face. A shared webfont is the single loudest tell that the content
      area is a website embedded in a native window (DESIGN.md section 3). Nothing is downloaded. */
@@ -701,6 +707,13 @@ textarea,
   color: var(--ok-ink);
 }
 
+/* Something in progress — Docker Desktop switching engines. Neither failure nor success, so it is
+   neither tone: a switch drawn in danger pink reads as one that has already gone wrong. */
+.banner--info {
+  background: var(--neutral-tint);
+  color: var(--neutral-ink);
+}
+
 /* The shell every detail page shares: a header of facts, then a body that scrolls on its own.
    Container detail and volume detail are the same shape, and were the same stylesheet copied
    twice until the second one arrived without it. */
@@ -1190,6 +1203,21 @@ textarea,
   gap: 6px;
 }
 
+/* A form is a column of fields, and nothing else spaced them: a label sat directly under the box
+   above it, so every label read as belonging to the field before. The gap between fields is wider
+   than the one inside a field, which is what groups each label with its own box. */
+.field + .field,
+.field + .toggle,
+.toggle + .field {
+  margin-top: var(--s4);
+}
+
+/* Native checkboxes and radios in the brand rather than the engine's own blue. On macOS the system
+   accent already is the brand (DESIGN.md section 9.1); WebView2 and browsers draw Chromium's. */
+:root {
+  accent-color: var(--brand);
+}
+
 .field__label {
   font-size: var(--text-sm);
   font-weight: 500;
@@ -1202,6 +1230,12 @@ textarea,
   border-radius: var(--r-sm);
   background: var(--bg);
   font-size: var(--text-base);
+}
+
+/* WebView2 and Edge put an eye in every password field that shows what was typed. A token field
+   is one: docs/CREDENTIALS.md has a secret never rendered, not even on request. */
+.input::-ms-reveal {
+  display: none;
 }
 
 .input::placeholder {

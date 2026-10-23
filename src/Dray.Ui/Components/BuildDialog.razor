@@ -3,118 +3,139 @@
    The engine's output is shown verbatim rather than reformatted: people read build logs by pattern,
    and rewriting them makes a familiar thing unfamiliar at exactly the moment something has gone
    wrong. *@
+@inherits DialogBody
 @implements IAsyncDisposable
 @inject EngineManager Engine
 @inject IShellBridge Shell
 @inject ShellCapabilities Caps
 
-<Dialog Title="Build an image" Open="Open" OpenChanged="OnOpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="build-context">Build context</label>
-            <div class="build__path">
-                <input id="build-context" class="input mono" placeholder="/path/to/project"
-                       @bind="_context" @bind:event="oninput" spellcheck="false" disabled="@_building" />
+<div class="field">
+    <label class="field__label" for="build-context">Build context</label>
+    <div class="build__path">
+        <input id="build-context" class="input mono" placeholder="/path/to/project"
+               @bind="_context" @bind:event="oninput" spellcheck="false" disabled="@_building" />
 
-                @if (Caps.HasNativeDialogs)
-                {
-                    <Button Label="Choose…" Icon="IconRef.Files" Variant="ButtonVariant.Secondary"
-                            Disabled="_building" OnClick="PickAsync" />
-                }
-            </div>
-        </div>
-
-        <div class="field">
-            <label class="field__label" for="build-tag">
-                Tag <span class="muted">— optional; an untagged build is dangling</span>
-            </label>
-            <input id="build-tag" class="input mono" placeholder="myapp:dev"
-                   @bind="_tag" @bind:event="oninput" spellcheck="false" disabled="@_building" />
-        </div>
-
-        @* Only when there is a choice to make. A machine without buildx, or with nothing but the
-           default builder, is not offered a picker that can only say one thing. *@
-        @if (_builders.Count > 0)
+        @if (Caps.HasNativeDialogs)
         {
-            <div class="field">
-                <label class="field__label" for="build-builder">
-                    Builder
-                    <span class="muted">— buildx, for cross-platform builds and shared cache</span>
-                </label>
-
-                <select id="build-builder" class="input" @bind="_builder" disabled="@_building">
-                    <option value="">This engine</option>
-
-                    @foreach (var builder in _builders)
-                    {
-                        <option value="@builder.Name" disabled="@(!builder.IsUsable)">
-                            @builder.Name@(builder.IsCurrent ? " (current)" : "")@(builder.IsUsable ? "" : " — unavailable")
-                        </option>
-                    }
-                </select>
-
-                @if (_builders.FirstOrDefault(b => b.Name == _builder) is { Problem: { } problem })
-                {
-                    @* Said before the build rather than after: a builder configured against an
-                       endpoint that no longer exists fails in a way nothing on screen explains. *@
-                    <p class="build__hint muted">@problem</p>
-                }
-                else if (_builders.FirstOrDefault(b => b.Name == _builder) is { Platforms.Count: > 0 } chosen)
-                {
-                    <p class="build__hint muted">Builds for @string.Join(", ", chosen.Platforms).</p>
-                }
-            </div>
+            <Button Label="Choose…" Icon="IconRef.Files" Variant="ButtonVariant.Secondary"
+                    Disabled="_building" OnClick="PickAsync" />
         }
+    </div>
+</div>
 
-        <div class="build__options">
-            <label class="toggle">
-                <input type="checkbox" @bind="_noCache" disabled="@_building" />
-                <span>Ignore the cache</span>
-            </label>
+<div class="field">
+    <label class="field__label" for="build-tag">
+        Tag <span class="muted">— optional; an untagged build is dangling</span>
+    </label>
+    <input id="build-tag" class="input mono" placeholder="myapp:dev"
+           @bind="_tag" @bind:event="oninput" spellcheck="false" disabled="@_building" />
+</div>
 
-            <label class="toggle">
-                <input type="checkbox" @bind="_pull" disabled="@_building" />
-                <span>Pull a newer base image</span>
-            </label>
-        </div>
+@* Only when there is a choice to make. A machine without buildx, or with nothing but the
+   default builder, is not offered a picker that can only say one thing. *@
+@if (_builders.Count > 0)
+{
+    <div class="field">
+        <label class="field__label" for="build-builder">
+            Builder
+            <span class="muted">— buildx, for cross-platform builds and shared cache</span>
+        </label>
 
-        @if (_error is { } error)
+        <select id="build-builder" class="input" @bind="_builder" disabled="@_building">
+            <option value="">This engine</option>
+
+            @foreach (var builder in _builders)
+            {
+                <option value="@builder.Name" disabled="@(!builder.IsUsable)">
+                    @builder.Name@(builder.IsCurrent ? " (current)" : "")@(builder.IsUsable ? "" : " — unavailable")
+                </option>
+            }
+        </select>
+
+        @if (_builders.FirstOrDefault(b => b.Name == _builder) is { Problem: { } problem })
         {
-            <p class="build__error">@error</p>
+            @* Said before the build rather than after: a builder configured against an
+               endpoint that no longer exists fails in a way nothing on screen explains. *@
+            <p class="build__hint muted">@problem</p>
         }
-        else if (_output.Count == 0)
+        else if (_builders.FirstOrDefault(b => b.Name == _builder) is { Platforms.Count: > 0 } chosen)
         {
-            <p class="build__hint muted">
-                Everything under the context is sent to the engine, so choose the project directory
-                rather than a parent of it. A <span class="mono">.dockerignore</span> keeps the
-                upload small.
-            </p>
+            <p class="build__hint muted">Builds for @string.Join(", ", chosen.Platforms).</p>
         }
+    </div>
+}
 
-        @if (_output.Count > 0)
-        {
-            <pre class="build__log mono"><code>@string.Join('\n', _output)</code></pre>
-        }
+<div class="build__options">
+    <label class="toggle">
+        <input type="checkbox" @bind="_noCache" disabled="@_building" />
+        <span>Ignore the cache</span>
+    </label>
 
-        @if (_done is { } done)
-        {
-            <p class="build__done">@done</p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="@(_building ? "Cancel" : "Close")" Variant="ButtonVariant.Ghost" OnClick="CloseAsync" />
-        <Button Label="@(_building ? Progress : "Build")" Variant="ButtonVariant.Primary" Busy="_building"
-                Disabled="@(_building || _context.Trim().Length == 0)" OnClick="StartAsync" />
-    </Footer>
-</Dialog>
+    <label class="toggle">
+        <input type="checkbox" @bind="_pull" disabled="@_building" />
+        <span>Pull a newer base image</span>
+    </label>
+</div>
+
+@if (_error is { } error)
+{
+    <p class="build__error">@error</p>
+}
+else if (_output.Count == 0)
+{
+    <p class="build__hint muted">
+        Everything under the context is sent to the engine, so choose the project directory
+        rather than a parent of it. A <span class="mono">.dockerignore</span> keeps the
+        upload small.
+    </p>
+}
+
+@if (_output.Count > 0)
+{
+    <pre class="build__log mono"><code>@string.Join('\n', _output)</code></pre>
+}
+
+@if (_done is { } done)
+{
+    <p class="build__done">@done</p>
+}
 
 @code {
-    [Parameter] public bool Open { get; set; }
+    /// <summary>
+    /// Open it. Completes when it closes; the page refreshes then, and the build — which may have
+    /// finished long before — needs no callback across into the dialog's own WebView to say so.
+    /// </summary>
+    public static async Task ShowAsync(IShellBridge shell)
+    {
+        var dialog = new DialogController();
+        await shell.ShowDialogAsync(new DialogRequest(
+            "Build an image",
+            typeof(BuildDialog),
+            Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("build", "Build")],
+            Controller: dialog));
+    }
 
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    protected override void DeclareButtons()
+    {
+        Button("cancel", _building ? "Cancel" : "Close");
+        Button("build", _building ? Progress : "Build",
+            enabled: !_building && _context.Trim().Length > 0, busy: _building);
+    }
 
-    /// <summary>Raised once a build succeeds, so the image list behind can refresh.</summary>
-    [Parameter] public EventCallback OnBuilt { get; set; }
+    protected override async Task<bool> OnButtonAsync(string buttonId)
+    {
+        if (buttonId == "build")
+        {
+            // Started and left running: the dialog stays open to show it.
+            _ = StartAsync();
+            return false;
+        }
+
+        // Cancelling stops Dray reading the stream; the engine finishes the layer it is on. Saying
+        // otherwise would be a lie — a build is not a transaction Dray can roll back.
+        if (_cts is { } cts) await cts.CancelAsync();
+        return true;
+    }
 
     string _context = "";
     string _tag = "";
@@ -137,18 +158,11 @@
     string? Builder => _builder.Length == 0 ? null : _builder;
 
     /// <summary>
-    /// Asked for once, when the dialog first opens rather than when the page loads: this shells
-    /// out to a program that may not be installed, and most sessions never build anything.
+    /// Asked for once, when the dialog opens rather than when the page loads: this shells out to a
+    /// program that may not be installed, and most sessions never build anything.
     /// </summary>
-    bool _askedForBuilders;
+    protected override async Task OnInitializedAsync() => _builders = await Engine.ListBuildersAsync();
 
-    protected override async Task OnParametersSetAsync()
-    {
-        if (!Open || _askedForBuilders) return;
-
-        _askedForBuilders = true;
-        _builders = await Engine.ListBuildersAsync();
-    }
     bool _building;
     string? _error;
     string? _done;
@@ -178,6 +192,10 @@
         _step = null;
         _output.Clear();
         _cts = new CancellationTokenSource();
+
+        // Started from the head's button, and only an event handler re-renders by itself — so the
+        // buttons learn they are busy from here.
+        StateHasChanged();
 
         var request = new BuildRequest(
             _context.Trim(),
@@ -212,8 +230,6 @@
                 await Shell.NotifyAsync(
                     "Build finished", request.Tag is null ? "The image was built." : $"{request.Tag} was built.",
                     NoticeKind.Success);
-
-                await OnBuilt.InvokeAsync();
             }
             else
             {
@@ -233,21 +249,8 @@
             _building = false;
             _cts?.Dispose();
             _cts = null;
+            StateHasChanged();
         }
-    }
-
-    async Task CloseAsync()
-    {
-        // Cancelling stops Dray reading the stream; the engine finishes the layer it is on. Saying
-        // otherwise would be a lie — a build is not a transaction Dray can roll back.
-        if (_cts is { } cts) await cts.CancelAsync();
-
-        await OpenChanged.InvokeAsync(false);
-    }
-
-    async Task OnOpenChanged(bool open)
-    {
-        if (!open) await CloseAsync();
     }
 
     public async ValueTask DisposeAsync()

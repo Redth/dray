@@ -23,6 +23,12 @@ public sealed record ComposeTarget(
     IReadOnlyDictionary<string, string> Environment)
 {
     /// <summary>
+    /// The WSL distribution compose runs inside, for an engine that lives in one — the one engine
+    /// whose compose is not this machine's. Null for every other.
+    /// </summary>
+    public string? Distro { get; init; }
+
+    /// <summary>
     /// How to address <paramref name="host"/> with <paramref name="command"/>, or null when that
     /// compose cannot reach it at all.
     /// <para>
@@ -34,6 +40,11 @@ public sealed record ComposeTarget(
     /// </summary>
     public static ComposeTarget? For(DockerHost host, ComposeCommand command)
     {
+        // Compose inside the distribution, reaching its engine the way it always does there;
+        // wsl.exe writes UTF-16 unless told otherwise.
+        if (host.Endpoint is { Scheme: EndpointScheme.Wsl, Distro: { } distro })
+            return new ComposeTarget([], new Dictionary<string, string> { ["WSL_UTF8"] = "1" }) { Distro = distro };
+
         if (!DockerCliContext.CanTarget(host.Endpoint)) return null;
 
         // A context already carries its endpoint and TLS material, so naming it is both shorter

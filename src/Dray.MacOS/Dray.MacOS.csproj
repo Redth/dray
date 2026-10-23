@@ -1,6 +1,18 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project>
 
-  <PropertyGroup>
+  <!-- Explicit SDK imports rather than Sdk="…" on the root element, so the no-op targets at the
+       bottom can be imported after the SDK's own and replace them. -->
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk.Razor" />
+
+  <!-- The macOS head builds on macOS and is inert everywhere else, for the reason
+       Dray.Windows.csproj gives: restoring a macOS TFM on Windows or Linux fails outright, and the
+       solution has to build on all three. -->
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('osx'))">
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Dray.MacOS</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
     <!-- The platform packages ship only a net10.0-macos26.0 lib, so the bare `net10.0-macos`
          TFM resolves to an older platform version and silently references nothing. -->
     <TargetFramework>net10.0-macos26.0</TargetFramework>
@@ -17,6 +29,10 @@
     <ApplicationDisplayVersion>$(AppVersion)</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
 
+    <!-- Assets.xcassets/AppIcon.appiconset, rendered by build/gen-app-icon.mjs. The set name,
+         not a path: actool looks it up in the compiled catalog. -->
+    <AppIcon>AppIcon</AppIcon>
+
     <EnableHardenedRuntime>true</EnableHardenedRuntime>
 
     <!-- The macOS SDK pack (26.0.11017) pins itself to Xcode 26.0 exactly, and the check fails on
@@ -28,7 +44,7 @@
 
   </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
     <PackageReference Include="Microsoft.Maui.Controls" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
     <PackageReference Include="Microsoft.Maui.Platforms.MacOS" />
@@ -45,7 +61,7 @@
   <!-- macOS reads an app's accent colour from its compiled asset catalog at launch; there is no
        runtime API. The colorset itself is generated from design/tokens.json so the brand cannot
        drift between AppKit and the web layer. -->
-  <ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
     <!-- Assets.xcassets is globbed into ImageAsset by the SDK already, so it needs no include
          here. It does need an exclude: the Razor SDK's default Content glob picks up **/*.json,
          which claims the catalog's Contents.json files a second time and asks the bundler to copy
@@ -58,7 +74,14 @@
     <PartialAppManifest Include="PartialInfo.plist" />
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- The menu-bar mark is generated and gitignored, like the colorset. Without it the status
+       item would have no image at all, so a fresh clone fails here with the fix, not at launch. -->
+  <Target Name="_EnsureGeneratedAssets" BeforeTargets="BeforeBuild" Condition="$([MSBuild]::IsOSPlatform('osx'))">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets.xcassets/DrayMark.imageset/DrayMark.svg')"
+           Text="Assets.xcassets/DrayMark.imageset is missing. Run: node build/gen-icons.mjs" />
+  </Target>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
     <ProjectReference Include="../Dray.Ui/Dray.Ui.csproj" />
     <ProjectReference Include="../Dray.Docker/Dray.Docker.csproj" />
     <ProjectReference Include="../Dray.Apple/Dray.Apple.csproj" />
@@ -82,5 +105,17 @@
         >$(_ExtraTrimmerArgs.Replace('--link-attributes ', '--link-attributes &quot;').Replace('.LinkDescription.xml', '.LinkDescription.xml&quot;'))</_ExtraTrimmerArgs>
     </PropertyGroup>
   </Target>
+
+  <!-- Off macOS nothing here compiles: the sources name AppKit types that do not exist. -->
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('osx'))">
+    <Compile Remove="**/*.cs" />
+    <Content Remove="**/*" />
+    <None Remove="**/*" />
+  </ItemGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk.Razor" />
+
+  <Import Project="../../build/SkipHeadOnOtherOS.targets"
+          Condition="!$([MSBuild]::IsOSPlatform('osx'))" />
 
 </Project>

@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject EngineManager Engine
 @inject IShellBridge Shell
+@inject HostSwitcher Switcher
 
 <PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
 
@@ -39,7 +40,16 @@
                                         <Icon Name="IconRef.Check" Size="IconSize.Sm" Label="Selected" />
                                     }
                                 </td>
-                                <td>@host.Name</td>
+                                <td>
+                                    @host.Name
+                                    @* Why it is down, under its name rather than only in a tooltip:
+                                       for an engine Docker Desktop has switched away from, this is
+                                       the sentence that says choosing it will switch back. *@
+                                    @if (host.State != HostConnectionState.Connected && host.StateDetail is { } detail)
+                                    {
+                                        <div class="hosts__detail muted">@detail</div>
+                                    }
+                                </td>
                                 <td><HostState Host="host" /></td>
                                 <td class="mono muted">@host.Endpoint.Display</td>
                                 <td>
@@ -84,6 +94,14 @@
                                     OnClick="() => Shell.OpenExternalAsync(AppleEngine.Downloads)" />
                         }
                     </div>
+                </div>
+            }
+
+            @if (Engine.Transition is { } transition)
+            {
+                <div class="banner banner--info hosts__transition" role="status">
+                    <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                    <span>@transition</span>
                 </div>
             }
 
@@ -188,11 +206,9 @@
 
         @* Outside the branch above, and deliberately: a machine with nothing to connect to is the
            one that most needs this, and it is the branch where Dray otherwise has nothing to say
-           beyond what it looked for. It hides itself once both engines answer. *@
-        @if (OperatingSystem.IsWindows())
-        {
-            <WindowsSetup />
-        }
+           beyond what it looked for. On every platform; it hides itself once an engine answers —
+           on Windows, once both kinds do. *@
+        <EngineSetup @ref="_setup" />
     </div>
 </EngineScope>
 
@@ -254,7 +270,13 @@
         // connection, and doing it for hosts nobody is looking at is the polling this design avoids.
         await Engine.ProbeOthersAsync();
         await RefreshServiceAsync();
+
+        // After the probes rather than alongside them: setup counts the engines that answered, and
+        // before the probes only the selected one has had the chance to.
+        if (_setup is not null) await _setup.RefreshAsync();
     }
+
+    EngineSetup? _setup;
 
     async Task RefreshServiceAsync()
     {
@@ -324,16 +346,20 @@
 
     string? _error;
 
-    static string Source(DockerHost host) => host.Origin switch
+    static string Source(DockerHost host) => host switch
     {
-        HostOrigin.DockerContext => "docker context",
-        HostOrigin.Environment => "DOCKER_HOST",
-        HostOrigin.WslDistro => "WSL2",
-        HostOrigin.AppleContainer => "Apple container",
-        _ => "found on this machine",
+        { DesktopMode: not null } => "Docker Desktop",
+        _ => host.Origin switch
+        {
+            HostOrigin.DockerContext => "docker context",
+            HostOrigin.Environment => "DOCKER_HOST",
+            HostOrigin.WslDistro => "WSL2",
+            HostOrigin.AppleContainer => "Apple container",
+            _ => "found on this machine",
+        },
     };
 
-    async Task Select(DockerHost host) => await Engine.SelectAsync(host.Id);
+    async Task Select(DockerHost host) => _error = await Switcher.ChooseAsync(host.Id);
 
     async Task Rediscover() => await Engine.InitializeAsync();
 
@@ -343,5 +369,6 @@
 
         await Engine.InitializeAsync();
         await Engine.ProbeOthersAsync();
+        if (_setup is not null) await _setup.RefreshAsync();
     }
 }

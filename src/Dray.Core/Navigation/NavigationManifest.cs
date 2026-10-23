@@ -95,4 +95,15 @@ public static class NavigationManifest
     /// <summary>The leaf matching a route, or null. Route matching is case-insensitive.</summary>
     public static NavNode? Find(string route)
         => Leaves().FirstOrDefault(n => string.Equals(n.Route, route, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The leaf for a route, or for the list a detail page belongs to: <c>/containers/abc</c> is
+    /// owned by Containers. The root is matched exactly, or Dashboard would own every route.
+    /// </summary>
+    public static NavNode? Owner(string route, bool includeDebug = true)
+        => Leaves(includeDebug).FirstOrDefault(n => string.Equals(n.Route, route, StringComparison.OrdinalIgnoreCase))
+            ?? Leaves(includeDebug)
+                .Where(n => n.Route != HomeRoute && route.StartsWith(n.Route + "/", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(n => n.Route!.Length)
+                .FirstOrDefault();
 }

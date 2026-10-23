@@ -256,7 +256,7 @@ public class EngineManagerTests
         var (reader, factory) = Setup(("alpha", "unix:///a.sock"));
         var compose = new ComposeCli(new RecordingProcessRunner().Returns("compose version --short", "5.4.0\n"));
 
-        await using var manager = new EngineManager(reader, factory, compose);
+        await using var manager = new EngineManager(reader, factory, compose: compose);
         await manager.InitializeAsync(TestContext.Current.CancellationToken);
 
         Assert.True(await WaitFor(() => manager.Selected is { Capabilities.SupportsCompose: true }));
@@ -269,7 +269,7 @@ public class EngineManagerTests
         var (reader, factory) = Setup(("alpha", "unix:///a.sock"));
         var compose = new ComposeCli(new RecordingProcessRunner());
 
-        await using var manager = new EngineManager(reader, factory, compose);
+        await using var manager = new EngineManager(reader, factory, compose: compose);
         await manager.InitializeAsync(TestContext.Current.CancellationToken);
 
         Assert.True(await WaitFor(() => manager.Selected is { State: HostConnectionState.Connected }));
@@ -283,7 +283,7 @@ public class EngineManagerTests
         var (reader, factory) = Setup(("alpha", "unix:///a.sock"), ("beta", "unix:///b.sock"));
         var runner = new RecordingProcessRunner().Returns("compose version --short", "5.4.0\n");
 
-        await using var manager = new EngineManager(reader, factory, new ComposeCli(runner));
+        await using var manager = new EngineManager(reader, factory, compose: new ComposeCli(runner));
         await manager.InitializeAsync(TestContext.Current.CancellationToken);
         await manager.SelectAsync("beta", TestContext.Current.CancellationToken);
 
@@ -306,6 +306,9 @@ sealed class FakeRuntimeFactory : IContainerRuntimeFactory
 
     public Dictionary<string, Exception> Failures { get; } = [];
 
+    /// <summary>The engine id each endpoint answers with, for the tests about two hosts being one engine.</summary>
+    public Dictionary<string, string> EngineIds { get; } = [];
+
     public List<TrackedRuntime> Created { get; } = [];
 
     public bool Handles(DockerEndpoint endpoint) => true;
@@ -316,6 +319,7 @@ sealed class FakeRuntimeFactory : IContainerRuntimeFactory
         {
             Containers = Containers.GetValueOrDefault(endpoint.Raw, []),
             ConnectFailure = Failures.GetValueOrDefault(endpoint.Raw),
+            EngineId = EngineIds.GetValueOrDefault(endpoint.Raw),
         };
 
         Created.Add(runtime);
@@ -337,11 +341,13 @@ sealed class TrackedRuntime(string endpoint) : StubRuntime
 
     public Exception? ConnectFailure { get; init; }
 
+    public string? EngineId { get; init; }
+
     public override Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default)
     {
         if (ConnectFailure is not null) throw ConnectFailure;
 
-        Capabilities = new RuntimeCapabilities { ApiVersion = "1.45", Flavor = EngineFlavor.Docker };
+        Capabilities = new RuntimeCapabilities { ApiVersion = "1.45", Flavor = EngineFlavor.Docker, EngineId = EngineId };
         return Task.FromResult(Capabilities);
     }
 

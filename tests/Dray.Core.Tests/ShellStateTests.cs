@@ -148,6 +148,36 @@ public class ShellStateTests
         Assert.Equal(0, fired);
     }
 
+    /// <summary>
+    /// A native head's back button invokes the id from <see cref="PageChrome.Back"/>, which is not
+    /// one of the page's actions. Treating it as undeclared left every native back button dead.
+    /// </summary>
+    [Fact]
+    public void TheDeclaredBackFiresThroughInvokeAction()
+    {
+        var shell = new ShellState();
+        shell.DeclareChrome(new PageChrome("nginx", Back: new ChromeBack("back", "All containers")));
+
+        var fired = new List<string>();
+        shell.ActionInvoked += fired.Add;
+        shell.InvokeAction("back");
+
+        Assert.Equal(["back"], fired);
+    }
+
+    [Fact]
+    public void BackDoesNotFireOnAPageThatDeclaresNone()
+    {
+        var shell = new ShellState();
+        shell.DeclareChrome(Containers());
+
+        var fired = 0;
+        shell.ActionInvoked += _ => fired++;
+        shell.InvokeAction("back");
+
+        Assert.Equal(0, fired);
+    }
+
     [Fact]
     public void SearchTextRoundTripsIntoChrome()
     {

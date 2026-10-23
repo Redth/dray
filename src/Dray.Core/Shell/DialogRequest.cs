@@ -88,14 +88,26 @@ public enum DialogSize
 /// The button row, or null for <see cref="DialogButton.Done"/> — which is the right default,
 /// because a dialog with nothing to decide still needs a way out.
 /// </param>
+/// <param name="Controller">
+/// For a dialog whose body drives its own buttons — a form. Null for a question with fixed answers,
+/// which closes on the first button pressed. See <see cref="DialogController"/>.
+/// </param>
 public sealed record DialogRequest(
     string Title,
     Type Body,
     IReadOnlyDictionary<string, object?>? Parameters = null,
     IReadOnlyList<DialogButton>? Buttons = null,
     string? Subtitle = null,
-    DialogSize Size = DialogSize.Medium)
+    DialogSize Size = DialogSize.Medium,
+    DialogController? Controller = null)
 {
+    /// <summary>
+    /// A button's label and state right now: the controller's, when the body has set one, or as
+    /// declared. Every head draws from this, so none has to know whether a controller exists.
+    /// </summary>
+    public DialogButtonState Current(DialogButton button)
+        => Controller?.State(button.Id) ?? new DialogButtonState(button.Label);
+
     public IReadOnlyList<DialogButton> ButtonList => Buttons is { Count: > 0 } buttons ? buttons : DialogButton.Done();
 
     public IReadOnlyDictionary<string, object?> ParameterMap =>

@@ -2,45 +2,62 @@
 
    Only the fields that change behaviour. Docker's create endpoint takes two dozen options; offering
    all of them would be a form nobody can complete and a set of choices nobody can evaluate. *@
+@inherits DialogBody
 @inject EngineManager Engine
 
-<Dialog Title="Create a network" Open="Open" OpenChanged="OpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="net-name">Name</label>
-            <input id="net-name" class="input" @bind="_name" @bind:event="oninput"
-                   autocomplete="off" spellcheck="false" @onkeydown="OnKeyDown" />
-        </div>
+<div class="field">
+    <label class="field__label" for="net-name">Name</label>
+    <input id="net-name" class="input" @bind="_name" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" @onkeydown="OnKeyDown" />
+</div>
 
-        <div class="field">
-            <label class="field__label" for="net-subnet">Subnet <span class="muted">(optional)</span></label>
-            <input id="net-subnet" class="input mono" placeholder="172.30.0.0/16"
-                   @bind="_subnet" @bind:event="oninput" autocomplete="off" spellcheck="false" />
-        </div>
+<div class="field">
+    <label class="field__label" for="net-subnet">Subnet <span class="muted">(optional)</span></label>
+    <input id="net-subnet" class="input mono" placeholder="172.30.0.0/16"
+           @bind="_subnet" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+</div>
 
-        <label class="toggle">
-            <input type="checkbox" @bind="_internal" />
-            <span>Internal — containers can reach each other but not the outside world</span>
-        </label>
+<label class="toggle">
+    <input type="checkbox" @bind="_internal" />
+    <span>Internal — containers can reach each other but not the outside world</span>
+</label>
 
-        @if (_problem is { } problem)
-        {
-            <p class="net__problem">@problem</p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => OpenChanged.InvokeAsync(false)" />
-        <Button Label="Create" Variant="ButtonVariant.Primary" Busy="_saving"
-                Disabled="@(_saving || !ContainerName.IsValid(_name))" OnClick="SubmitAsync" />
-    </Footer>
-</Dialog>
+@if (_problem is { } problem)
+{
+    <p class="net__problem">@problem</p>
+}
 
 @code {
-    [Parameter] public bool Open { get; set; }
+    /// <summary>Open it. True when a network was created, so the page knows to refresh.</summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell)
+    {
+        var dialog = new DialogController();
+        await shell.ShowDialogAsync(new DialogRequest(
+            "Create a network",
+            typeof(NetworkDialog),
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
+            Controller: dialog));
 
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+        return dialog.Result == "create";
+    }
 
-    [Parameter] public EventCallback OnCreated { get; set; }
+    protected override void DeclareButtons()
+    {
+        Button("cancel", "Cancel");
+        Button("create", "Create", enabled: !_saving && ContainerName.IsValid(_name), busy: _saving);
+    }
+
+    protected override async Task<bool> OnButtonAsync(string buttonId)
+    {
+        // A create closes the dialog itself, and only once the engine has accepted it.
+        if (buttonId == "create")
+        {
+            await SubmitAsync();
+            return false;
+        }
+
+        return true;
+    }
 
     string _name = "";
     string _subnet = "";
@@ -66,6 +83,10 @@
         _saving = true;
         _problem = null;
 
+        // Submitted from the head's button as well as from Enter, and only an event handler
+        // re-renders by itself — so the buttons learn they are busy from here.
+        StateHasChanged();
+
         try
         {
             var request = new NetworkRequest(
@@ -75,15 +96,12 @@
 
             _problem = await Engine.CreateNetworkAsync(request);
 
-            if (_problem is null)
-            {
-                await OnCreated.InvokeAsync();
-                await OpenChanged.InvokeAsync(false);
-            }
+            if (_problem is null) Close("create");
         }
         finally
         {
             _saving = false;
+            StateHasChanged();
         }
     }
 }

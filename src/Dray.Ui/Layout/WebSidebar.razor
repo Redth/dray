@@ -4,8 +4,14 @@
 
 <nav class="sidebar chrome" aria-label="Main">
     <div class="sidebar__brand">
-        <Icon Name="IconRef.Container" Size="IconSize.Lg" />
+        <BrandMark />
         <span>Dray</span>
+    </div>
+
+    @* First in the sidebar, above the navigation: which engine is selected decides what every page
+       below it shows (DESIGN.md section 5). *@
+    <div class="sidebar__picker">
+        <HostPicker />
     </div>
 
     <ul class="sidebar__list">

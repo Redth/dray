@@ -27,7 +27,11 @@
     else if (_entries.Count == 0)
     {
         <EmptyState Icon="IconRef.Registry" Title="No registries configured"
-                    Body="Public images pull without any of this. A registry appears here once you sign in to one — from Dray or from a terminal, since both use the same store." />
+                    Body="Public images pull without any of this. A registry appears here once you sign in to one — from Dray or from a terminal, since both use the same store.">
+            <Actions>
+                <Button Label="Sign in to a registry…" Icon="IconRef.Plus" OnClick="SignInNewAsync" />
+            </Actions>
+        </EmptyState>
     }
     else
     {
@@ -110,7 +114,7 @@
                                            the column off the card. *@
                                         <Button Label="Sign in" Icon="IconRef.Registry"
                                                 Tooltip="@($"Sign in to {entry.DisplayName}")"
-                                                Variant="ButtonVariant.Ghost" OnClick="() => BeginSignIn(entry)" />
+                                                Variant="ButtonVariant.Ghost" OnClick="() => SignInAsync(entry)" />
                                     }
 
                                     @if (entry.Storage == CredentialStorage.Helper && !entry.IsAmbient)
@@ -138,18 +142,10 @@
     }
 </div>
 
-@if (_signingIn is { } target)
-{
-    <SignInDialog Registry="target" Open="true"
-                  OpenChanged="open => _signingIn = open ? target : null"
-                  OnSignedIn="OnSignedInAsync" />
-}
-
 @code {
     static readonly ContainerStatus MissingStatus = new(StateTone.Danger, "▲", "Helper missing");
 
     IReadOnlyList<RegistryEntry>? _entries;
-    RegistryEntry? _signingIn;
     string? _notice;
     bool _noticeOk;
 
@@ -168,11 +164,24 @@
         }
     }
 
-    void BeginSignIn(RegistryEntry entry) => _signingIn = entry;
-
-    async Task OnSignedInAsync(string server)
+    async Task SignInAsync(RegistryEntry entry)
     {
-        Notify($"Signed in to {server}. The credential is in your system store, not in Dray.", ok: true);
+        if (!await SignInDialog.ShowAsync(Shell, entry)) return;
+
+        Notify($"Signed in to {entry.DisplayName}. The credential is in your system store, not in Dray.", ok: true);
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Sign in to a registry that is not listed yet. Nothing is written to config.json for it
+    /// (docs/CREDENTIALS.md section 4): the credential goes to the helper the CLI would ask, and the
+    /// list finds it there.
+    /// </summary>
+    async Task SignInNewAsync()
+    {
+        if (!await SignInDialog.ShowAsync(Shell)) return;
+
+        Notify("Signed in. The credential is in your system store, not in Dray.", ok: true);
         await LoadAsync();
     }
 
@@ -204,10 +213,15 @@
     PageChrome Chrome => new(
         "Registries",
         Subtitle: _entries is null ? null : $"{_entries.Count} configured",
-        Actions: [ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh)]);
+        Actions:
+        [
+            ChromeAction.Primary("signin", "Sign in to a registry…", IconRef.Plus),
+            ChromeAction.Secondary("refresh", "Refresh", IconRef.Refresh),
+        ]);
 
     async Task HandleAction(string id)
     {
-        if (id == "refresh") await LoadAsync();
+        if (id == "signin") await SignInNewAsync();
+        else if (id == "refresh") await LoadAsync();
     }
 }

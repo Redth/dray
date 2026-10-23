@@ -12,6 +12,8 @@
   <ItemGroup Label="MAUI app heads">
     <PackageVersion Include="Microsoft.Maui.Controls" Version="10.0.100" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.100" />
+    <!-- The version MAUI 10.0.100's graphics already brings; named for the Windows tray icon. -->
+    <PackageVersion Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <PackageVersion Include="Microsoft.Maui.Platforms.MacOS" Version="0.1.0-preview.12.26421.1" />
     <PackageVersion Include="Microsoft.Maui.Platforms.MacOS.BlazorWebView" Version="0.1.0-preview.12.26421.1" />
     <PackageVersion Include="Microsoft.Maui.Platforms.MacOS.Essentials" Version="0.1.0-preview.12.26421.1" />

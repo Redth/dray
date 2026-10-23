@@ -251,7 +251,7 @@ public class StackOperationsTests
     {
         var source = new FakeConfigSource().WithContext("alpha", "unix:///a.sock").WithConfig("alpha");
         var runner = new RecordingProcessRunner().Returns("compose version --short", "5.4.0\n");
-        var manager = new EngineManager(new DockerContextReader(source), new FakeRuntimeFactory(), new ComposeCli(runner));
+        var manager = new EngineManager(new DockerContextReader(source), new FakeRuntimeFactory(), compose: new ComposeCli(runner));
         await manager.InitializeAsync(TestContext.Current.CancellationToken);
         return (manager, runner);
     }

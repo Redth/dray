@@ -54,8 +54,15 @@ places that pattern frays. The work here is re-expressing the proven mechanics a
 
 **Progress:** Core abstractions, the RCL, the component kit, `Dray.DevHost` and the **macOS head**
 are done — native `NSOutlineView` sidebar and `NSToolbar` both projected from the manifest and from
-`PageChrome`, with the theme handoff verified in light and dark. Windows and GTK heads are next.
-Greyscale and both-theme checks pass on `/gallery`.
+`PageChrome`, with the theme handoff verified in light and dark. Greyscale and both-theme checks
+pass on `/gallery`.
+
+**The Windows head is written but has not run.** It has a WinUI `NavigationView` sidebar built from
+the manifest, a native toolbar row projected from `PageChrome`, `ContentDialog` dialogs with Blazor
+bodies, a transparent WebView2 on Mica, and the token handoff read from WinUI's own theme
+dictionaries. Every file compiles against the real Windows reference assemblies with warnings as
+errors. Nothing has been seen on screen. docs/NATIVE-SHELL.md §5.4 lists what to verify first. The
+GTK head is next.
 
 Since built on top of that:
 
@@ -73,11 +80,12 @@ and you cannot see where native chrome ends and the WebView begins.
 app launches with networking disabled · no route, nav entry, icon or colour is declared in more than
 one place.
 
-> **Windows and GTK4 heads are deferred.** Neither can be run or verified on the development
-> machine, so writing them now would produce untested code whose first real check is CI. The seams
-> they need — `NavigationManifest`, `PageChrome`, `IconRef`, `IShellBridge`, `IPlatformTheme` — are
-> all in place and exercised by the macOS head and `Dray.DevHost`, so adding a head later is
-> additive rather than structural. Picked up when there is a machine to run them on.
+> **The GTK4 head is deferred.** It cannot be run or verified on the development machine. The
+> seams it needs — `NavigationManifest`, `PageChrome`, `IconRef`, `IShellBridge`, `IPlatformTheme`
+> — are all in place and exercised by the other heads, so adding it later is additive rather than
+> structural. The Windows head was written ahead of a Windows machine, so it could be finished in one
+> session on one. It is the precedent for what "written but not run" has to come with: a compile
+> check against the platform's real assemblies, and a written list of runtime claims to verify.
 
 ---
 
@@ -113,11 +121,14 @@ are reached by running a program that already has the socket and speaking HTTP o
 transport serves both, which is why `ssh://` arrived alongside WSL rather than as a project of its
 own (docs/ARCHITECTURE.md §2.4a).
 
-The transport was **verified end to end against a live engine** with `dial-stdio` standing in for
-the WSL launcher — the mechanism is identical and only the program differs. Version and info probes,
-container and image lists, a hijacked exec with its exit code, the archive endpoint streaming a tar,
-and a held-open stats stream all work through it. What stays unverified until there is a Windows
-machine is `wsl.exe` itself.
+The transport was first verified against a live engine on macOS with `dial-stdio` standing in for
+the WSL launcher. **Then verified on Windows, against a real `wsl.exe`** — and that run found the bug
+the stand-in could not: `DockerRawApi`, built during connect, refused relayed endpoints, so no WSL or
+SSH host had ever been able to connect. Fixed, with a regression test. Against Ubuntu 26.04 running
+Docker 29.9, connect, the container list and the event stream all work through the relay. A
+container started from inside the distro appears in the store without a re-fetch. A request on a
+warm distro costs about 175 ms. A failed relay now says why, from its stderr: Docker not installed,
+installed but not running, or the distro gone.
 
 Distro enumeration handles the two traps in `wsl --list --verbose`: it is UTF-16LE unless
 `WSL_UTF8=1` is honoured, and the table is localised in both its header and its state word. The
@@ -129,8 +140,9 @@ Still outstanding for this phase: showing which distro a container's bind mounts
 versus the native filesystem, the top cause of "why is this so slow" on Windows).
 
 **Demo:** connect to local Docker, a WSL2 distro, and a remote host over SSH; kill a container from a
-terminal and watch the dashboard update with no refresh. *(The first is verified live; the relay the
-other two use is verified live, but against a stand-in launcher rather than `wsl.exe` or `ssh`.)*
+terminal and watch the dashboard update with no refresh. *(Local Docker and a WSL2 distro are
+verified live on Windows. SSH shares the WSL relay, raw-API fix included, but has not been run
+against a real `ssh` yet.)*
 **Exit:** an unreachable host degrades one sidebar entry and nothing else · reconnect survives a
 daemon restart · zero polling in the code path.
 
@@ -599,17 +611,27 @@ SIGKILL` on Linux and almost always the OOM killer; on Windows it means nothing 
 reports an NTSTATUS instead — which arrives signed through some paths and unsigned through others,
 so both spellings of `0xC0000005` reach the same sentence.
 
-**Both kinds at once, with no mode.** Docker Desktop's switch is not a mode of the machine: both
-daemons run simultaneously on their own pipes, and containers started in either keep running across
-a switch. It only changes which engine the default pipe and CLI context resolve to. Since Dray
-addresses engines by endpoint, both appear as two hosts and Dray needs no mode of its own — the host
-picker is the switch, and unlike Docker Desktop's it stops nothing.
+**One engine at a time, and Dray switches it.** This paragraph used to say Docker Desktop ran both
+daemons at once and that the picker's switch stopped nothing. Measured, it does not: in Windows mode
+the Linux pipe does not answer, and after a switch the Windows pipe returns 500. So Dray drives the
+mode through Docker Desktop's own CLI (`docker desktop engine ls/use`, `status`, `start`, all with
+`--format json`). Each engine is still its own host. Choosing the inactive one asks first — the
+switch stops every container on the other engine — then switches Docker Desktop and selects the
+engine that comes up: 11 seconds to Linux, 3 back, shown as in progress in the picker and on the
+Hosts page. `docker_engine` and the CLI's `default` context are hidden as aliases once their engine ID
+matches the Docker Desktop engine they point at. The picker is now in the Windows sidebar, and the
+choice survives a restart.
 
-**Guided setup, and where the line is.** Windows is the one platform where a developer can be left
-with no engine and no idea which of two unrelated things to install. Dray names exactly what is
-missing and offers to run the documented command — shown first, run only when asked, elevated in the
-open, in its own visible window. It stops short of installing an engine, and PRODUCT.md now says so
-explicitly rather than leaving the exception unstated.
+**Guided setup that finishes the job.** PRODUCT.md now says Dray helps install engines on every
+platform, under the same rules as before — shown first, run only when asked, elevated in the open —
+using the vendor's own installer. On Windows that made the Linux track a complete route rather than a
+checklist that stopped at "you have a distribution": WSL → Ubuntu (`--no-launch`, not elevated) →
+your account, created from a native form → Docker Engine via Docker's script, as root, shown whole →
+connected. Docker Desktop is offered beside it as the other route, installed with winget, started or
+switched. Steps that do not need Dray elevated run inside it with their output streamed onto the
+page. **Verified on this machine:** Ubuntu installed and Docker Engine installed through Dray's own
+steps, and Dray connected to the engine they produced. Account creation was verified on a throwaway
+distribution — groups, default user, and a password `sudo` accepts.
 
 Every check is non-elevated, so `Unknown` is a common answer rather than a failure. What makes that
 safe is that every offered command is idempotent — DISM against an enabled feature says so and
@@ -626,9 +648,44 @@ Dray-prefixed twin of every engine.
 A `wsl://` host gets no button, because its socket has no Windows-side address — the panel says
 where the command already works instead of offering one that cannot.
 
-**What is not done:** the WinUI head. The engine layer is head-agnostic and every part of it above
-is covered by tests that run on any platform, but Dray still has no window on Windows. Nor does
-Dray install an engine, which is deliberate rather than pending.
+**Since then, verified on this machine:**
+
+- **The setup UI was clicked through.** In the Windows head (Release, via UI Automation): the
+  picker, choosing a WSL engine, and the Docker Desktop switch with its confirmation. In DevHost
+  (driven over CDP): Start Docker in a distro, the account dialog, and Keep it running. This found
+  that **every setup button had always been disabled**: `Running="_running"` binds the literal text
+  to a string parameter.
+- **An engine in WSL stopped whenever nothing was attached.** WSL ends a distribution about fifteen
+  seconds after its last client, and containers do not count. Setup now offers
+  `instanceIdleTimeout=-1` once such an engine answers; measured to keep the distribution and its
+  containers up.
+- **Compose acted on the CLI's context, not the selected engine,** and `SupportsCompose` was never
+  set. It now targets the selected engine, and runs inside the distribution for a WSL engine.
+  Verified: a stack in Ubuntu stopped and started through Dray, and its compose file opened from
+  Windows.
+- **Install help on macOS and Linux exists** (Colima, OrbStack and Docker Desktop on macOS; Docker
+  Engine through polkit on Linux), as has a host picker in the web head.
+
+**What is not done:**
+
+- **Nothing here has run on a Linux desktop.** The Linux setup plan is unit-tested and reviewed in
+  `/gallery`, but no step has executed there.
+- **On a Mac, the head builds and runs against Docker Desktop**, and running it found two bugs in
+  the sidebar picker: the sidebar selects its first row as it loads, which is the picker, so its
+  menu's modal loop ran inside the app's launch and the window never appeared; and its title never
+  changed, because the sidebar ignores a new list once it has loaded. Both are fixed. Opening the
+  picker's menu with a click has not been driven — synthetic clicks need an Accessibility grant
+  the test machine did not have — and no Mac setup step (Colima, OrbStack, starting Docker
+  Desktop) has executed yet.
+- **A Mac app opened from the Finder could not find `docker`** — launchd's `PATH` has none of the
+  engines' commands — so compose, buildx, credential helpers and Apple's `container` were all
+  missing outside a terminal launch. Fixed in `MacSearchPath`; verified by detecting compose under
+  launchd's `PATH` before and after.
+- **The Windows head was not driven with DevFlow**, because another worktree's Debug instance held
+  its port and log file. It was driven in a Release build through UI Automation and screen capture.
+- **Windows Server's engine script** (`install-docker-ce.ps1`) is the command Microsoft documents. It
+  has not been run on a Server machine.
+- Showing which distro a bind mount lives in (`/mnt/c` versus native) is still outstanding from Phase 2.
 
 ---
 

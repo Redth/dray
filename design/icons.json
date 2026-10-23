@@ -241,5 +241,19 @@
       "gtk": "window-close-symbolic",
       "svg": "<path d='m6 6 12 12M18 6 6 18'/>"
     }
+  },
+  "marks": {
+    "$comment": [
+      "Dray's own mark, which no platform icon set has a name for -- so it has no `sf` or `gtk`",
+      "mapping and no IconRef. Same geometry rules as `icons`. This is the one source of the",
+      "drawing: the sprite symbol, the macOS menu-bar template image and the app-icon artwork",
+      "(build/gen-app-icon.mjs) all read it from here. DESIGN.md section 10.",
+      "",
+      "`load` is the shape the app tile tints for volume; outline everywhere else."
+    ],
+    "dray": {
+      "svg": "<path d='M2.5 10.5 5.5 15H21'/><path d='M8 4h4.5a5.5 5.5 0 0 1 0 11H8z'/><circle cx='9.5' cy='18.5' r='2'/><circle cx='17.5' cy='18.5' r='2'/>",
+      "load": "M8 4h4.5a5.5 5.5 0 0 1 0 11H8z"
+    }
   }
 }
