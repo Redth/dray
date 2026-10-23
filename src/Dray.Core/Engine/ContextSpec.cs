@@ -216,15 +216,22 @@ public sealed class MinikubeDockerEnv(IProcessRunner? runner = null)
 
         if (values.TryGetValue("DOCKER_CERT_PATH", out var certs) && certs.Length > 0)
         {
-            var ca = Path.Combine(certs, "ca.pem");
-            var cert = Path.Combine(certs, "cert.pem");
-            var key = Path.Combine(certs, "key.pem");
-
             if (ContextSpec.ValidatePath(certs) is not null) return null;
 
-            return ContextSpec.Docker(host, ca, cert, key);
+            return ContextSpec.Docker(host, Join(certs, "ca.pem"), Join(certs, "cert.pem"), Join(certs, "key.pem"));
         }
 
         return ContextSpec.Docker(host);
+    }
+
+    /// <summary>
+    /// A file in minikube's directory, written in that directory's own separators — not this
+    /// machine's. Path.Combine would put a backslash after a forward-slash path on Windows, and a
+    /// mixed path is one the docker command may read and a person reading the context cannot.
+    /// </summary>
+    static string Join(string directory, string file)
+    {
+        var separator = directory.Contains('\\') && !directory.Contains('/') ? '\\' : '/';
+        return directory.TrimEnd('/', '\\') + separator + file;
     }
 }

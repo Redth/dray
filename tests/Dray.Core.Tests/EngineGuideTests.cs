@@ -36,9 +36,10 @@ public class EngineGuideTests
     [Fact]
     public void AnExecutableOnPathIsInstalled()
     {
+        // In this machine's own PATH syntax: the probe reads PATH the way the OS it runs on does.
         var source = new FakeConfigSource()
-            .WithEnvironment("PATH", "/usr/bin:/opt/homebrew/bin")
-            .WithExecutable("/opt/homebrew/bin/colima");
+            .WithEnvironment("PATH", string.Join(Path.PathSeparator, "/usr/bin", "/opt/homebrew/bin"))
+            .WithExecutable(Path.Combine("/opt/homebrew/bin", "colima"));
 
         Assert.Equal(GuideState.Installed, new EngineGuideProbe(source).Check(Guide("colima"), []).State);
     }
@@ -237,6 +238,19 @@ public class ContextSpecTests
             """;
 
         Assert.StartsWith("host=tcp://192.168.49.2:2376,ca=/home/me/.minikube/certs/ca.pem", MinikubeDockerEnv.Parse(output));
+    }
+
+    [Fact]
+    public void AWindowsCertPathKeepsItsOwnSeparators()
+    {
+        const string output = """
+            DOCKER_HOST=tcp://127.0.0.1:58123
+            DOCKER_CERT_PATH=C:\Users\me\.minikube\certs
+            """;
+
+        Assert.Equal(
+            @"host=tcp://127.0.0.1:58123,ca=C:\Users\me\.minikube\certs\ca.pem,cert=C:\Users\me\.minikube\certs\cert.pem,key=C:\Users\me\.minikube\certs\key.pem",
+            MinikubeDockerEnv.Parse(output));
     }
 
     [Fact]

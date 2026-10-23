@@ -248,11 +248,13 @@ public sealed class EngineGuideProbe(IDockerConfigSource source)
             return string.IsNullOrEmpty(home) ? null : Path.Combine(home, path[2..]);
         }
 
+        // A Linux variable naming a Linux path, so joined with the separator it uses rather than
+        // this machine's — Path.Combine on Windows would write a backslash into a Unix socket path.
         const string runtime = "$XDG_RUNTIME_DIR/";
         if (path.StartsWith(runtime, StringComparison.Ordinal))
         {
             var dir = source.GetEnvironmentVariable("XDG_RUNTIME_DIR");
-            return string.IsNullOrEmpty(dir) ? null : Path.Combine(dir, path[runtime.Length..]);
+            return string.IsNullOrEmpty(dir) ? null : dir.TrimEnd('/') + "/" + path[runtime.Length..];
         }
 
         return path;
