@@ -1,7 +1,8 @@
 # Dray — agent instructions
 
 A native desktop app for managing Docker: containers, images, volumes, networks, registries and
-compose stacks, locally and on any host reachable through a Docker context.
+compose stacks, locally and on any host reachable through a Docker context — and the local
+Kubernetes cluster beside them.
 
 **Read these before making changes.** They are contracts, not suggestions.
 
@@ -11,6 +12,7 @@ compose stacks, locally and on any host reachable through a Docker context.
 | [`DESIGN.md`](DESIGN.md) | Colour, type, spacing, components, motion, native integration. Binding. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Project layout, runtime seam, state flow, the native↔web seam |
 | [`docs/NATIVE-SHELL.md`](docs/NATIVE-SHELL.md) | What to lift from MAUI.Sherpa verbatim, and the five places it frays |
+| [`docs/KUBERNETES.md`](docs/KUBERNETES.md) | Local clusters: scope, the two pickers, the reflector, what is not built |
 | [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md) | Secret handling. Dray stores none; read before touching auth |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phases, demos, exit criteria |
 
@@ -149,6 +151,11 @@ message if either is absent.
   engine, and have the UI hide the control (DESIGN.md §8.1). Never catch the refusal and show an
   error the user could not have avoided, and never fill an absent value with a plausible one — an
   unreported size is not `0 B` and an unreported exit code is not `0` (DESIGN.md §8.2).
+- **Kubernetes is a sibling seam, not another engine.** `IClusterClient` sits beside
+  `IContainerRuntime`, and `ClusterStore` beside `EntityStore`; pods never go through the container
+  interface. v1 connects only to clusters *measured* as local (`docs/KUBERNETES.md` §3), and Dray
+  never changes `kubectl`'s current-context except from a control that says so before it runs —
+  "Use in terminal", or creating a kind cluster, because kind switches it and has no flag not to.
 - Nullable enabled, warnings as errors, central package management via `Directory.Packages.props`.
 - Records for DTOs, `Async` suffix on async methods.
 - A page **declares** its native chrome via `PageChrome`; it never imperatively mutates a toolbar.

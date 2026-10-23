@@ -1,7 +1,7 @@
 # Roadmap
 
 Nine phases. Each has a **demo** — the thing you can actually show when it's done — and **exit
-criteria** that must hold before the next phase starts. Phases 1–7 are v1.
+criteria** that must hold before the next phase starts. Phases 1–7, including 6.5, are v1.
 
 Assumptions taken (see PRODUCT.md for the reasoning; say the word and any of these can change):
 Dray is a **client**, not an engine host, with the runtime seam in place for Apple `container` later ·
@@ -385,6 +385,40 @@ service's logs in the aggregated view, fix the compose file, recreate just that 
 
 ---
 
+## Phase 6.5 — Local Kubernetes
+
+The cluster on this machine, beside the engine it runs on. A lens on the user's own workloads, not
+an admin console. Design and the three settled decisions — in v1, two pickers, local clusters
+only — are in [`docs/KUBERNETES.md`](KUBERNETES.md).
+
+- **K0 spike** (KUBERNETES.md §10): run against kind on Docker Desktop's engine. Port-forward,
+  v5 exec, watch/410, streaming lists, STATUS parity, pairing and the image diagnosis all measured;
+  two first-draft claims corrected and one client deadlock found. Still to run: OrbStack, Docker
+  Desktop's own Kubernetes, k3d, minikube, and anything inside the macOS head
+- Kubeconfig discovery honouring `KUBECONFIG`; a cluster picker separate from the engine picker,
+  defaulted by a measured pairing; Remote contexts listed with a reason and not connectable
+- `Dray.Kubernetes` behind an `IClusterClient` seam in Core; `ClusterStore` fed by list-then-watch
+  reflectors that relist by diffing on 410
+- Workloads, Pods, Services and Events pages; the pod state vocabulary joins DESIGN.md §2.4
+- Logs (previous instance first after a restart), shell, port forwarding bound to loopback
+- Scale, restart, delete — typed where it destroys something a controller will not recreate
+- Node containers grouped under their cluster on the Containers page
+- Create and delete a kind cluster on the selected engine: kind detected (Homebrew's path
+  included) or its install command shown, creation streamed, the current-context switch and the
+  1.3 GB node image stated before anything runs, deletion typed
+- `ImagePullBackOff` on an image built here, diagnosed from the engine's image list and the node's
+  `status.images`, with the load command shown before it runs
+
+**Demo:** build `myapp:dev` in Dray, apply a manifest to a kind cluster from a terminal, and watch
+the pod go to Can't pull image. Dray says the image is on the engine but not in the cluster and
+shows the `kind load` command; run it, watch the pod go Running without a refresh, forward its port
+and open it.
+**Exit:** a pod deleted from a terminal changes its row with no refresh · a forced 410 relist
+writes only what changed · `kubectl`'s current-context never moves unless the user pressed the
+control that moves it · no Remote cluster is ever connected · pod pills legible in greyscale.
+
+---
+
 ## Phase 7 — Ship
 
 - macOS: hardened runtime, notarization, DMG, appcast auto-update, Homebrew cask
@@ -708,8 +742,9 @@ where the command already works instead of offering one that cannot.
 ---
 
 **Phase 9 — considered, not committed.** Machine lifecycle (creating the VM rather than driving it) ·
-`docker scout` vulnerability surfacing · Swarm · Kubernetes. Kubernetes and pods are explicitly out of
-v1 scope. Each of these is a product decision, not a backlog item.
+`docker scout` vulnerability surfacing · Swarm · remote Kubernetes clusters. Local clusters are v1
+(Phase 6.5); remote ones carry exec credential plugins, the GUI `PATH` problem and production-grade
+stakes, and are deferred on purpose. Each of these is a product decision, not a backlog item.
 
 ---
 

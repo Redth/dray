@@ -7,6 +7,7 @@ Dray.sln
 ├── src/
 │   ├── Dray.Core/            net10.0    domain, state store, services, nav manifest — no UI, no Docker
 │   ├── Dray.Docker/          net10.0    IContainerRuntime implemented over the Docker Engine API
+│   ├── Dray.Kubernetes/      net10.0    IClusterClient over the Kubernetes API — local clusters, v1
 │   ├── Dray.Ui/              net10.0    Razor Class Library — ALL Blazor pages, components, wwwroot
 │   ├── Dray.MacOS/           net10.0-macos      AppKit head
 │   ├── Dray.Windows/         net10.0-windows    WinUI head (namespace Dray.WinUI)
@@ -707,6 +708,20 @@ mistake with a different cause.
 
 **Not one page was rewritten to add this engine.** That is the claim the seam was drawn to support,
 and it now has a second implementation behind it rather than an argument.
+
+### 2.12 Kubernetes is beside the runtime, not behind it
+
+A cluster is not another engine. It has no image store, volumes or networks in Docker's sense, and
+a pod has an owner and a desired state that a container does not, so `Dray.Kubernetes` implements
+its own seam — `IClusterClient`, feeding its own `ClusterStore` — rather than a third
+`IContainerRuntime`. The engine picker and the cluster picker are separate controls; a measured
+pairing between them (a cluster whose nodes are containers on a connected engine) sets a default
+and never couples the two.
+
+The event-stream rule holds without exception for lists: Kubernetes watches feed the store through
+list-then-watch reflectors that relist by *diffing* when the server answers 410 Gone, for the same
+reason §3.1's fallback diffs rather than resets. Design, scope and the spike that has to run before
+any of it is trusted are in [`docs/KUBERNETES.md`](KUBERNETES.md).
 
 ---
 

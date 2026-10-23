@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: spike}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: myapp, namespace: spike}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: myapp}}
+  template:
+    metadata: {labels: {app: myapp}}
+    spec:
+      containers:
+      - {name: web, image: "myapp:dev", ports: [{containerPort: 8080}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: myapp, namespace: spike}
+spec:
+  selector: {app: myapp}
+  ports: [{port: 80, targetPort: 8080}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: crasher, namespace: spike}
+spec:
+  containers:
+  - {name: main, image: "busybox:1.37", command: ["sh","-c","echo starting up; echo 'fatal: config missing' >&2; exit 3"]}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: oomer, namespace: spike}
+spec:
+  containers:
+  - name: main
+    image: "busybox:1.37"
+    command: ["sh","-c","echo allocating; tail /dev/zero"]
+    resources: {limits: {memory: "32Mi"}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: sleeper, namespace: spike}
+spec:
+  containers:
+  - {name: main, image: "busybox:1.37", command: ["sh","-c","while true; do date; sleep 2; done"]}
+  - {name: sidecar, image: "busybox:1.37", command: ["sleep","infinity"]}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: once, namespace: spike}
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers: [{name: main, image: "busybox:1.37", command: ["sh","-c","echo done"]}]
+---
+# A line echo server: the held-connection port-forward test needs a conversation, and busybox
+# httpd closes after every response.
+apiVersion: v1
+kind: Pod
+metadata: {name: echo, namespace: spike}
+spec:
+  containers:
+  - {name: echo, image: "busybox:1.37", command: ["sh","-c","nc -lk -p 9000 -e cat"]}
