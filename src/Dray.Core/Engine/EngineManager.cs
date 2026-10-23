@@ -1019,11 +1019,11 @@ public sealed class EngineManager : IAsyncDisposable
 
     /// <summary>Ask the engine to search a registry. Throws what the engine said, for the caller to show.</summary>
     public async Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
-        string term, int limit = 25, CancellationToken ct = default)
+        string term, int limit = 25, ImageSearchFilters? filters = null, CancellationToken ct = default)
     {
         if (_runtime is not { } runtime) return [];
 
-        return await runtime.SearchImagesAsync(term, limit, ct).ConfigureAwait(false);
+        return await runtime.SearchImagesAsync(term, limit, filters, ct).ConfigureAwait(false);
     }
 
     /// <returns>Null on success, or a sentence explaining what went wrong.</returns>
@@ -1065,13 +1065,55 @@ public sealed class EngineManager : IAsyncDisposable
     public Task<string?> RunAsync(RunRequest request, CancellationToken ct = default)
         => TryAsync(runtime => runtime.RunAsync(request, ct));
 
+    /// <summary>
+    /// Pull an image, streaming per-layer progress — anonymously first, and with the stored
+    /// credential only if the registry refuses.
+    /// <para>
+    /// Anonymous first because almost every pull is of a public image, and fetching a credential can
+    /// raise a keychain prompt — the same order the update check uses. The retry happens only when
+    /// the refusal arrives before any layer has moved, so a pull is never started twice.
+    /// </para>
+    /// <para>
+    /// With nothing stored, the engine's refusal is passed on with what it most likely means and what
+    /// to do about it. The engine's own sentence — "repository does not exist or may require 'docker
+    /// login'" — names a command Dray users may never type.
+    /// </para>
+    /// </summary>
+    /// <param name="registries">The credential store, or null to pull anonymously and only that.</param>
     public async IAsyncEnumerable<PullProgress> PullImageAsync(
         string reference,
+        RegistryReader? registries = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         if (_runtime is not { } runtime) yield break;
 
-        await foreach (var step in runtime.PullImageAsync(reference, ct).ConfigureAwait(false))
+        PullProgress? refusal = null;
+        var moved = false;
+
+        await foreach (var step in runtime.PullImageAsync(reference, null, ct).ConfigureAwait(false))
+        {
+            if (step.IsError && !moved && registries is not null && PullRefusal.NeedsCredential(step.Error))
+            {
+                refusal = step;
+                break;
+            }
+
+            moved |= step.LayerId is not null;
+            yield return step;
+        }
+
+        if (refusal is null || registries is null) yield break;
+
+        var draft = ImageReferenceDraft.Parse(reference);
+        var credential = await registries.FindForAsync(RegistryHosts.CredentialServer(draft.Host), ct).ConfigureAwait(false);
+
+        if (credential is null)
+        {
+            yield return refusal with { Error = PullRefusal.Explain(refusal.Error!, RegistryHosts.NameOf(draft.Host)) };
+            yield break;
+        }
+
+        await foreach (var step in runtime.PullImageAsync(reference, credential, ct).ConfigureAwait(false))
             yield return step;
     }
 

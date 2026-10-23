@@ -70,7 +70,7 @@ public abstract class StubRuntime : IContainerRuntime
         => Task.CompletedTask;
 
     public virtual Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
-        string term, int limit = 25, CancellationToken ct = default)
+        string term, int limit = 25, ImageSearchFilters? filters = null, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<ImageSearchResult>>([]);
 
     public virtual Task SaveImageAsync(
@@ -80,7 +80,8 @@ public abstract class StubRuntime : IContainerRuntime
     public virtual Task<IReadOnlyList<string>> LoadImageAsync(string archivePath, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<string>>([]);
 
-    public virtual IAsyncEnumerable<PullProgress> PullImageAsync(string reference, CancellationToken ct = default)
+    public virtual IAsyncEnumerable<PullProgress> PullImageAsync(
+        string reference, RegistryCredential? credential = null, CancellationToken ct = default)
         => AsyncEnumerable.Empty<PullProgress>();
 
     public virtual IAsyncEnumerable<BuildProgress> BuildImageAsync(BuildRequest request, CancellationToken ct = default)

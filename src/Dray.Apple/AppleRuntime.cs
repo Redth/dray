@@ -626,11 +626,15 @@ public sealed class AppleRuntime(IProcessRunner? runner = null, string? executab
     /// that reads as "nothing matched".
     /// </summary>
     public Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
-        string term, int limit = 25, CancellationToken ct = default)
+        string term, int limit = 25, ImageSearchFilters? filters = null, CancellationToken ct = default)
         => throw new NotSupportedException("This engine cannot search a registry. Pull an image by name instead.");
 
+    /// <summary>
+    /// <c>container image pull</c>. The credential is ignored for the reason <see cref="PushImageAsync"/>
+    /// gives: this CLI looks it up in the same helpers itself.
+    /// </summary>
     public async IAsyncEnumerable<PullProgress> PullImageAsync(
-        string reference, [EnumeratorCancellation] CancellationToken ct = default)
+        string reference, RegistryCredential? credential = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
         // The CLI reports progress as human-readable lines rather than as structured layer events,
         // so each line becomes one status with no layer id and no fraction. A per-layer bar would

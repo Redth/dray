@@ -231,7 +231,7 @@
 
         try
         {
-            var remote = await Engine.SearchImagesAsync(term, 6, ct);
+            var remote = await Engine.SearchImagesAsync(term, 6, ct: ct);
 
             // Anything already here is already in the list above, and the registry's name for it
             // is usually a longer spelling of the same thing.

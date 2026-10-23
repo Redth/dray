@@ -5,13 +5,20 @@
    The insets are the frame's own margins, handed over by a head whose WebView runs edge to edge
    between the title and the button row (WinDialog). Padding the scroller rather than the WebView is
    what lets the content scroll under the whole width of the dialog, its scrollbar at the dialog's
-   edge, instead of inside a box inset from it. A head that insets the WebView itself sets none. */
+   edge, instead of inside a box inset from it. A head that insets the WebView itself sets none.
+
+   No side is ever less than a focus ring's room. A ring is drawn outside its control — 2px of
+   outline at a 2px offset — and the WebView clips at its own edge, so with no insets (macOS) a
+   control flush against any edge lost that side of its ring: the pull dialog's search field its
+   top and right, the registry picker its left. max() rather than a sum: Windows's margins already
+   have room to spare, and adding to them would shrink its body for nothing. On macOS the body now
+   sits 4px inside the alert's own text column, which is the price of a ring that is whole. */
 .surface {
     height: 100%;
     overflow: auto;
     padding:
-        var(--dialog-inset-top, 0px) var(--dialog-inset-right, 0px)
-        var(--dialog-inset-bottom, 0px) var(--dialog-inset-left, 0px);
+        max(var(--dialog-inset-top, 0px), var(--s1)) max(var(--dialog-inset-right, 0px), var(--s1))
+        max(var(--dialog-inset-bottom, 0px), var(--s1)) max(var(--dialog-inset-left, 0px), var(--s1));
     color: var(--ink);
     font-size: var(--text-base);
 }

@@ -9,15 +9,21 @@
     overflow-y: auto;
 }
 
+/* The id column fits the engine's twelve-character layer ids. At 7ch they ran across the start of
+   their own progress bars. */
 .layers__row {
     display: grid;
-    grid-template-columns: 7ch 1fr 14ch;
+    grid-template-columns: 13ch 1fr 16ch;
     align-items: center;
     gap: var(--s2);
     font-size: var(--text-xs);
 }
 
 .layers__id {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--muted);
 }
 

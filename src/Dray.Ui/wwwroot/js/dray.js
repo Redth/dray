@@ -89,6 +89,39 @@ export const logs = {
   },
 };
 
+export const suggest = {
+  /**
+   * The keys a field with suggestions under it claims, decided as each key is pressed.
+   *
+   * Blazor's preventDefault is per event type rather than per key, and is fixed at the last render,
+   * so it cannot say "Enter, but only now". It matters because a native dialog's default button
+   * listens for the same Return: macOS passes a key the page did not claim up to the sheet, so an
+   * Enter meant to choose a suggestion would also press Pull.
+   *
+   * ↑ and ↓ move through the list whenever there is one. Enter is always the field's — it chooses
+   * the highlighted row, or pulls, and the page does both. Escape is the field's only while a row
+   * is highlighted, to let go of it; otherwise it closes the dialog as it always does.
+   */
+  attach(input) {
+    const onKey = e => {
+      const rows = input.dataset.rows === 'true';
+      const highlighted = input.hasAttribute('aria-activedescendant');
+
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && rows) e.preventDefault();
+      else if (e.key === 'Enter') e.preventDefault();
+      else if (e.key === 'Escape' && highlighted) e.preventDefault();
+    };
+
+    input.addEventListener('keydown', onKey);
+    return { detach: () => input.removeEventListener('keydown', onKey) };
+  },
+
+  /** Keep the highlighted row in view as the keyboard moves through a list taller than its box. */
+  reveal(id) {
+    document.getElementById(id)?.scrollIntoView({ block: 'nearest' });
+  },
+};
+
 export const clipboard = {
   async write(text) {
     try {

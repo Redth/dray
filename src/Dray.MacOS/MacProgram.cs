@@ -80,6 +80,8 @@ public static class MacProgram
         builder.Services.AddScoped<PruneService>();
         builder.Services.AddScoped<StackActionService>();
         builder.Services.AddSingleton<RegistryReader>();
+        // The registry's own API, for what the engine cannot answer: tags, and what each was built for.
+        builder.Services.AddSingleton<RegistryBrowser>();
 
         builder.Services.AddSingleton<MacShellReadySignal>();
         builder.Services.AddSingleton<IShellReadySignal>(sp => sp.GetRequiredService<MacShellReadySignal>());

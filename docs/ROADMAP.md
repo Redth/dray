@@ -338,6 +338,24 @@ service's logs in the aggregated view, fix the compose file, recreate just that 
   an image and pulling it is one thought. The engine does the searching — it already holds the
   registry configuration and the credentials — and the reader handles both engines' response
   shapes, which differ in field names and not merely in case.
+- **Browse and pull by tag**, in the same dialog. One field, read as the CLI reads it: part of a name
+  suggests repositories, a colon lists that repository's tags, and a host typed into it moves into a
+  registry picker that offers Docker Hub, GitHub, Quay, Microsoft and Amazon ECR Public beside every
+  registry the user has signed in to. Each tag shows its platforms with the engine's own first,
+  its download size and its age; a filter, on by default, hides tags with no build for the
+  engine's platform, and the chosen tag says before the download whether it runs here. Tags already
+  on the engine are marked, and marked again when the registry's tag has moved since. Measured
+  against Docker Desktop on Apple silicon: Hub search and tags, GHCR's 4,616 home-assistant tags
+  read in five pages, MCR's 3,899-repository catalog, Quay through the engine's search, and an
+  amd64-only `mssql/server` correctly flagged as having no arm64 build. Tags are read from the
+  registry directly, because the Engine API has no endpoint for them (ARCHITECTURE.md §2.7).
+- **Private images pull.** The engine never reads the credential store — the CLI hands it a
+  credential on every pull — so before this a private image could not be pulled from Dray at all. A
+  refused anonymous pull is now retried once with the helper's credential, and with none stored
+  the refusal says what it probably means and where to sign in. Docker refuses a Hub repository it
+  cannot see before the stream starts, which surfaced as a raw API exception; it is now reported
+  in the stream like every other failure. Pulling by digest works: the digest used to be split on
+  its colon into a repository called `nginx@sha256`.
 - **Notifications** for pull, push, build and every compose command, and only when the window is
   not in front: a notification about something the user is watching is noise. The web head posts
   through the Notification API; the macOS half waits on phase 7's signing, because
