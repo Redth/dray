@@ -53,6 +53,20 @@ public sealed class StackOperation
 
     public bool IsRunning => State == OperationState.Running;
 
+    /// <summary>Each step's command line, as announced — what the history keeps.</summary>
+    public IReadOnlyList<string> Commands
+    {
+        get { lock (_lock) return [.. _commands]; }
+    }
+
+    readonly List<string> _commands = [];
+
+    internal void Announce(string command)
+    {
+        lock (_lock) _commands.Add(command);
+        Add(new ComposeOutput("$ " + command, IsError: false));
+    }
+
     /// <summary>Raised on every line and when the operation ends.</summary>
     public event Action? Changed;
 
@@ -93,8 +107,11 @@ public sealed class StackOperation
 /// rather than queued — a queued down after an up is rarely what someone who clicked twice wanted.
 /// </para>
 /// </summary>
-public sealed class StackOperations(EngineManager engine)
+public sealed class StackOperations(EngineManager engine, StackHistory? history = null)
 {
+    /// <summary>Where finished operations are recorded, when the head keeps a history.</summary>
+    public StackHistory? History => history;
+
     readonly Lock _lock = new();
     readonly Dictionary<(string Host, string Stack), StackOperation> _latest = [];
 
@@ -157,7 +174,7 @@ public sealed class StackOperations(EngineManager engine)
                 // Each step announces itself as the command it is, so the output reads as a
                 // terminal session would — and a failure is visibly the failure of that command.
                 var shown = await engine.DescribeComposeAsync(stack, step, operation.Token).ConfigureAwait(false);
-                operation.Add(new ComposeOutput("$ " + (shown ?? string.Join(' ', step)), IsError: false));
+                operation.Announce(shown ?? string.Join(' ', step));
 
                 exitCode = null;
 
@@ -187,6 +204,10 @@ public sealed class StackOperations(EngineManager engine)
         }
 
         operation.Finish(state, exitCode);
+
+        history?.Add(new OperationRecord(
+            operation.Host, operation.Stack, operation.Label, operation.Commands,
+            operation.StartedAt, operation.FinishedAt ?? DateTimeOffset.Now, state, exitCode));
 
         if (finished is not null)
         {

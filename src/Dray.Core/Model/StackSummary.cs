@@ -174,6 +174,18 @@ public sealed record StackSummary
     public StackProvenance Provenance { get; init; } = StackProvenance.Observed;
 
     /// <summary>
+    /// What the files declare about each service, where the files are readable here: whether it
+    /// builds, and which profiles it is in. Empty for a stack known only by its labels.
+    /// </summary>
+    public IReadOnlyDictionary<string, ComposeServiceEntry> Declared { get; init; } = new Dictionary<string, ComposeServiceEntry>();
+
+    /// <summary>Every profile any service is in, in the order the files first mention them.</summary>
+    public IReadOnlyList<string> Profiles => [.. Declared.Values.SelectMany(d => d.Profiles).Distinct(StringComparer.Ordinal)];
+
+    /// <summary>Whether any service has a <c>build:</c> section.</summary>
+    public bool Builds => Declared.Values.Any(d => d.Builds);
+
+    /// <summary>
     /// Whether this host has ever had containers for the stack. Tells Down from Draft: both have no
     /// containers, and only one of them has ever run.
     /// </summary>

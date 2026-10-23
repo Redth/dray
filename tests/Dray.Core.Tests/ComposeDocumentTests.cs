@@ -102,6 +102,16 @@ public class ComposeDocumentTests
         => Assert.Null(ComposeDocument.Parse("services:\n  web: {}\n").Locate(["volumes", "data"]));
 
     [Fact]
+    public void BuildsAndProfilesAreRead()
+    {
+        var services = ComposeDocument.Parse("services:\n  api:\n    build: .\n  tools:\n    image: alpine\n    profiles: [debug, ops]\n").Services;
+
+        Assert.True(services[0].Builds);
+        Assert.Empty(services[0].Profiles);
+        Assert.Equal(["debug", "ops"], services[1].Profiles);
+    }
+
+    [Fact]
     public void NothingAtAllIsEmpty()
     {
         Assert.Same(ComposeDocument.Empty, ComposeDocument.Parse(null));

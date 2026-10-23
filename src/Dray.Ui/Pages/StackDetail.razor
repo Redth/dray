@@ -96,6 +96,28 @@
                             </div>
                         }
 
+                        @if (current.Profiles.Count > 0 && current.Provenance != StackProvenance.Observed)
+                        {
+                            @* Profiles are the stack's, in its .env, so a terminal sees the same
+                               ones. Each chip is a toggle with its state in the word and the check,
+                               not only its tint. *@
+                            <div class="stack__profiles" role="group" aria-label="Profiles">
+                                <span class="field__label">Profiles</span>
+                                @foreach (var profile in current.Profiles)
+                                {
+                                    var captured = profile;
+                                    var on = _activeProfiles.Contains(profile);
+
+                                    <button type="button" class="stack__profile @(on ? "is-on" : null)" aria-pressed="@(on.ToString().ToLowerInvariant())"
+                                            title="@(on ? $"Turn {profile} off" : $"Turn {profile} on")" @onclick="() => ToggleProfileAsync(captured)">
+                                        <Icon Name="@(on ? IconRef.Check : IconRef.Plus)" Size="IconSize.Sm" />
+                                        @profile
+                                    </button>
+                                }
+                                <span class="muted stack__profiles-note">Saved as COMPOSE_PROFILES in .env</span>
+                            </div>
+                        }
+
                         @if (DriftSummary is { } drifted)
                         {
                             <div class="note stack__drift" role="status">
@@ -127,6 +149,11 @@
                                                 @if (DriftPill(service.Name) is { } drift)
                                                 {
                                                     <StatePill Status="drift" />
+                                                }
+
+                                                @if (current.Declared.GetValueOrDefault(service.Name)?.Profiles is { Count: > 0 } profiles)
+                                                {
+                                                    <span class="muted stack__inprofile">in @string.Join(", ", profiles)</span>
                                                 }
                                             </td>
                                             <td><StatePill Status="service.Status" /></td>
@@ -240,7 +267,69 @@
 
     /// <summary>What Deploy would change per service, or null when unknown. See <see cref="StackDrift"/>.</summary>
     IReadOnlyDictionary<string, ServiceDrift>? _drift;
+    IReadOnlyDictionary<string, IReadOnlyList<string>> _changedFiles = new Dictionary<string, IReadOnlyList<string>>();
     CancellationTokenSource? _driftCts;
+
+    /// <summary>The profiles <c>COMPOSE_PROFILES</c> in the stack's .env turns on.</summary>
+    HashSet<string> _activeProfiles = new(StringComparer.Ordinal);
+
+    string? EnvPath => WorkingDirectory is { } dir ? System.IO.Path.Combine(dir, DotEnvFile.FileName) : null;
+
+    void ReadProfiles()
+    {
+        _activeProfiles = new(StringComparer.Ordinal);
+
+        try
+        {
+            if (EnvPath is { } path && System.IO.File.Exists(path)
+                && DotEnvFile.Parse(System.IO.File.ReadAllText(path)).LastOrDefault(v => v.Key == "COMPOSE_PROFILES") is { } profiles)
+            {
+                foreach (var name in profiles.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    _activeProfiles.Add(name);
+            }
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Turn a profile on or off by writing <c>COMPOSE_PROFILES</c> into the stack's .env.
+    /// <para>
+    /// The .env rather than a setting of Dray's: compose reads it for every command, including the
+    /// ones typed in a terminal, so the profiles are the stack's and not Dray's view of it.
+    /// Measured: compose honours it with <c>-f</c> given and from any directory. One line of the
+    /// file changes; its comments and every other variable are left alone.
+    /// </para>
+    /// </summary>
+    async Task ToggleProfileAsync(string profile)
+    {
+        if (EnvPath is not { } path) return;
+
+        var on = !_activeProfiles.Contains(profile);
+        var next = new HashSet<string>(_activeProfiles, StringComparer.Ordinal);
+        if (on) next.Add(profile); else next.Remove(profile);
+
+        try
+        {
+            var text = System.IO.File.Exists(path) ? await System.IO.File.ReadAllTextAsync(path) : "";
+            var ordered = Stack?.Profiles.Where(next.Contains).ToList() ?? [.. next];
+
+            await System.IO.File.WriteAllTextAsync(path, DotEnvFile.Set(text, "COMPOSE_PROFILES", ordered.Count == 0 ? null : string.Join(',', ordered)));
+
+            _notice = on
+                ? $"{profile} is on. Deploy brings up its services; compose in a terminal sees it too."
+                : $"{profile} is off. Its running services keep running until the next Deploy removes them.";
+            _noticeOk = true;
+        }
+        catch (Exception ex)
+        {
+            _notice = $"Could not write {DotEnvFile.FileName}: {ex.Message}";
+            _noticeOk = false;
+        }
+
+        await RefreshDriftAsync();
+    }
 
     string StackName => Uri.UnescapeDataString(Name);
 
@@ -379,10 +468,12 @@
 
         try
         {
-            var drift = await Engine.DriftAsync(stack, cts.Token);
+            var changes = await Actions.ChangesAsync(stack, cts.Token);
             if (cts.IsCancellationRequested) return;
 
-            _drift = drift;
+            _drift = changes?.Drift;
+            _changedFiles = changes?.ChangedFiles ?? new Dictionary<string, IReadOnlyList<string>>();
+            ReadProfiles();
             await InvokeAsync(StateHasChanged);
         }
         catch (OperationCanceledException)
@@ -403,6 +494,9 @@
 
             var parts = new List<string>();
             if (changed.Count > 0) parts.Add($"recreate {string.Join(", ", changed)}");
+
+            foreach (var (service, files) in _changedFiles.OrderBy(c => c.Key, StringComparer.Ordinal))
+                parts.Add($"recreate {service}, whose {string.Join(", ", files)} changed");
             if (created.Count > 0) parts.Add($"create {string.Join(", ", created)}");
             if (removed.Count > 0) parts.Add($"remove {string.Join(", ", removed)}");
 
@@ -414,6 +508,7 @@
     ContainerStatus? DriftPill(string service) => _drift?.GetValueOrDefault(service) switch
     {
         ServiceDrift.Changed => new ContainerStatus(StateTone.Warn, "✎", "Edited", "not deployed"),
+        ServiceDrift.FileChanged => new ContainerStatus(StateTone.Warn, "✎", "File changed", string.Join(", ", _changedFiles.GetValueOrDefault(service) ?? [])),
         ServiceDrift.NotCreated when Stack is { IsDown: false } => new ContainerStatus(StateTone.Neutral, "+", "Not created"),
         ServiceDrift.Removed => new ContainerStatus(StateTone.Neutral, "−", "Not in the file"),
         _ => null,

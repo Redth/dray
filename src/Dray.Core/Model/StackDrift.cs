@@ -17,6 +17,12 @@ public enum ServiceDrift
 
     /// <summary>The engine reported no hash for it, so there is nothing honest to compare.</summary>
     Unknown,
+
+    /// <summary>
+    /// Compose sees no change, but a file the service mounts was edited since Dray deployed it —
+    /// compose's hash does not cover mounted files. Deploy recreates these explicitly.
+    /// </summary>
+    FileChanged,
 }
 
 /// <summary>
@@ -61,6 +67,17 @@ public static class StackDrift
 
         return drift;
     }
+
+    /// <summary>
+    /// Mark the services compose calls unchanged whose mounted files changed — compose's verdict
+    /// first, Dray's addition only where compose had nothing to say.
+    /// </summary>
+    public static IReadOnlyDictionary<string, ServiceDrift> WithMounts(
+        IReadOnlyDictionary<string, ServiceDrift> drift, IReadOnlyDictionary<string, IReadOnlyList<string>> changedFiles)
+        => drift.ToDictionary(
+            d => d.Key,
+            d => d.Value == ServiceDrift.Unchanged && changedFiles.ContainsKey(d.Key) ? ServiceDrift.FileChanged : d.Value,
+            StringComparer.Ordinal);
 
     /// <summary>Read <c>compose config --hash</c> output: one <c>service hash</c> per line.</summary>
     public static IReadOnlyDictionary<string, string> ParseHashes(string? output)

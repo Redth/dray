@@ -27,8 +27,15 @@ public sealed record YamlSyntaxError(string Message, YamlRange Range);
 /// <param name="Key">Where the service's name is written, for pointing at it.</param>
 /// <param name="DependsOn">Direct <c>depends_on</c> edges, in either of compose's two forms.</param>
 /// <param name="DeclaresWatch">Whether it has a <c>develop.watch</c> block.</param>
+/// <param name="Builds">It has a <c>build:</c> section — Build has something to do for it.</param>
+/// <param name="Profiles">The profiles it belongs to; empty when it always runs.</param>
 public sealed record ComposeServiceEntry(
-    string Name, YamlRange Key, IReadOnlyList<string> DependsOn, bool DeclaresWatch);
+    string Name, YamlRange Key, IReadOnlyList<string> DependsOn, bool DeclaresWatch)
+{
+    public bool Builds { get; init; }
+
+    public IReadOnlyList<string> Profiles { get; init; } = [];
+}
 
 /// <summary>Where a path into the file landed.</summary>
 /// <param name="Exact">
@@ -251,7 +258,13 @@ public sealed class ComposeDocument
                 name,
                 YamlRange.Of(key),
                 body is null ? [] : DependsOn(body),
-                body is not null && Child(body, "develop") is YamlMappingNode develop && Child(develop, "watch") is not null and not YamlScalarNode { Value: null or "" }));
+                body is not null && Child(body, "develop") is YamlMappingNode develop && Child(develop, "watch") is not null and not YamlScalarNode { Value: null or "" })
+            {
+                Builds = body is not null && Child(body, "build") is not null,
+                Profiles = body is not null && Child(body, "profiles") is YamlSequenceNode profiles
+                    ? [.. profiles.Children.OfType<YamlScalarNode>().Select(p => p.Value).OfType<string>()]
+                    : [],
+            });
         }
 
         return services;

@@ -17,7 +17,15 @@ public sealed class DeployRequest(Func<DeployOptions, Task<string?>> describe)
 
     /// <summary>Per service, what the files say compared with what is running. Null when unknown.</summary>
     public IReadOnlyDictionary<string, ServiceDrift>? Drift { get; init; }
+
+    /// <summary>Per service, the mounted files edited since Dray last deployed it.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> ChangedFiles { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
 }
+
+/// <summary>What Deploy would change, with Dray's addition: files compose's hash does not cover.</summary>
+public sealed record StackChanges(
+    IReadOnlyDictionary<string, ServiceDrift> Drift,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> ChangedFiles);
 
 /// <summary>
 /// What can be done to a stack and to its services, and doing it.
@@ -90,6 +98,10 @@ public sealed class StackActionService(
         }
 
         if (files) actions.Add(update);
+
+        if (files && stack.Builds)
+            actions.Add(new RowAction("build", $"Build {name}", IconRef.Build, "Build the images for services with a build: section", Disabled: busy));
+
         if (up) actions.AddRange([down, downVolumes]);
 
         if (stack.Provenance == StackProvenance.Adopted) actions.Add(forget);
@@ -126,6 +138,9 @@ public sealed class StackActionService(
         {
             actions.Add(new RowAction("recreate", $"Recreate {service.Name}", IconRef.Refresh, "Recreate from its configuration, without touching what it depends on", Disabled: busy));
             actions.Add(new RowAction("update", $"Pull and update {service.Name}", IconRef.Pull, "Pull its image, then recreate it if it is running", Disabled: busy));
+
+            if (stack.Declared.GetValueOrDefault(service.Name)?.Builds == true)
+                actions.Add(new RowAction("build", $"Build {service.Name}", IconRef.Build, "Build this service's image from its build: section", Disabled: busy));
         }
 
         return actions;
@@ -154,7 +169,10 @@ public sealed class StackActionService(
                 return Start(stack, "Restart", StackCommands.For(StackVerb.Restart, stack));
 
             case "update":
-                return Start(stack, "Pull and update", StackCommands.For(StackVerb.Update, stack));
+                return Start(stack, "Pull and update", StackCommands.For(StackVerb.Update, stack), RecordMounts(stack));
+
+            case "build":
+                return Start(stack, "Build", StackCommands.For(StackVerb.Build, stack));
 
             case "down":
             {
@@ -192,6 +210,7 @@ public sealed class StackActionService(
     {
         var verb = action switch
         {
+            "build" => StackVerb.Build,
             "start" => StackVerb.Start,
             "stop" => StackVerb.Stop,
             "restart" => StackVerb.Restart,
@@ -208,8 +227,36 @@ public sealed class StackActionService(
             _ => $"{char.ToUpperInvariant(action[0])}{action[1..]} {service.Name}",
         };
 
-        return Start(stack, label, StackCommands.For(chosen, stack, service: service.Name));
+        var recreates = chosen is StackVerb.Recreate or StackVerb.Update;
+        return Start(stack, label, StackCommands.For(chosen, stack, service: service.Name), recreates ? RecordMounts(stack, service.Name) : null);
     }
+
+    /// <summary>
+    /// What Deploy would change: compose's own drift, and the services whose mounted files were
+    /// edited since Dray last deployed them, which compose's hash does not cover.
+    /// </summary>
+    public async Task<StackChanges?> ChangesAsync(StackSummary stack, CancellationToken ct = default)
+    {
+        if (await engine.DriftAsync(stack, ct) is not { } drift) return null;
+
+        var changed = engine.Selected is { } host && operations.History is { } history
+            ? StackMounts.Changed(StackMounts.Snapshot(stack.ConfigFiles, stack.WorkingDirectory), history.MountsAtDeploy(host.Id, stack.Name))
+            : new Dictionary<string, IReadOnlyList<string>>();
+
+        return new StackChanges(StackDrift.WithMounts(drift, changed), changed);
+    }
+
+    /// <summary>
+    /// After a run that brought containers up, remember what their mounted files were — the
+    /// baseline the next "edited since deploy" is measured from.
+    /// </summary>
+    Func<StackOperation, Task> RecordMounts(StackSummary stack, string? service = null) => operation =>
+    {
+        if (operation.State == OperationState.Succeeded && operations.History is { } history)
+            history.RecordMounts(operation.Host, stack.Name, StackMounts.Snapshot(stack.ConfigFiles, stack.WorkingDirectory), service);
+
+        return Task.CompletedTask;
+    };
 
     /// <summary>
     /// Deploy, after compose has looked at the files.
@@ -241,12 +288,13 @@ public sealed class StackActionService(
             return null;
         }
 
-        var drift = await engine.DriftAsync(stack);
+        var changes = await ChangesAsync(stack);
 
         var request = new DeployRequest(options => engine.DescribeComposeAsync(stack, StackCommands.For(StackVerb.Deploy, stack, options)[0]))
         {
             Warnings = [.. config.Problems.Where(p => p.Severity == ProblemSeverity.Warning)],
-            Drift = drift,
+            Drift = changes?.Drift,
+            ChangedFiles = changes?.ChangedFiles ?? new Dictionary<string, IReadOnlyList<string>>(),
         };
 
         var choice = await shell.ShowDialogAsync(new DialogRequest(
@@ -261,7 +309,14 @@ public sealed class StackActionService(
         // Deploying a stack is asking Dray to track it, whatever it was told before.
         if (engine.Selected is { } selected) engine.Catalog?.Registry.Unforget(selected.Id, stack.Name);
 
-        return Start(stack, "Deploy", StackCommands.For(StackVerb.Deploy, stack, request.Options));
+        var steps = StackCommands.For(StackVerb.Deploy, stack, request.Options).ToList();
+
+        // Compose would leave these running the old file; recreating them is what "only what
+        // changed" means once a mounted file counts as a change.
+        if (!request.Options.ForceRecreate && request.ChangedFiles.Count > 0)
+            steps.Add(["up", "-d", "--no-deps", "--force-recreate", .. request.ChangedFiles.Keys.Order(StringComparer.Ordinal)]);
+
+        return Start(stack, "Deploy", steps, RecordMounts(stack));
     }
 
     async Task<string?> DownWithVolumesAsync(StackSummary stack)

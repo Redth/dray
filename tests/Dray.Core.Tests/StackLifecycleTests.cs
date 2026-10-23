@@ -78,7 +78,11 @@ public class StackCommandsTests
 
 public class StackCatalogTests
 {
-    static readonly Func<IReadOnlyList<string>, IReadOnlyList<string>> Declares = _ => ["web", "worker"];
+    static readonly Func<IReadOnlyList<string>, IReadOnlyList<ComposeServiceEntry>> Declares = _ =>
+    [
+        new ComposeServiceEntry("web", new YamlRange(1, 1, 1, 2), [], false),
+        new ComposeServiceEntry("worker", new YamlRange(1, 1, 1, 2), [], false) { Builds = true, Profiles = ["jobs"] },
+    ];
 
     static StackSummary Observed(string name, string? file = null, DockerState state = DockerState.Running) => StackDiscovery.From(
     [
@@ -100,6 +104,10 @@ public class StackCatalogTests
         Assert.Equal(StackState.Down, stack.State);
         Assert.Equal(StackProvenance.Managed, stack.Provenance);
         Assert.Equal(["web", "worker"], stack.Services.Select(s => s.Name));
+
+        // What the files say about each service travels with the stack.
+        Assert.True(stack.Builds);
+        Assert.Equal(["jobs"], stack.Profiles);
     }
 
     [Fact]
@@ -289,19 +297,22 @@ public class StackOperationsTests
     [Fact]
     public async Task OneOperationAtATimePerStack()
     {
-        var (manager, _) = await ManagerAsync();
+        var (manager, runner) = await ManagerAsync();
         await using var __ = manager;
         var operations = new StackOperations(manager);
 
-        var gate = new TaskCompletionSource();
-        var first = operations.Start(new StackSummary { Name = "web" }, "Deploy", [["up", "-d"]], _ => gate.Task);
+        // The fake's compose does not exit until released: the first deploy is genuinely in flight.
+        var release = new TaskCompletionSource();
+        runner.Hold = release.Task;
+
+        var first = operations.Start(new StackSummary { Name = "web" }, "Deploy", [["up", "-d"]]);
 
         // Refused while the first is in flight; another stack is not affected.
         Assert.Null(operations.Start(new StackSummary { Name = "web" }, "Down", [["down"]]));
         Assert.NotNull(operations.Start(new StackSummary { Name = "api" }, "Down", [["down"]]));
 
+        release.SetResult();
         await Finished(first!);
-        gate.SetResult();
         Assert.Same(first, operations.For("web"));
     }
 }
@@ -358,4 +369,65 @@ public class StackDriftTests
     [Fact]
     public void WarningsAndBlankLinesAreNotServices()
         => Assert.Equal(["web"], StackDrift.ParseHashes("\nweb bf6121f23746cbb8aa6e190dbdd370ed3928bc89066e458132ea9a62bcbc8edd\nWARN something odd\n").Keys);
+}
+
+public sealed class StackHistoryTests : IDisposable
+{
+    readonly string _dir = Directory.CreateTempSubdirectory("dray-history-").FullName;
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
+    static OperationRecord Op(string stack, int minute, OperationState state = OperationState.Succeeded)
+        => new("h", stack, "Deploy", ["docker compose -p " + stack + " up -d"], DateTimeOffset.UnixEpoch.AddMinutes(minute), DateTimeOffset.UnixEpoch.AddMinutes(minute + 1), state, 0);
+
+    [Fact]
+    public void HistorySurvivesARestartNewestFirst()
+    {
+        var path = Path.Combine(_dir, "history.json");
+        var history = new StackHistory(path);
+        history.Add(Op("web", 1));
+        history.Add(Op("web", 2, OperationState.Failed));
+        history.Add(Op("api", 3));
+
+        var reopened = new StackHistory(path).For("h", "web");
+
+        Assert.Equal([OperationState.Failed, OperationState.Succeeded], reopened.Select(r => r.State));
+        Assert.Equal(TimeSpan.FromMinutes(1), reopened[0].Duration);
+    }
+
+    [Fact]
+    public void OnlyTheLatestAreKeptPerStack()
+    {
+        var history = new StackHistory(Path.Combine(_dir, "history.json"));
+        for (var i = 0; i < StackHistory.Kept + 5; i++) history.Add(Op("web", i));
+        history.Add(Op("api", 0));
+
+        Assert.Equal(StackHistory.Kept, history.For("h", "web").Count);
+        Assert.Single(history.For("h", "api"));
+    }
+
+    [Fact]
+    public void AMountedFileEditIsTheOneThingComposeCannotSee()
+    {
+        var stack = Path.Combine(_dir, "web");
+        Directory.CreateDirectory(Path.Combine(stack, "conf"));
+        File.WriteAllText(Path.Combine(stack, "conf", "nginx.conf"), "worker_processes 1;");
+        File.WriteAllText(Path.Combine(stack, "compose.yaml"),
+            "services:\n  web:\n    image: nginx:1\n    volumes:\n      - ./conf/nginx.conf:/etc/nginx/nginx.conf:ro\n      - ./data:/data\n      - cache:/cache\n");
+        Directory.CreateDirectory(Path.Combine(stack, "data"));
+
+        var files = new[] { Path.Combine(stack, "compose.yaml") };
+        var deployed = StackMounts.Snapshot(files, stack);
+
+        // One file hashed: not the directory, not the named volume.
+        Assert.Equal(["nginx.conf"], deployed.Services["web"].Keys.Select(Path.GetFileName));
+        Assert.Empty(StackMounts.Changed(StackMounts.Snapshot(files, stack), deployed));
+
+        File.WriteAllText(Path.Combine(stack, "conf", "nginx.conf"), "worker_processes 4;");
+
+        Assert.Equal(["nginx.conf"], StackMounts.Changed(StackMounts.Snapshot(files, stack), deployed)["web"]);
+
+        // Never deployed by Dray: nothing to compare with, so nothing is claimed.
+        Assert.Empty(StackMounts.Changed(StackMounts.Snapshot(files, stack), null));
+    }
 }

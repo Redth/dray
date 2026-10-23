@@ -36,6 +36,7 @@ builder.Services.AddSingleton<IContainerRuntimeFactory>(
 builder.Services.AddSingleton(new StackRegistry(Path.Combine(DrayPaths.ConfigDirectory, "stacks.json")));
 builder.Services.AddSingleton<StackCatalog>();
 builder.Services.AddSingleton<EngineManager>();
+builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
 builder.Services.AddSingleton<StackOperations>();
 // Scoped: it holds one live stream per watched container and must go away with the view
 // that asked for them.

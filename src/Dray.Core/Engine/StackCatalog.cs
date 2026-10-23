@@ -21,7 +21,7 @@ namespace Dray.Core.Engine;
 public sealed class StackCatalog : IDisposable
 {
     readonly Lock _lock = new();
-    readonly Dictionary<string, (DateTime Written, IReadOnlyList<string> Services)> _declared = [];
+    readonly Dictionary<string, (DateTime Written, IReadOnlyList<ComposeServiceEntry> Services)> _declared = [];
     readonly List<FileSystemWatcher> _watchers = [];
 
     IReadOnlyList<StackDefinition> _definitions = [];
@@ -115,7 +115,7 @@ public sealed class StackCatalog : IDisposable
         IReadOnlyList<StackDefinition> definitions,
         IReadOnlyList<StackRecord> known,
         string? stacksFolder,
-        Func<IReadOnlyList<string>, IReadOnlyList<string>> declaredServices,
+        Func<IReadOnlyList<string>, IReadOnlyList<ComposeServiceEntry>> declaredServices,
         Func<string, bool> exists)
     {
         var stacks = new Dictionary<string, StackSummary>(StringComparer.Ordinal);
@@ -128,24 +128,30 @@ public sealed class StackCatalog : IDisposable
             return IsUnder(folder, stacksFolder) ? StackProvenance.Managed : StackProvenance.Adopted;
         }
 
-        IReadOnlyList<StackService> WithDeclared(IReadOnlyList<StackService> services, IReadOnlyList<string> files, StackProvenance provenance)
+        IReadOnlyList<StackService> WithDeclared(IReadOnlyList<StackService> services, IReadOnlyList<ComposeServiceEntry> declared)
         {
-            if (provenance == StackProvenance.Observed) return services;
-
             var present = services.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
-            var missing = declaredServices(files).Where(n => !present.Contains(n)).Select(n => new StackService(n, []));
+            var missing = declared.Where(d => !present.Contains(d.Name)).Select(d => new StackService(d.Name, []));
 
             return [.. services.Concat(missing).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)];
         }
 
+        IReadOnlyList<ComposeServiceEntry> Declared(IReadOnlyList<string> files, StackProvenance provenance)
+            => provenance == StackProvenance.Observed ? [] : declaredServices(files);
+
+        static Dictionary<string, ComposeServiceEntry> Map(IReadOnlyList<ComposeServiceEntry> declared)
+            => declared.GroupBy(d => d.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
+
         foreach (var stack in observed)
         {
             var provenance = ProvenanceOf(stack.WorkingDirectory, stack.ConfigFiles);
+            var declared = Declared(stack.ConfigFiles, provenance);
 
             stacks[stack.Name] = stack with
             {
                 Provenance = provenance,
-                Services = WithDeclared(stack.Services, stack.ConfigFiles, provenance),
+                Services = WithDeclared(stack.Services, declared),
+                Declared = Map(declared),
             };
         }
 
@@ -154,6 +160,7 @@ public sealed class StackCatalog : IDisposable
             if (stacks.ContainsKey(definition.Project)) continue;
 
             var provenance = ProvenanceOf(definition.WorkingDirectory, definition.Files);
+            var declared = Declared(definition.Files, provenance);
 
             stacks[definition.Project] = new StackSummary
             {
@@ -162,7 +169,8 @@ public sealed class StackCatalog : IDisposable
                 WorkingDirectory = definition.WorkingDirectory,
                 Provenance = provenance,
                 WasDeployed = known.Any(k => k.Project == definition.Project),
-                Services = WithDeclared([], definition.Files, provenance),
+                Services = WithDeclared([], declared),
+                Declared = Map(declared),
             };
         }
 
@@ -171,6 +179,7 @@ public sealed class StackCatalog : IDisposable
             if (stacks.ContainsKey(record.Project)) continue;
 
             var provenance = ProvenanceOf(record.WorkingDirectory, record.Files);
+            var declared = Declared(record.Files, provenance);
 
             stacks[record.Project] = new StackSummary
             {
@@ -179,7 +188,8 @@ public sealed class StackCatalog : IDisposable
                 WorkingDirectory = record.WorkingDirectory,
                 Provenance = provenance,
                 WasDeployed = true,
-                Services = WithDeclared([], record.Files, provenance),
+                Services = WithDeclared([], declared),
+                Declared = Map(declared),
             };
         }
 
@@ -199,34 +209,44 @@ public sealed class StackCatalog : IDisposable
         return Path.GetFullPath(path).StartsWith(root, comparison);
     }
 
-    /// <summary>The services a stack's files declare, union of every file, read once per edit of each.</summary>
-    IReadOnlyList<string> DeclaredServices(IReadOnlyList<string> files)
+    /// <summary>
+    /// The services a stack's files declare, across every file, read once per edit of each. A
+    /// service named in two files — the base and its override — is the later file's entry, as
+    /// compose merges it, so a profile or a build added in an override is not lost.
+    /// </summary>
+    IReadOnlyList<ComposeServiceEntry> DeclaredServices(IReadOnlyList<string> files)
     {
-        var names = new List<string>();
+        var services = new List<ComposeServiceEntry>();
 
         foreach (var file in files)
         {
             try
             {
                 var written = File.GetLastWriteTimeUtc(file);
-                IReadOnlyList<string> services;
+                IReadOnlyList<ComposeServiceEntry> entries;
 
                 lock (_lock)
                 {
                     if (_declared.TryGetValue(file, out var cached) && cached.Written == written)
                     {
-                        services = cached.Services;
+                        entries = cached.Services;
                     }
                     else
                     {
-                        services = [.. ComposeDocument.Parse(File.ReadAllText(file)).Services.Select(s => s.Name)];
-                        _declared[file] = (written, services);
+                        entries = ComposeDocument.Parse(File.ReadAllText(file)).Services;
+                        _declared[file] = (written, entries);
                     }
                 }
 
-                foreach (var name in services)
+                foreach (var entry in entries)
                 {
-                    if (!names.Contains(name, StringComparer.Ordinal)) names.Add(name);
+                    var existing = services.FindIndex(s => s.Name == entry.Name);
+                    if (existing < 0) services.Add(entry);
+                    else services[existing] = services[existing] with
+                    {
+                        Builds = services[existing].Builds || entry.Builds,
+                        Profiles = entry.Profiles.Count > 0 ? entry.Profiles : services[existing].Profiles,
+                    };
                 }
             }
             catch (IOException)
@@ -234,7 +254,7 @@ public sealed class StackCatalog : IDisposable
             }
         }
 
-        return names;
+        return services;
     }
 
     // ---------------------------------------------------------------- folders

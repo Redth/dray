@@ -733,8 +733,9 @@ and all. **All three exit criteria met.**
 - **The first-use question** is a card on the Stacks page with `~/Stacks` suggested, not a folder
   created unasked.
 
-Not done here: a Build action outside the Deploy dialog's option, and the Windows head. A
-`DRAY_CONFIG_DIR` override keeps development runs out of the installed app's registry.
+A **Build** action appears for any stack or service with a `build:` section. Not done here: the
+Windows head, which does not exist yet. A `DRAY_CONFIG_DIR` override keeps development runs out of
+the installed app's registry.
 
 ### 10.2 — Authoring
 
@@ -781,8 +782,14 @@ three exit criteria met.**
   socket mounted, a relative path on a remote engine. Advice, labelled as Dray's, never part of
   compose's verdict.
 
-Not done: a profile picker, and the hash of bind-mounted config files, which compose's own hash
-does not cover — an edited `nginx.conf` still needs "Recreate everything".
+- **Profiles** are chips on the stack's page that write `COMPOSE_PROFILES` into its `.env` — one
+  line, comments kept — because compose reads that for every command, a terminal's included.
+  Measured: honoured with `-f` given and from any directory.
+- **An edited mounted file is a change.** Compose's hash does not cover files a service binds in,
+  so Dray keeps SHA-256 digests of them at each deploy it runs (`history.json`, digests only) and
+  marks a service whose `nginx.conf` moved as "File changed". Deploy then adds
+  `up -d --no-deps --force-recreate` for exactly those services — verified: the edit is picked up,
+  and the drift clears.
 
 ### 10.3 — Inspect and operate
 

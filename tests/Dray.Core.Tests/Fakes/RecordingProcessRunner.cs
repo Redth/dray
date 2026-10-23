@@ -27,6 +27,9 @@ public sealed class RecordingProcessRunner : IProcessRunner
 
     public int ExitCode { get; set; }
 
+    /// <summary>When set, streams wait for it before reporting their exit — a run that is still running.</summary>
+    public Task? Hold { get; set; }
+
     public RecordingProcessRunner Returns(string match, string stdout, int exitCode = 0)
     {
         _responses.Add((match, new ProcessResult(exitCode, stdout, string.Empty)));
@@ -84,6 +87,8 @@ public sealed class RecordingProcessRunner : IProcessRunner
             await Task.Yield();
             yield return line;
         }
+
+        if (Hold is { } hold) await hold.WaitAsync(ct);
 
         yield return ComposeOutput.Exited(ExitCode);
     }
