@@ -172,9 +172,14 @@ public static class StackServiceGrid
 
             // One replica links straight to it; several is a count, because there is no single
             // container for the link to mean.
-            ["containers"] = service.Replicas.Count == 1
-                ? new GridLink(service.Replicas[0].Name, $"/containers/{service.Replicas[0].ShortId}")
-                : new GridLink($"{service.RunningCount} of {service.Replicas.Count} running", "/containers"),
+            // None is said rather than linked: a service declared in the file and never started,
+            // or scaled to zero, has no container for a link to go to.
+            ["containers"] = service.Replicas.Count switch
+            {
+                0 => "No container",
+                1 => new GridLink(service.Replicas[0].Name, $"/containers/{service.Replicas[0].ShortId}"),
+                _ => (object)new GridLink($"{service.RunningCount} of {service.Replicas.Count} running", "/containers"),
+            },
 
             ["image"] = service.Replicas.FirstOrDefault() is { } replica
                 ? $"{Humanize.ImageName(replica.Image)}:{Humanize.ImageTag(replica.Image)}"

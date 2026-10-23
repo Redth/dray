@@ -1,0 +1,90 @@
+@* The body of the Deploy dialog: how to deploy, and the exact command that will run.
+
+   The command is shown, not described. "Recreate all" means something specific, and the flags are
+   that meaning — seeing `--force-recreate` before pressing Deploy is how someone learns what the
+   preset does, and copying it is how they run the same thing from a terminal later. Dockhand's
+   best idea, kept honest by the same builder producing both the preview and the run. *@
+@inject IShellBridge Shell
+
+<div class="deploy">
+    <div class="deploy__presets" role="radiogroup" aria-label="How to deploy">
+        @foreach (var (preset, title, body) in Presets)
+        {
+            var captured = preset;
+            var selected = Request.Options == preset;
+
+            <button type="button" role="radio" aria-checked="@(selected.ToString().ToLowerInvariant())"
+                    class="deploy__preset @(selected ? "is-selected" : null)" @onclick="() => ChooseAsync(captured)">
+                <span class="deploy__mark" aria-hidden="true">
+                    <Icon Name="@(selected ? IconRef.Check : IconRef.ChevronRight)" Size="IconSize.Sm" />
+                </span>
+                <span class="deploy__title">@title</span>
+                <span class="deploy__body muted">@body</span>
+            </button>
+        }
+    </div>
+
+    <fieldset class="deploy__options">
+        <legend class="field__label">Options</legend>
+
+        <label class="deploy__toggle">
+            <input type="checkbox" checked="@Request.Options.Pull" @onchange="e => SetAsync(o => o with { Pull = (bool)e.Value! })" />
+            <span>Pull images first <span class="muted">— picks up a tag that has moved</span></span>
+        </label>
+
+        <label class="deploy__toggle">
+            <input type="checkbox" checked="@Request.Options.Build" @onchange="e => SetAsync(o => o with { Build = (bool)e.Value! })" />
+            <span>Rebuild services that build <span class="muted">— for a <code class="mono">build:</code> section</span></span>
+        </label>
+
+        <label class="deploy__toggle">
+            <input type="checkbox" checked="@Request.Options.ForceRecreate" @onchange="e => SetAsync(o => o with { ForceRecreate = (bool)e.Value! })" />
+            <span>Recreate every container <span class="muted">— even ones compose sees no change in</span></span>
+        </label>
+
+        <label class="deploy__toggle">
+            <input type="checkbox" checked="@Request.Options.RemoveOrphans" @onchange="e => SetAsync(o => o with { RemoveOrphans = (bool)e.Value! })" />
+            <span>Remove containers for services no longer in the file</span>
+        </label>
+    </fieldset>
+
+    <div class="field">
+        <span class="field__label">Command</span>
+
+        <div class="deploy__command">
+            <code class="mono deploy__text">@(_command ?? "…")</code>
+            <Button Label="Copy command" Icon="IconRef.Copy" IconOnly="true" Variant="ButtonVariant.Ghost"
+                    Disabled="@(_command is null)" OnClick="() => Shell.WriteClipboardAsync(_command!)" />
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>The choices, read back by whoever opened the dialog once Deploy is pressed.</summary>
+    [Parameter, EditorRequired] public DeployRequest Request { get; set; } = default!;
+
+    static readonly (DeployOptions Preset, string Title, string Body)[] Presets =
+    [
+        (DeployOptions.OnlyChanged, "Only what changed", "Create what is missing, recreate what was edited, leave the rest running."),
+        (DeployOptions.PullAndApply, "Pull, then apply", "Fetch newer images first; containers whose image moved are recreated."),
+        (DeployOptions.RecreateAll, "Recreate everything", "Every container replaced — for a change compose cannot see, like an edited mounted file."),
+    ];
+
+    string? _command;
+
+    protected override Task OnInitializedAsync() => DescribeAsync();
+
+    Task ChooseAsync(DeployOptions preset)
+    {
+        Request.Options = preset;
+        return DescribeAsync();
+    }
+
+    Task SetAsync(Func<DeployOptions, DeployOptions> change)
+    {
+        Request.Options = change(Request.Options);
+        return DescribeAsync();
+    }
+
+    async Task DescribeAsync() => _command = await Request.Describe(Request.Options);
+}

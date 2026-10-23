@@ -56,7 +56,14 @@ public sealed class ComposeDocument
         _root = root;
         Services = services;
         SyntaxError = error;
+        ProjectName = root is not null && Child(root, "name") is YamlScalarNode { Value: { Length: > 0 } name } ? name : null;
     }
+
+    /// <summary>
+    /// The top-level <c>name:</c>, as written. May contain <c>${VAR}</c>, which only compose can
+    /// resolve — callers that need the project name should treat such a value as unknown.
+    /// </summary>
+    public string? ProjectName { get; }
 
     /// <summary>Every service, in the order the file declares them.</summary>
     public IReadOnlyList<ComposeServiceEntry> Services { get; }

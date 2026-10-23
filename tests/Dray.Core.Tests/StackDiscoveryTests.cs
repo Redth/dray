@@ -103,14 +103,18 @@ public class StackDiscoveryTests
     }
 
     [Fact]
-    public void AStackTakesTheWorstOfItsServices()
+    public void AStackWithOneServiceDownIsPartlyRunning()
     {
+        // An exit with no code reported is not a clean finish — unknown is not zero — so it counts
+        // against the stack rather than being excused as a completed one-shot.
         var stack = StackDiscovery.From([
             Container("p-web-1", project: "p", service: "web"),
             Container("p-db-1", DockerState.Exited, "p", "db"),
         ]).Single();
 
-        Assert.Equal(StateTone.Neutral, stack.Status.Tone);
+        Assert.Equal(StackState.Partial, stack.State);
+        Assert.Equal(StateTone.Warn, stack.Status.Tone);
+        Assert.Equal("Partly running · 1 of 2 running", stack.Status.Label);
         Assert.Equal(1, stack.RunningCount);
         Assert.Equal(2, stack.ContainerCount);
     }

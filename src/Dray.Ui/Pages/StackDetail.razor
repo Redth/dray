@@ -2,6 +2,9 @@
 @inject EngineManager Engine
 @inject NavigationManager Nav
 @inject ShellCapabilities Caps
+@inject StackActionService Actions
+@inject StackOperations Operations
+@implements IDisposable
 
 <PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
 
@@ -20,13 +23,27 @@
                 {
                     <StatePill Status="header.Status" />
                 }
+
+                @if (!Caps.HasNativeToolbar && Stack is { } acting)
+                {
+                    @* On a head with a native toolbar these are toolbar items (Chrome, below); here
+                       they are the page's own, the way the container page does it. *@
+                    <div class="detail__actions">
+                        <RowActions Actions="Actions.ActionsFor(acting)" Visible="3"
+                                    MenuLabel="@($"More commands for {acting.Name}")"
+                                    OnAction="id => RunAsync(acting, id)" />
+                    </div>
+                }
             </div>
 
             <div class="detail__meta mono muted">
                 @if (Stack is { } stack)
                 {
                     <span>@stack.Services.Count service@(stack.Services.Count == 1 ? "" : "s")</span>
-                    <span>@stack.RunningCount/@stack.ContainerCount running</span>
+                    @if (!stack.IsDown)
+                    {
+                        <span>@stack.RunningCount/@stack.ContainerCount running</span>
+                    }
 
                     @if (stack.ConfigFiles.FirstOrDefault() is { } file)
                     {
@@ -46,12 +63,24 @@
                 }
             </div>
 
+            @if (_notice is { } topNotice && _tab != "Services")
+            {
+                <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+                    <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                    <span>@topNotice</span>
+                    <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true"
+                            Variant="ButtonVariant.Ghost" OnClick="() => _notice = null" />
+                </div>
+            }
+
+            <OperationLog Stack="@StackName" />
+
             <div class="detail__body">
                 @if (Stack is not { } current)
                 {
                     <div class="page">
                         <EmptyState Icon="IconRef.Stack" Title="That stack is not here"
-                                    Body="It may have been brought down, or it belongs to a different host than the one selected." />
+                                    Body="It belongs to a different host than the one selected, or Dray was told to forget it and nothing of it is running." />
                     </div>
                 }
                 else if (_tab == "Services")
@@ -71,7 +100,7 @@
                             <thead>
                                 <tr>
                                     <th>Service</th><th>State</th><th>Container</th><th>Image</th>
-                                    <th class="num">Uptime</th><th class="num">Replicas</th>
+                                    <th class="num">Uptime</th><th class="num">Replicas</th><th></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -79,8 +108,30 @@
                                 {
                                     var captured = service;
 
+                                    @if (service.Replicas.Count == 0)
+                                    {
+                                        @* Declared in the file, no container on this host: never
+                                           started, behind a profile, or scaled to zero. Listed so
+                                           the stack on screen is the stack in the file. *@
+                                        <tr @key="service.Name">
+                                            <td>@service.Name</td>
+                                            <td><StatePill Status="service.Status" /></td>
+                                            <td class="muted">No container</td>
+                                            <td class="muted">—</td>
+                                            <td class="num muted">—</td>
+                                            <td class="num"></td>
+                                            <td class="cell-actions">
+                                                <RowActions Actions="Actions.ServiceActionsFor(current, captured)" Visible="2"
+                                                            MenuLabel="@($"More for {service.Name}")"
+                                                            OnAction="id => RunService(current, captured, id, null)" />
+                                            </td>
+                                        </tr>
+                                    }
+
                                     @foreach (var (replica, index) in service.Replicas.Select((r, i) => (r, i)))
                                     {
+                                        var container = replica;
+
                                         <tr @key="replica.Id">
                                             <td>
                                                 @service.Name
@@ -104,10 +155,26 @@
                                                     <ScaleControl Service="captured" Busy="@(_scaling == captured.Name)"
                                                                   OnScale="n => ScaleAsync(captured, n)" />
                                                 </td>
+                                                <td class="cell-actions">
+                                                    @* The service's actions, with Shell aimed at this
+                                                       replica; later rows get a Shell of their own —
+                                                       the replica picker is the table itself. *@
+                                                    <RowActions Actions="Actions.ServiceActionsFor(current, captured)" Visible="2"
+                                                                MenuLabel="@($"More for {service.Name}")"
+                                                                OnAction="id => RunService(current, captured, id, container)" />
+                                                </td>
                                             }
                                             else
                                             {
                                                 <td></td>
+                                                <td class="cell-actions">
+                                                    @if (container.State == DockerState.Running && Engine.Selected?.Capabilities.SupportsShell != false)
+                                                    {
+                                                        <Button Label="@($"Shell in {container.Name}")" Icon="IconRef.Terminal" IconOnly="true"
+                                                                Variant="ButtonVariant.Ghost"
+                                                                OnClick="@(() => Nav.NavigateTo($"/containers/{container.ShortId}?tab=Terminal"))" />
+                                                    }
+                                                </td>
                                             }
                                         </tr>
                                     }
@@ -283,13 +350,86 @@
         }
     }
 
-    PageChrome Chrome => new(
-        StackName,
-        Subtitle: Engine.Selected?.Name,
-        Actions: [ChromeAction.Secondary("logs", "Logs", IconRef.Logs)],
-        Back: new ChromeBack("back", "All stacks"));
+    protected override void OnInitialized() => Operations.Changed += OnOperationChanged;
 
-    void HandleAction(string id)
+    void OnOperationChanged(StackOperation operation)
+    {
+        // Start and end change which actions are enabled; the lines are the log's to draw.
+        if (operation.Stack == StackName && (operation.Lines.Count <= 1 || !operation.IsRunning))
+            InvokeAsync(StateHasChanged);
+    }
+
+    async Task RunAsync(StackSummary stack, string action)
+    {
+        var notice = await Actions.RunAsync(stack, action);
+
+        // A deleted or forgotten stack has nothing left to show here.
+        if (action == "delete" && notice is null) Nav.NavigateTo("/stacks");
+
+        if (notice is not null)
+        {
+            _notice = notice;
+            _noticeOk = action == "forget";
+        }
+    }
+
+    void RunService(StackSummary stack, StackService service, string action, ContainerSummary? replica)
+    {
+        switch (action)
+        {
+            case "logs":
+                if (service.Replicas.Count == 1) Nav.NavigateTo($"/containers/{service.Replicas[0].ShortId}");
+                else Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(stack.Name)}/logs");
+                break;
+
+            case "shell":
+                var target = replica is { State: DockerState.Running } ? replica : service.Replicas.FirstOrDefault(r => r.State == DockerState.Running);
+                if (target is not null) Nav.NavigateTo($"/containers/{target.ShortId}?tab=Terminal");
+                break;
+
+            default:
+                if (Actions.RunService(stack, service, action) is { } notice)
+                {
+                    _notice = notice;
+                    _noticeOk = false;
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>
+    /// On a native toolbar the stack's actions are toolbar items, in the order their state invites:
+    /// the first is the page's one primary, a destructive one is never primary, and Logs follows.
+    /// </summary>
+    PageChrome Chrome
+    {
+        get
+        {
+            var actions = new List<ChromeAction>();
+
+            if (Caps.HasNativeToolbar && Stack is { } stack)
+            {
+                var offered = Actions.ActionsFor(stack).Where(a => !a.Disabled).ToList();
+
+                for (var i = 0; i < offered.Count; i++)
+                {
+                    var a = offered[i];
+                    var label = a.Label.Replace(" " + stack.Name, "", StringComparison.Ordinal);
+
+                    actions.Add(a.Danger
+                        ? ChromeAction.Destructive(a.Id, label, a.Icon)
+                        : i == 0 ? ChromeAction.Primary(a.Id, label, a.Icon) : ChromeAction.Secondary(a.Id, label, a.Icon));
+                }
+            }
+
+            actions.Add(ChromeAction.Secondary("logs", "Logs", IconRef.Logs));
+
+            return new(StackName, Subtitle: Engine.Selected?.Name, Actions: actions, Back: new ChromeBack("back", "All stacks"));
+        }
+    }
+
+    async Task HandleAction(string id)
     {
         switch (id)
         {
@@ -300,6 +440,12 @@
             case "logs":
                 Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(StackName)}/logs");
                 break;
+
+            default:
+                if (Stack is { } stack) await RunAsync(stack, id);
+                break;
         }
     }
+
+    public void Dispose() => Operations.Changed -= OnOperationChanged;
 }

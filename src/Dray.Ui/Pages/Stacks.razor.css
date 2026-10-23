@@ -134,3 +134,75 @@
         white-space: nowrap;
     }
 }
+
+/* The first-use question. A card in the list's own flow, not a dialog: nothing is blocked by it,
+   and the stacks already running are listed underneath whatever the answer. */
+.stacks__setup {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    margin-bottom: var(--s3);
+}
+
+.stacks__setup-icon {
+    color: var(--brand);
+}
+
+.stacks__setup-text p {
+    margin: var(--s1) 0 0;
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+    max-width: 64ch;
+}
+
+.stacks__setup-actions {
+    display: flex;
+    gap: var(--s2);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+@media (max-width: 52rem) {
+    .stacks__setup {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .stacks__setup-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+}
+
+/* Where the files are. Last to be read and first to go when the header is narrow. */
+.stacks__where {
+    flex: 0 1 auto;
+    min-width: 0;
+    margin-left: auto;
+    font-size: var(--text-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@container (max-width: 36rem) {
+    .stacks__where {
+        display: none;
+    }
+}
+
+.stacks__folder {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    margin: var(--s3) 0 0;
+    font-size: var(--text-xs);
+}
+
+/* A footer's control: as small as the line it sits in. */
+.stacks__folder ::deep .btn {
+    height: auto;
+    padding: 0 var(--s1);
+    font-size: var(--text-xs);
+}

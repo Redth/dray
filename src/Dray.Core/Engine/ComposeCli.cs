@@ -191,6 +191,31 @@ public sealed class ComposeCli(
     }
 
     /// <summary>
+    /// One invocation as a person would type it: the program, then every argument, quoting the ones
+    /// a shell would split. For display — the run itself never goes through a shell.
+    /// </summary>
+    public static string Display(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        IReadOnlyList<string> arguments)
+    {
+        var parts = new List<string> { command.Executable };
+        parts.AddRange(Arguments(command, target, project, files, arguments).Select(Quote));
+
+        // The environment is how the standalone binary is aimed; leaving it out of the shown command
+        // would show a command that targets a different host when pasted.
+        var prefix = string.Concat(target.Environment.Select(kv => $"{kv.Key}={Quote(kv.Value)} "));
+        return prefix + string.Join(' ', parts);
+    }
+
+    static string Quote(string value)
+        => value.Length > 0 && value.All(c => char.IsAsciiLetterOrDigit(c) || "-_./:=@,+%".Contains(c))
+            ? value
+            : "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+
+    /// <summary>
     /// The full argument list for one compose invocation.
     /// <para>
     /// A pure function so that what Dray runs can be tested exactly, and so a UI that shows the

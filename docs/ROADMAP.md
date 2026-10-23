@@ -713,6 +713,29 @@ misspelt key is underlined while typing and again, by compose, after saving.
 **Exit:** a down stack is still listed · deleting an adopted stack cannot remove its files · one
 exited migration container does not turn a stack red.
 
+**Progress:** done, and driven end to end in a browser against Docker Desktop: a stacks folder of
+two drafts, one deployed through the dialog with the pull preset, stopped, brought down — still
+listed as Down, with Deploy as its next action — and the other deleted by typing its name, folder
+and all. **All three exit criteria met.**
+
+- **Three sources, one list** (`StackCatalog`): labels, `stacks.json` (paths only — a test asserts
+  no value is ever written), and the stacks folder, scanned without descending into a stack's own
+  data and watched rather than polled. A stack is remembered the moment its containers are seen with
+  their files on this machine, so one brought up from a terminal stays listed after a down too.
+- **Compose's own naming rules**, measured rather than read: `My_Stack.v2` is `my_stackv2`,
+  `.env`'s `COMPOSE_PROJECT_NAME` beats the file's `name:`, and an override is passed explicitly
+  because `-f` turns compose's discovery of it off.
+- **A stack whose files are elsewhere still has real controls.** Measured: `start`, `stop`,
+  `restart` and `down` work with nothing but `-p`, from any directory; `pull` and anything that
+  creates do not. So those stacks get the four that work and no Deploy.
+- **Every action is one builder** (`StackCommands`), so the dialog's command preview is the
+  command that runs, and each step of a multi-step action announces itself in the output.
+- **The first-use question** is a card on the Stacks page with `~/Stacks` suggested, not a folder
+  created unasked.
+
+Not done here: a Build action outside the Deploy dialog's option, and the Windows head. A
+`DRAY_CONFIG_DIR` override keeps development runs out of the installed app's registry.
+
 ### 10.2 — Authoring
 
 - **New stack:** blank, from an image, from a `docker run` line, from running containers (their

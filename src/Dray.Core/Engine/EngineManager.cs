@@ -58,11 +58,33 @@ public sealed class EngineManager : IAsyncDisposable
     IContainerRuntime? _runtime;
     RuntimeEventPump? _pump;
 
-    public EngineManager(DockerContextReader reader, IContainerRuntimeFactory factory, ComposeCli? compose = null)
+    public EngineManager(
+        DockerContextReader reader,
+        IContainerRuntimeFactory factory,
+        ComposeCli? compose = null,
+        StackCatalog? catalog = null)
     {
         _reader = reader;
         _factory = factory;
         _compose = compose ?? new ComposeCli();
+        Catalog = catalog;
+
+        if (catalog is not null)
+        {
+            catalog.Changed += () => Changed?.Invoke();
+            Store.Changed += OnStoreChangedForStacks;
+        }
+    }
+
+    /// <summary>
+    /// The stacks Dray knows about beyond what is running — remembered and on disk. Null where the
+    /// head did not supply one, in which case <see cref="Stacks"/> is the running ones only.
+    /// </summary>
+    public StackCatalog? Catalog { get; }
+
+    void OnStoreChangedForStacks(StoreChange _)
+    {
+        if (Selected is { } host) Catalog?.Observe(host.Id, StackDiscovery.From(Store.Containers));
     }
 
     /// <summary>How long a health probe of an unselected host may take before it counts as unreachable.</summary>
@@ -379,7 +401,9 @@ public sealed class EngineManager : IAsyncDisposable
     /// else: a container starting or dying updates its stack without a refresh.
     /// </para>
     /// </summary>
-    public IReadOnlyList<StackSummary> Stacks => StackDiscovery.From(Store.Containers);
+    public IReadOnlyList<StackSummary> Stacks => Catalog is { } catalog
+        ? catalog.For(Selected?.Id, Store.Containers)
+        : StackDiscovery.From(Store.Containers);
 
     /// <summary>
     /// Run a compose subcommand against the selected host, streaming its output.
@@ -408,12 +432,42 @@ public sealed class EngineManager : IAsyncDisposable
             yield break;
         }
 
+        var (files, directory) = Locate(stack);
+
         await foreach (var line in _compose
-            .RunAsync(command, target, stack.Name, stack.ConfigFiles, arguments, stack.WorkingDirectory, ct)
+            .RunAsync(command, target, stack.Name, files, arguments, directory, ct)
             .ConfigureAwait(false))
         {
             yield return line;
         }
+    }
+
+    /// <summary>
+    /// The files and directory to run compose with — or none at all, for a stack whose files are
+    /// not on this machine.
+    /// <para>
+    /// Paths from labels name the disk of whichever machine ran <c>compose up</c>. Handing compose a
+    /// <c>-f</c> that does not exist fails every command; handing it only <c>-p</c> lets the ones
+    /// that work from labels alone — start, stop, restart, down — do so
+    /// (<see cref="StackCommands.NeedsFiles"/>).
+    /// </para>
+    /// </summary>
+    static (IReadOnlyList<string> Files, string? Directory) Locate(StackSummary stack)
+        => stack.ConfigFiles.Count > 0 && stack.ConfigFiles.All(File.Exists)
+            ? (stack.ConfigFiles, stack.WorkingDirectory is { } wd && Directory.Exists(wd) ? wd : Path.GetDirectoryName(stack.ConfigFiles[0]))
+            : ([], null);
+
+    /// <summary>
+    /// The command line a compose run would use, for showing before it runs. Null when compose is
+    /// not installed or cannot reach the selected host — there is then no command to show.
+    /// </summary>
+    public async Task<string?> DescribeComposeAsync(StackSummary stack, IReadOnlyList<string> arguments, CancellationToken ct = default)
+    {
+        if (await _compose.DetectAsync(ct).ConfigureAwait(false) is not { } command) return null;
+        if (Selected is not { } host || ComposeTarget.For(host, command) is not { } target) return null;
+
+        var (files, _) = Locate(stack);
+        return ComposeCli.Display(command, target, stack.Name, files, arguments);
     }
 
     /// <summary>
@@ -433,8 +487,10 @@ public sealed class EngineManager : IAsyncDisposable
                 null);
         }
 
+        var (files, directory) = Locate(stack);
+
         return await _compose
-            .ConfigAsync(command, target, stack.Name, stack.ConfigFiles, stack.WorkingDirectory, ct)
+            .ConfigAsync(command, target, stack.Name, files, directory, ct)
             .ConfigureAwait(false);
     }
 
