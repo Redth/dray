@@ -398,36 +398,31 @@
     /// </summary>
     public static async Task ShowAsync(IShellBridge shell)
     {
-        var dialog = new DialogController();
-        await shell.ShowDialogAsync(new DialogRequest(
+        var session = new DialogSession(new DialogRequest(
             "Pull an image",
             typeof(PullDialog),
             Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("pull", "Pull")],
 
             // Large: a list being read, with a row of facts per tag, is not a two-field form.
-            Size: DialogSize.Large,
-            Controller: dialog));
+            Size: DialogSize.Large));
+        await shell.ShowDialogAsync(session);
     }
 
-    protected override void DeclareButtons()
-    {
-        Button("cancel", _pulling ? "Cancel" : "Close");
-        Button("pull", _pulling ? "Pulling…" : "Pull", enabled: !_pulling && Draft.IsPullable, busy: _pulling);
-    }
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(_pulling ? "Cancel" : "Close"),
+        DialogButton.Confirm("pull", _pulling ? "Pulling…" : "Pull") with { Enabled = !_pulling && Draft.IsPullable, Busy = _pulling },
+    ];
 
-    protected override async Task<bool> OnButtonAsync(string buttonId)
+    protected override Task<bool> OnPressedAsync(string buttonId)
     {
-        if (buttonId == "pull")
-        {
-            // Started and left running: the dialog stays open to show it.
-            _ = StartAsync();
-            return false;
-        }
+        // Started and left running: the dialog stays open to show it. Cancel never reaches here —
+        // the session closes the dialog, and closing cancels the token the stream is linked to, so
+        // Dray stops reading it. The engine finishes the pull it started; saying otherwise would be a lie, and
+        // a half-pulled image is not a state Dray can create.
+        if (buttonId == "pull") _ = StartAsync();
 
-        // Cancelling the stream stops Dray reading it; the engine finishes the pull it started.
-        // Saying otherwise would be a lie, and a half-pulled image is not a state Dray can create.
-        if (_cts is { } cts) await cts.CancelAsync();
-        return true;
+        return Task.FromResult(false);
     }
 
     // ---------------------------------------------------------------- what the user has said
@@ -1237,7 +1232,9 @@
         if (_fetch is { } fetch) await fetch.CancelAsync();
         _loading = false;
 
-        _cts = new CancellationTokenSource();
+        // Linked to the dialog's own closing, so Cancel, Escape or the window going away all stop
+        // Dray reading the stream — the body is not asked first when the way out is pressed.
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(Closing);
 
         // Started from the head's button as well as from Enter, and only an event handler re-renders
         // by itself — so the buttons learn they are busy from here.

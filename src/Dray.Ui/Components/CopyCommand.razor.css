@@ -1,0 +1,57 @@
+.cmd {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+    padding: var(--s1) var(--s1) var(--s1) var(--s3);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+}
+
+.cmd__prompt {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: var(--text-sm);
+}
+
+/* Scrolls inside itself rather than wrapping: a command broken across lines is easy to paste
+   half of. */
+.cmd__text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    color: var(--ink);
+    font-size: var(--text-sm);
+    line-height: 28px;
+    user-select: text;
+    scrollbar-width: none;
+}
+
+.cmd__copy {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    height: 24px;
+    padding: 0 var(--s2);
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+    transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+
+.cmd__copy:hover {
+    background: var(--bg);
+    color: var(--ink);
+}
+
+.cmd__copy:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}

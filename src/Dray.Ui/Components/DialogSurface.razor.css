@@ -1,24 +1,34 @@
-/* The body fills the accessory view the platform gave it, and scrolls inside it. The alert has
-   already decided how big that is — see MacDialogSheet on why the size is asked for rather than
-   measured.
+/* The body fills the region of the frame the platform gave it, and scrolls inside it once the
+   content is taller than the frame may grow. The macOS head sizes that region from the content's
+   own measured height, so in the ordinary case nothing scrolls at all.
 
-   The insets are the frame's own margins, handed over by a head whose WebView runs edge to edge
-   between the title and the button row (WinDialog). Padding the scroller rather than the WebView is
-   what lets the content scroll under the whole width of the dialog, its scrollbar at the dialog's
-   edge, instead of inside a box inset from it. A head that insets the WebView itself sets none.
+   Padded on every side, because a WebView clips at its own edge and a focus ring is drawn outside
+   the control it belongs to — two pixels of outline at a two-pixel offset, so four past a field's
+   border. Without this a field against an edge loses its ring on that side.
 
-   No side is ever less than a focus ring's room. A ring is drawn outside its control — 2px of
-   outline at a 2px offset — and the WebView clips at its own edge, so with no insets (macOS) a
-   control flush against any edge lost that side of its ring: the pull dialog's search field its
-   top and right, the registry picker its left. max() rather than a sum: Windows's margins already
-   have room to spare, and adding to them would shrink its body for nothing. On macOS the body now
-   sits 4px inside the alert's own text column, which is the price of a ring that is whole. */
+   Two heads, two ways in. The macOS sheet widens its WebView by exactly --s2 past its text column
+   (MacDialogFrame.Inset), so the content lines up with the AppKit title and buttons; change one and
+   the other has to follow. The Windows head runs its WebView edge to edge and hands its own margins
+   over as --dialog-inset-*, which lets the content scroll under the dialog's whole width with the
+   scrollbar at its edge. max() rather than a sum: Windows's margins already have room for a ring. */
 .surface {
+    /* The ground of a sheet is the platform's material, not a colour: AppKit draws it translucent
+       and tinted by whatever is behind the window. An opaque panel colour over it reads as a grey
+       slab beside AppKit's own buttons, which take the tint (DESIGN.md 9.1.1 — a material cannot be
+       matched by a colour). So the raised fills here are ink laid over the ground at low strength,
+       the way a native control's fill is; on a head whose ground is solid they read the same.
+
+       --bg is left opaque on purpose. It is what text fields and dropdowns paint, and both are
+       solid on the platform too: a field is recessed, and a list floating over content must hide
+       what is under it. */
+    --surface: color-mix(in oklab, var(--ink) 5%, transparent);
+    --surface-2: color-mix(in oklab, var(--ink) 9%, transparent);
+
     height: 100%;
     overflow: auto;
     padding:
-        max(var(--dialog-inset-top, 0px), var(--s1)) max(var(--dialog-inset-right, 0px), var(--s1))
-        max(var(--dialog-inset-bottom, 0px), var(--s1)) max(var(--dialog-inset-left, 0px), var(--s1));
+        max(var(--dialog-inset-top, 0px), var(--s2)) max(var(--dialog-inset-right, 0px), var(--s2))
+        max(var(--dialog-inset-bottom, 0px), var(--s2)) max(var(--dialog-inset-left, 0px), var(--s2));
     color: var(--ink);
     font-size: var(--text-base);
 }

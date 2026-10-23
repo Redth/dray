@@ -1,0 +1,45 @@
+@* A command for the user to run themselves, with a button that copies the whole of it.
+
+   Selectable as well as copyable: a command is one of the places DESIGN.md 2.6 keeps selection
+   on, because someone may want the first half of it. The button is the main path — it takes the
+   whole command, including the part a narrow dialog scrolled out of view. *@
+@inject IShellBridge Shell
+
+<div class="cmd">
+    <span class="cmd__prompt mono" aria-hidden="true">$</span>
+    <code class="cmd__text mono">@Command</code>
+    <button type="button" class="cmd__copy" title="@(_copied ? "Copied" : "Copy command")"
+            aria-label="@(_copied ? "Copied" : $"Copy {Command}")" @onclick="CopyAsync">
+        <Icon Name="@(_copied ? IconRef.Check : IconRef.Copy)" Size="IconSize.Sm" />
+        <span class="cmd__copyword">@(_copied ? "Copied" : "Copy")</span>
+    </button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Command { get; set; } = "";
+
+    bool _copied;
+    CancellationTokenSource? _reset;
+
+    async Task CopyAsync()
+    {
+        await Shell.WriteClipboardAsync(Command);
+
+        // The word changes, not just the glyph — never colour or shape alone (DESIGN.md 2.4).
+        _copied = true;
+
+        _reset?.Cancel();
+        _reset = new CancellationTokenSource();
+        var token = _reset.Token;
+
+        try
+        {
+            await Task.Delay(1600, token);
+            _copied = false;
+        }
+        catch (TaskCanceledException)
+        {
+            // Copied again before the word went back. The newer press owns the reset.
+        }
+    }
+}

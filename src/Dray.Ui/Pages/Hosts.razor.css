@@ -1,50 +1,176 @@
-.caps {
+/* The query container. The grid below decides its columns from the content area's own width, not
+   the window's: a 1200px window with a wide sidebar has less room than a 1000px one without. */
+.hosts {
+    container: hosts / inline-size;
+}
+
+.hosts__grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: minmax(16rem, 21rem) minmax(0, 1fr);
     gap: var(--s4);
+    align-items: start;
 }
 
-.hosts__service {
-    margin-top: var(--s4);
+@container hosts (max-width: 44rem) {
+    .hosts__grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
-/* The sentence and the button on one line: the sentence explains the state, the button changes it,
-   and stacking them makes a two-line panel out of one fact. */
-.hosts__servicebody {
+.hosts__main {
     display: flex;
+    flex-direction: column;
+    gap: var(--s4);
+    min-width: 0;
+}
+
+/* ---------------------------------------------------------------- list */
+
+.hostlist {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.hostlist__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    padding: var(--s3) var(--s3) var(--s2);
+}
+
+.hostlist__title {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-weight: var(--text-xs-weight);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.hostlist__count {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.hostlist__items {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 var(--s2);
+}
+
+/* A row is a button — it does one thing, and the keyboard reaches it without a roving tabindex. */
+.hostitem {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--s3);
+    width: 100%;
+    padding: var(--s2);
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--motion-fast) var(--motion-ease);
 }
 
-.hosts__note {
-    margin: 0;
-    font-size: var(--text-sm);
+.hostitem:hover {
+    background: var(--surface-2);
 }
 
-.hosts__spacer {
-    flex: 1 1 auto;
+.hostitem:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
 }
 
-.hosts__suggest {
-    margin-top: var(--s4);
+/* The platform's own selection shade, as every other list in Dray uses. Which host is selected
+   is also said by aria-current and by the detail card beside it — not by the tint alone. */
+.hostitem.is-selected {
+    background: var(--selected, color-mix(in oklab, var(--brand) 14%, var(--bg)));
 }
 
-/* Which kind of container this engine runs, above the capability list. It sits apart from the
-   capabilities because it is not one: those say what an engine can do, and this says what it is —
-   and on Windows it is the fact that decides everything below it. */
-.hosts__mode {
-    margin: 0 0 var(--s3);
-    font-size: var(--text-sm);
+.hostitem.is-stale .hostitem__text {
+    opacity: 0.55;
 }
 
-/* Why a host is down, under its name. Wrapped rather than truncated: it is the one sentence on the
-   row that says what to do, and an ellipsis would cut off the half that does. */
-.hosts__detail {
-    max-width: 60ch;
-    font-size: var(--text-sm);
+.hostitem__text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.hostitem__name,
+.hostitem__sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hostitem__name {
+    font-weight: var(--text-md-weight);
+}
+
+.hostitem__sub {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    line-height: var(--text-xs-lh);
+}
+
+/* Why a host is down, in place of its summary. Wrapped rather than truncated: it is the one sentence
+   on the row that says what to do, and an ellipsis would cut off the half that does. */
+.hostitem__sub.hostitem__why {
+    overflow: visible;
     white-space: normal;
 }
 
-.hosts__transition {
-    margin-top: var(--s4);
+.hostlist__add {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin: var(--s2);
+    padding: var(--s2) var(--s3);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    cursor: pointer;
+    transition: color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
+
+.hostlist__add:hover {
+    border-color: var(--brand);
+    background: var(--surface-2);
+    color: var(--ink);
+}
+
+.hostlist__add:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- suggestion */
+
+.hosts__suggest {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+}
+
+.hosts__suggesttext {
+    flex: 1 1 18rem;
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--text-sm);
+}
+

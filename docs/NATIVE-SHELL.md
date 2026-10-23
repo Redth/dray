@@ -348,7 +348,7 @@ The title row is the part people notice second: on macOS a dialog attached to a 
 
 | Head | Frame | Notes |
 |---|---|---|
-| macOS | `NSAlert` with an accessory view for the body, or an `NSPanel` sheet with a hosted WebView for a body that is more than a form | `BeginSheet` on the key window, never `RunModal`, unless there is no key window |
+| macOS | An `NSPanel` sheet: an AppKit title label, a hosted WebView for the body, and a row of `NSButton`s. `NSAlert` only for a destructive confirmation, which has no body | `BeginSheet` on the key window, never `RunModal` |
 | Windows | `ContentDialog` — `Title`, `Content`, `PrimaryButtonText` / `CloseButtonText` | its three regions are this pattern already |
 | Linux | `AdwMessageDialog`, or `AdwWindow` with `modal` for a hosted body | |
 | Web | `<dialog>` + `showModal()` | the only head that draws its own frame, because there is no other frame to use. `showModal()` is what buys focus trapping, focus restore, Escape and the top layer — see `Dialog.razor`. Hand-rolling any of those is the Sherpa bug. |
@@ -360,49 +360,78 @@ needs one (type-to-confirm), the confirm button disabled until it is safe to pre
 ### 4.5 As built
 
 `IShellBridge.ShowDialogAsync(DialogRequest)` is the whole surface. A request names a title, a
-Blazor component for the body, its parameters, and a button row; the result is the id of the button
-pressed, or null for a dismissal.
+Blazor component for the body, its parameters, and the button row it opens with; the result is the
+id of the button that closed it, or null for a dismissal.
+
+**A dialog is a session, not a request.** A form does not keep the frame it opened with: its commit
+button is off until the form is complete, busy while the engine works, and a guided flow changes
+its title and its whole button row between steps. So the head draws a `DialogSession`, not the
+request, and redraws its own controls whenever the session changes. Presses go the other way — the
+head reports one, the body decides what it means, and the dialog closes only when the body says so.
+That is what lets a form validate, stay open while the engine works, and report a refusal in place.
 
 | | |
 |---|---|
-| Contract | `Dray.Core/Shell/DialogRequest.cs`. Button *order* lives here too, with tests — AppKit adds buttons right-to-left and the browser lays them out left-to-right, and that is one sorting rule with a parameter rather than two implementations. |
+| Contract | `Dray.Core/Shell/DialogRequest.cs` and `DialogSession.cs`, both with tests. Button *order* lives here — AppKit, GTK and the browser disagree, and that is one sorting rule with a parameter rather than one implementation per head. A `Leading` button (a Back) sits apart at the leading edge on every head. |
+| Body | Inherits `DialogBody`. Overrides `Title` and `Buttons`, read after every render, and `OnPressedAsync`, which returns whether to close. Each body has a static `Request(...)` the page passes to the shell. |
+| Shared | `DialogContent` hosts the body on every head: it cascades the session, turns Return in a field into a press of the default button, and reports the content's height. |
 | Web | `WebDialogService` + `DialogHost`, over `<dialog>` and `showModal()`. |
-| macOS | `MacDialogSheet` — an `NSAlert` sheet whose `AccessoryView` is `MacDialogBody`, a second `BlazorWebView` built from the app's own service provider and hosting `DialogSurface`. |
+| macOS | `MacDialogSheet` — an `NSPanel` sheet built from AppKit controls around `MacDialogBody`, a second `BlazorWebView` from the app's own service provider hosting `DialogSurface`. |
 
-Three things about the macOS half that were learned by running it:
+**Why not `NSAlert`, which this was first.** An alert closes itself on any button press and lays its
+buttons out once. A form inside one could not validate or stay open while the engine worked, and a
+step could not change the buttons — which is why every form in the app had drifted back to drawing
+its own button row in HTML, the bug this section exists to prevent. The sheet does what the alert
+did for free with the same AppKit pieces rather than an imitation: the default button's key
+equivalent is Return, so AppKit draws it in the accent and presses it; Cancel's is Escape; a
+destructive button sets `hasDestructiveAction`; a busy row shows `NSProgressIndicator`.
+
+Things about the macOS half that were learned by running it:
 
 - `IMauiContext` is **not** in the app's service collection. It is created per window, so the body
   takes it from `Application.Current.Windows[0].Handler.MauiContext`; asking DI throws.
-- The sheet attaches to the key window, then the main window, then MAUI's own. Falling through to
-  `RunModal` because the app happened to be in the background blocks the main thread until someone
-  dismisses it — a hang, not a dialog.
-- The accessory view's size has to be set on the `NSView`, not only on the MAUI element, and it has
-  to be decided before the body renders: an alert lays its accessory view out once, from the frame
-  the view already has. That is why `DialogSize` is three named sizes rather than a measurement.
+- The sheet is sized from the body's own measured height, reported by a `ResizeObserver`, and is
+  not shown until the first measurement arrives (or 400 ms pass) — so it slides out at its real
+  height instead of sliding out and then jumping. Content taller than the window scrolls inside the
+  body; the buttons never leave the screen.
+- The body WebView is made transparent exactly as the main one is, and runs its own
+  `PlatformThemeSync`. It is a separate document, and without both it paints a white slab in dark
+  mode and keeps the previous appearance when the system one changes.
+- Escape inside the WebView reaches the panel as `cancelOperation:`, which `DialogPanel` overrides
+  to dismiss. WebKit's Tab only visits fields unless Full Keyboard Access is on — the same rule as
+  every native control — so the native buttons are reached by Return, Escape and the mouse.
+- DevFlow's CDP bridge attaches to each body WebView as it opens; `webview webviews` lists them,
+  and `-w <index>` drives the one inside the sheet.
 
-The body declares nothing about chrome. `DialogSurface` renders the component and nothing else — no
-title, no buttons — which is the rule in one file.
+The body declares nothing about chrome. `DialogSurface` renders `DialogContent` and nothing else —
+no title, no buttons — which is the rule in one file.
+
+**The one in-page exception is the command palette.** It has no title row and no button row — it is
+a search field with a list, which is the combobox case section 4 leaves in the page — and its
+commands navigate the main window, which a body in a separate WebView cannot do.
 
 ### 4.6 Forms: a body that drives its buttons
 
 A question has fixed answers and closes on the first button pressed. A form does not. Its commit
 button is disabled until the fields are valid, reads "Pulling…" while it works, keeps the dialog
-open while it does, and closes only on success. Before `DialogController` existed, every form in
-the app (Pull, Build, Run, Push, Tag, Rename, Sign in, New volume, New network) solved that by
-becoming a web `<dialog>` with its own HTML title and buttons, which is the bug this section
-forbids.
+open while it does, and closes only on success; a guided flow changes its title and its whole row
+between steps. Before the session existed, every form in the app (Pull, Build, Run, Push, Tag,
+Rename, Sign in, New volume, New network) solved that by becoming a web `<dialog>` with its own HTML
+title and buttons, which is the bug this section forbids.
 
-`DialogRequest.Controller` is the channel. The body inherits `DialogBody`, states its buttons in
-`DeclareButtons()` after every render, and answers presses in `OnButtonAsync`: true closes, false
-keeps the dialog open. A long piece of work is started there and left running. The page opens the
-dialog through a static `ShowAsync` on the body, and refreshes once it closes. No callback crosses
-into the dialog's WebView.
+`DialogSession` is the channel (section 4.5). The body inherits `DialogBody`, states its title and
+buttons through `Title` and `Buttons` after every render, and answers presses in `OnPressedAsync`:
+true closes, false keeps the dialog open, and a body that has finished its work may close itself
+with `Close(id, value)`. Work may run for as long as it takes — no head holds its button event open
+while it does — and `Closing` is the token it listens to. The page opens the dialog through a static
+`ShowAsync` on the body, which returns what the page needs, and refreshes once it closes. No callback
+crosses into the dialog's WebView.
 
-| Head | How the controller is projected |
+| Head | How the session is projected |
 |---|---|
-| Web | `DialogHost` draws the button row from `DialogRequest.Current(button)` and routes presses through the controller. Escape presses cancel, and the dialog reopens if the body refuses. |
-| macOS | Each alert button's target is pointed at the controller instead of at `NSAlert`, which would end the sheet on any press. The sheet ends only when the body says so. Titles and enabled states follow `Changed`. |
-| Windows | Each `ContentDialog` button click holds a deferral while the body decides, and cancels the click to stay open. Escape arrives in `Closing` as a close with no button and is put to the body as its cancel button. |
+| Web | `DialogHost` draws the title and the button row from the session and routes presses through it. Escape and the backdrop are a dismissal. |
+| macOS | `MacDialogSheet` rebuilds an AppKit button row from the session on every change, keyed by id so a button that only relabels keeps its place and focus. The sheet ends when the session closes. |
+| Windows | A `ContentDialog` has three buttons, so `WinDialog` reassigns its slots on every change: commit is primary, cancel is the close button, and the secondary slot takes a leading button (a Back) if there is one, else the first ordinary choice. Anything left over is logged rather than shown. Every click is cancelled and handed to the session, which hides the dialog when it closes — so Cancel stays live while a pull runs. Escape arrives in `Closing` and is a dismissal. |
 
 A destructive commit button is marked the platform's way. macOS uses `HasDestructiveAction`.
 Windows has no destructive style, so `WinDanger` draws the danger tokens through the button's

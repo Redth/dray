@@ -5,7 +5,7 @@ namespace Dray.Ui.Services;
 /// <summary>
 /// The dialog a native head is currently presenting, for the component rendering its body.
 /// <para>
-/// The body runs in its own WebView with its own Blazor renderer, so the request cannot be passed
+/// The body runs in its own WebView with its own Blazor renderer, so the session cannot be passed
 /// to it as a parameter from the page that asked for it — the two are in different documents. This
 /// carries it across, and it is a singleton because a sheet is modal: there is exactly one.
 /// </para>
@@ -16,13 +16,13 @@ namespace Dray.Ui.Services;
 /// </summary>
 public sealed class NativeDialogState
 {
-    public DialogRequest? Current { get; private set; }
+    public DialogSession? Current { get; private set; }
 
     public event Action? Changed;
 
-    public void Set(DialogRequest? request)
+    public void Set(DialogSession? session)
     {
-        Current = request;
+        Current = session;
         Changed?.Invoke();
     }
 }

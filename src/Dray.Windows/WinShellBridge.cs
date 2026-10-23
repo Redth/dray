@@ -17,8 +17,8 @@ public sealed class WinShellBridge(IServiceProvider services) : IShellBridge
     readonly WinDialog _dialogs = new(services);
     bool? _notificationsRegistered;
 
-    public Task<string?> ShowDialogAsync(DialogRequest request, CancellationToken ct = default)
-        => _dialogs.ShowAsync(request, ct);
+    public Task<string?> ShowDialogAsync(DialogSession session, CancellationToken ct = default)
+        => _dialogs.ShowAsync(session, ct);
 
     public async Task<ConfirmResult> ConfirmDestructiveAsync(DestructiveConfirm request, CancellationToken ct = default)
     {

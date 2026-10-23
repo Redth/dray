@@ -27,6 +27,30 @@ public enum DialogButtonRole
 /// </summary>
 public sealed record DialogButton(string Id, string Label, DialogButtonRole Role = DialogButtonRole.Normal)
 {
+    /// <summary>
+    /// Whether it can be pressed right now. A body turns its commit button off until the form is
+    /// complete, so the platform's own disabled state says so rather than a press that does nothing.
+    /// </summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// Work started by this button is in flight. The head shows the platform's own progress
+    /// indicator beside it and refuses a second press; the body still says what is happening.
+    /// </summary>
+    public bool Busy { get; init; }
+
+    /// <summary>
+    /// Sits at the leading edge of the row, apart from the decision — a Back, or a Help. Every
+    /// platform puts these on the far side from the commit button, so it is a placement rather than
+    /// a role: it changes where the button goes, not what Return or Escape do.
+    /// </summary>
+    public bool Leading { get; init; }
+
+    /// <summary>Can be pressed: enabled, and not already working.</summary>
+    public bool Pressable => Enabled && !Busy;
+
+    public static DialogButton Back(string label = "Back") => new("back", label) { Leading = true };
+
     public static DialogButton Cancel(string label = "Cancel") => new("cancel", label, DialogButtonRole.Cancel);
 
     public static DialogButton Confirm(string id, string label) => new(id, label, DialogButtonRole.Confirm);
@@ -74,7 +98,7 @@ public enum DialogSize
 /// <para>
 /// The page says what it wants and the head decides what that is made of, exactly as
 /// <see cref="PageChrome"/> does for the toolbar. Nothing here names a widget, because the answer
-/// is an <c>NSAlert</c> sheet on macOS, a <c>ContentDialog</c> on Windows, an
+/// is an <c>NSPanel</c> sheet on macOS, a <c>ContentDialog</c> on Windows, an
 /// <c>AdwMessageDialog</c> on GTK, and a <c>&lt;dialog&gt;</c> in a browser — and a page that knew
 /// which would be a page that had to be changed to add the next head.
 /// </para>
@@ -88,26 +112,14 @@ public enum DialogSize
 /// The button row, or null for <see cref="DialogButton.Done"/> — which is the right default,
 /// because a dialog with nothing to decide still needs a way out.
 /// </param>
-/// <param name="Controller">
-/// For a dialog whose body drives its own buttons — a form. Null for a question with fixed answers,
-/// which closes on the first button pressed. See <see cref="DialogController"/>.
-/// </param>
 public sealed record DialogRequest(
     string Title,
     Type Body,
     IReadOnlyDictionary<string, object?>? Parameters = null,
     IReadOnlyList<DialogButton>? Buttons = null,
     string? Subtitle = null,
-    DialogSize Size = DialogSize.Medium,
-    DialogController? Controller = null)
+    DialogSize Size = DialogSize.Medium)
 {
-    /// <summary>
-    /// A button's label and state right now: the controller's, when the body has set one, or as
-    /// declared. Every head draws from this, so none has to know whether a controller exists.
-    /// </summary>
-    public DialogButtonState Current(DialogButton button)
-        => Controller?.State(button.Id) ?? new DialogButtonState(button.Label);
-
     public IReadOnlyList<DialogButton> ButtonList => Buttons is { Count: > 0 } buttons ? buttons : DialogButton.Done();
 
     public IReadOnlyDictionary<string, object?> ParameterMap =>
@@ -121,13 +133,21 @@ public sealed record DialogRequest(
     /// taking the Return key.
     /// </para>
     /// </summary>
-    public IReadOnlyList<DialogButton> Ordered(DialogButtonOrder order)
-    {
-        IReadOnlyList<DialogButton> commit =
-            [.. ButtonList.Where(b => b.Role is DialogButtonRole.Confirm or DialogButtonRole.Destructive)];
+    public IReadOnlyList<DialogButton> Ordered(DialogButtonOrder order) => Order(ButtonList, order);
 
-        IReadOnlyList<DialogButton> rest = [.. ButtonList.Where(b => b.Role == DialogButtonRole.Normal)];
-        IReadOnlyList<DialogButton> cancel = [.. ButtonList.Where(b => b.Role == DialogButtonRole.Cancel)];
+    /// <summary>
+    /// The trailing buttons of a row in a head's order. Leading buttons are left out — every head
+    /// puts those at the far edge on their own, in the order given.
+    /// </summary>
+    public static IReadOnlyList<DialogButton> Order(IReadOnlyList<DialogButton> buttons, DialogButtonOrder order)
+    {
+        var trailing = buttons.Where(b => !b.Leading).ToList();
+
+        IReadOnlyList<DialogButton> commit =
+            [.. trailing.Where(b => b.Role is DialogButtonRole.Confirm or DialogButtonRole.Destructive)];
+
+        IReadOnlyList<DialogButton> rest = [.. trailing.Where(b => b.Role == DialogButtonRole.Normal)];
+        IReadOnlyList<DialogButton> cancel = [.. trailing.Where(b => b.Role == DialogButtonRole.Cancel)];
 
         return order == DialogButtonOrder.CommitFirst
             ? [.. commit, .. rest, .. cancel]
@@ -135,7 +155,7 @@ public sealed record DialogRequest(
     }
 
     /// <summary>The button Escape chooses, or null when the dialog has no way to be cancelled.</summary>
-    public DialogButton? CancelButton => ButtonList.FirstOrDefault(b => b.Role == DialogButtonRole.Cancel);
+    public DialogButton? CancelButton => CancelOf(ButtonList);
 
     /// <summary>
     /// The button Return commits.
@@ -145,5 +165,11 @@ public sealed record DialogRequest(
     /// by reflex.
     /// </para>
     /// </summary>
-    public DialogButton? DefaultButton => ButtonList.FirstOrDefault(b => b.Role == DialogButtonRole.Confirm);
+    public DialogButton? DefaultButton => DefaultOf(ButtonList);
+
+    public static DialogButton? CancelOf(IReadOnlyList<DialogButton> buttons)
+        => buttons.FirstOrDefault(b => b.Role == DialogButtonRole.Cancel);
+
+    public static DialogButton? DefaultOf(IReadOnlyList<DialogButton> buttons)
+        => buttons.FirstOrDefault(b => b.Role == DialogButtonRole.Confirm);
 }

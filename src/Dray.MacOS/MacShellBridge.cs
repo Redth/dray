@@ -13,13 +13,14 @@ namespace Dray.MacOS;
 public sealed class MacShellBridge(IServiceProvider services) : IShellBridge
 {
     /// <summary>
-    /// Dialogs are an NSAlert sheet with a Blazor body — docs/NATIVE-SHELL.md section 4. The one
-    /// service this takes, and it is the app's own provider rather than a feature.
+    /// Dialogs are an NSPanel sheet built from AppKit controls around a Blazor body —
+    /// docs/NATIVE-SHELL.md section 4. The one service this takes, and it is the app's own provider
+    /// rather than a feature.
     /// </summary>
     readonly MacDialogSheet _dialogs = new(services);
 
-    public Task<string?> ShowDialogAsync(DialogRequest request, CancellationToken ct = default)
-        => _dialogs.ShowAsync(request, ct);
+    public Task<string?> ShowDialogAsync(DialogSession session, CancellationToken ct = default)
+        => _dialogs.ShowAsync(session, ct);
 
     public Task<ConfirmResult> ConfirmDestructiveAsync(DestructiveConfirm request, CancellationToken ct = default)
     {

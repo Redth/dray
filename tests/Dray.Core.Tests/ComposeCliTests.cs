@@ -92,7 +92,8 @@ public class ComposeCliTests
         var target = ComposeTarget.For(Host("env", "tcp://h:2376", HostOrigin.Environment, conventional), Standalone)!;
 
         Assert.Equal("1", target.Environment["DOCKER_TLS_VERIFY"]);
-        Assert.Equal("/c", target.Environment["DOCKER_CERT_PATH"]);
+        // The directory as this machine's path API names it: on Windows "/c" reads back as "\c".
+        Assert.Equal(Path.GetDirectoryName("/c/ca.pem"), target.Environment["DOCKER_CERT_PATH"]);
 
         // DOCKER_CERT_PATH can only say "this directory, these three names". Anything else has no
         // way to be said, and reaching the host without its certificate is not an option.

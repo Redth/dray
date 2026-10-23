@@ -65,15 +65,14 @@ else
     /// </summary>
     public static async Task<bool> ShowAsync(IShellBridge shell, RegistryEntry? registry = null)
     {
-        var dialog = new DialogController();
-        await shell.ShowDialogAsync(new DialogRequest(
+        var session = new DialogSession(new DialogRequest(
             registry is null ? "Sign in to a registry" : $"Sign in to {registry.DisplayName}",
             typeof(SignInDialog),
             Parameters: new Dictionary<string, object?> { [nameof(Registry)] = registry },
-            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("signin", "Sign in")],
-            Controller: dialog));
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("signin", "Sign in")]));
+        await shell.ShowDialogAsync(session);
 
-        return dialog.Result == "signin";
+        return session.Result == "signin";
     }
 
     /// <summary>The registry to sign in to, or null for the user to name one.</summary>
@@ -106,15 +105,13 @@ else
     // host re-renders the body whenever a button changes, and a cleared field must stay cleared.
     protected override void OnInitialized() => _username = Registry?.Username ?? "";
 
-    protected override void DeclareButtons()
-    {
-        Button("cancel", "Cancel");
-        Button("signin", "Sign in",
-            enabled: !_saving && Ambient is null && _username.Length > 0 && _secret.Length > 0,
-            busy: _saving);
-    }
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel("Cancel"),
+        DialogButton.Confirm("signin", "Sign in") with { Enabled = !_saving && Ambient is null && _username.Length > 0 && _secret.Length > 0, Busy = _saving },
+    ];
 
-    protected override async Task<bool> OnButtonAsync(string buttonId)
+    protected override async Task<bool> OnPressedAsync(string buttonId)
     {
         if (buttonId == "signin")
         {

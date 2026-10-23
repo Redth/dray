@@ -1199,6 +1199,11 @@ textarea,
   padding: var(--s3) var(--s5) var(--s4);
 }
 
+/* Between a leading button — a Back — and the decision, which keeps to the trailing edge. */
+.dialog__spacer {
+  flex: 1 1 auto;
+}
+
 /* ---------------------------------------------------------------- form controls */
 
 .field {
@@ -1246,6 +1251,10 @@ textarea,
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   background: var(--bg);
+
+  /* What the user typed is the most important text in a form, so it is ink rather than whatever
+     the surrounding prose is — a dialog body's text is muted, and a field must not inherit that. */
+  color: var(--ink);
   font-size: var(--text-base);
 }
 

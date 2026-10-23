@@ -44,15 +44,14 @@ else
     /// <summary>Open it. The name created, or null if the dialog was dismissed.</summary>
     public static async Task<string?> ShowAsync(IShellBridge shell, string distro)
     {
-        var dialog = new DialogController();
-        await shell.ShowDialogAsync(new DialogRequest(
+        var session = new DialogSession(new DialogRequest(
             $"Create your account in {distro}",
             typeof(LinuxAccountDialog),
             Parameters: new Dictionary<string, object?> { [nameof(Distro)] = distro },
-            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create account")],
-            Controller: dialog));
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create account")]));
+        await shell.ShowDialogAsync(session);
 
-        return dialog.Result == "create" ? dialog.Value as string : null;
+        return session.Result == "create" ? session.Value as string : null;
     }
 
     [Parameter, EditorRequired] public string Distro { get; set; } = "";
@@ -72,13 +71,13 @@ else
     // the host re-renders the body whenever a button changes, and the field must not fight typing.
     protected override void OnInitialized() => _name = WslAccount.Suggest(Environment.UserName);
 
-    protected override void DeclareButtons()
-    {
-        Button("cancel", "Cancel");
-        Button("create", "Create account", enabled: CanSubmit, busy: _saving);
-    }
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel("Cancel"),
+        DialogButton.Confirm("create", "Create account") with { Enabled = CanSubmit, Busy = _saving },
+    ];
 
-    protected override async Task<bool> OnButtonAsync(string buttonId)
+    protected override async Task<bool> OnPressedAsync(string buttonId)
     {
         if (buttonId != "create") return true;
 

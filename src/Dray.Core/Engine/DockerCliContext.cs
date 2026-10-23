@@ -107,6 +107,79 @@ public sealed class DockerCliContext(IProcessRunner? runner = null)
         }
     }
 
+    /// <summary>
+    /// Add a host by creating a context for it. Discovery reads contexts, so the host appears in
+    /// the picker on the next look — and in <c>docker context ls</c>, because it is the same thing.
+    /// </summary>
+    /// <param name="docker">The <c>--docker</c> value, from <see cref="ContextSpec.Docker"/>.</param>
+    /// <returns>Null on success, or a sentence explaining the refusal.</returns>
+    public async Task<string?> CreateContextAsync(
+        string name, string description, string docker, CancellationToken ct = default)
+    {
+        if (ContextSpec.ValidateName(name) is { } invalid) return invalid;
+
+        try
+        {
+            // Checked first rather than left to the CLI, whose answer names the context store
+            // rather than saying what to do about it.
+            var existing = await _runner
+                .RunAsync("docker", ["context", "inspect", name], null, ct)
+                .ConfigureAwait(false);
+
+            if (existing.ExitCode == 0)
+                return $"A context called {name} already exists. Choose another name, or use the host that is already there.";
+
+            var result = await _runner
+                .RunAsync("docker", ["context", "create", name, "--description", description, "--docker", docker], null, ct)
+                .ConfigureAwait(false);
+
+            return result.ExitCode == 0 ? null : Describe(result);
+        }
+        catch (Exception)
+        {
+            return "Adding a host needs the docker command, and Dray could not find it. Install the "
+                + "Docker CLI — Homebrew's docker formula, or your engine's own — and try again.";
+        }
+    }
+
+    /// <summary>
+    /// Whether Dray may offer to remove this host. Only contexts Dray created: one the user or
+    /// their engine made is theirs, and Docker Desktop's own would quietly break its CLI.
+    /// </summary>
+    public static bool CanRemove(DockerHost host)
+        => host.Origin == HostOrigin.DockerContext
+            && (host.Id.StartsWith(ContextPrefix, StringComparison.Ordinal)
+                || (host.Description?.StartsWith(AddedBy, StringComparison.Ordinal) ?? false));
+
+    /// <summary>
+    /// How a context Dray added on the user's behalf describes itself. The user named it, so the
+    /// name carries no prefix — the description is how Dray recognises its own afterwards, and how
+    /// <c>docker context ls</c> tells the user where it came from.
+    /// </summary>
+    public const string AddedBy = "Added by Dray";
+
+    /// <summary>Remove a context Dray created. The engine and everything in it are untouched.</summary>
+    /// <returns>Null on success, or a sentence explaining the refusal.</returns>
+    public async Task<string?> RemoveContextAsync(DockerHost host, CancellationToken ct = default)
+    {
+        if (!CanRemove(host)) return $"{host.Name} was not added by Dray, so Dray leaves it alone.";
+
+        try
+        {
+            // --force because the CLI refuses to remove the context it is currently using, and
+            // the user has just confirmed they want this one gone. The CLI falls back to default.
+            var result = await _runner
+                .RunAsync("docker", ["context", "rm", "--force", host.Id], null, ct)
+                .ConfigureAwait(false);
+
+            return result.ExitCode == 0 ? null : Describe(result);
+        }
+        catch (Exception ex)
+        {
+            return $"Could not reach the docker command: {ex.Message}";
+        }
+    }
+
     /// <summary>A context already pointing at this endpoint, whoever created it.</summary>
     async Task<string?> FindContextForAsync(DockerEndpoint endpoint, CancellationToken ct)
     {

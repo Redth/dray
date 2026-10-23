@@ -1,4 +1,4 @@
-@* Create a network.
+@* Create a network. A dialog body: the title and buttons are the platform's.
 
    Only the fields that change behaviour. Docker's create endpoint takes two dozen options; offering
    all of them would be a form nobody can complete and a set of choices nobody can evaluate. *@
@@ -8,56 +8,32 @@
 <div class="field">
     <label class="field__label" for="net-name">Name</label>
     <input id="net-name" class="input" @bind="_name" @bind:event="oninput"
-           autocomplete="off" spellcheck="false" @onkeydown="OnKeyDown" />
+           autocomplete="off" spellcheck="false" disabled="@_saving" />
 </div>
 
 <div class="field">
     <label class="field__label" for="net-subnet">Subnet <span class="muted">(optional)</span></label>
     <input id="net-subnet" class="input mono" placeholder="172.30.0.0/16"
-           @bind="_subnet" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+           @bind="_subnet" @bind:event="oninput" autocomplete="off" spellcheck="false" disabled="@_saving" />
 </div>
 
 <label class="toggle">
-    <input type="checkbox" @bind="_internal" />
+    <input type="checkbox" @bind="_internal" disabled="@_saving" />
     <span>Internal — containers can reach each other but not the outside world</span>
 </label>
 
 @if (_problem is { } problem)
 {
-    <p class="net__problem">@problem</p>
+    <p class="net__problem" role="alert">@problem</p>
 }
 
 @code {
     /// <summary>Open it. True when a network was created, so the page knows to refresh.</summary>
     public static async Task<bool> ShowAsync(IShellBridge shell)
-    {
-        var dialog = new DialogController();
-        await shell.ShowDialogAsync(new DialogRequest(
+        => await shell.ShowDialogAsync(new DialogRequest(
             "Create a network",
             typeof(NetworkDialog),
-            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
-            Controller: dialog));
-
-        return dialog.Result == "create";
-    }
-
-    protected override void DeclareButtons()
-    {
-        Button("cancel", "Cancel");
-        Button("create", "Create", enabled: !_saving && ContainerName.IsValid(_name), busy: _saving);
-    }
-
-    protected override async Task<bool> OnButtonAsync(string buttonId)
-    {
-        // A create closes the dialog itself, and only once the engine has accepted it.
-        if (buttonId == "create")
-        {
-            await SubmitAsync();
-            return false;
-        }
-
-        return true;
-    }
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")])) == "create";
 
     string _name = "";
     string _subnet = "";
@@ -65,43 +41,38 @@
     string? _problem;
     bool _saving;
 
-    async Task OnKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && !_saving && ContainerName.IsValid(_name)) await SubmitAsync();
-    }
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(),
+        DialogButton.Confirm("create", "Create") with { Enabled = ContainerName.IsValid(_name), Busy = _saving },
+    ];
 
-    async Task SubmitAsync()
+    protected override async Task<bool> OnPressedAsync(string id)
     {
         // A network name obeys the same rule a container name does, so the same validator applies
         // rather than a second copy that could drift from it.
         if (ContainerName.Validate(_name) is { } invalid)
         {
             _problem = invalid;
-            return;
+            return false;
         }
 
         _saving = true;
         _problem = null;
-
-        // Submitted from the head's button as well as from Enter, and only an event handler
-        // re-renders by itself — so the buttons learn they are busy from here.
         StateHasChanged();
 
         try
         {
-            var request = new NetworkRequest(
+            _problem = await Engine.CreateNetworkAsync(new NetworkRequest(
                 _name.Trim(),
                 Subnet: string.IsNullOrWhiteSpace(_subnet) ? null : _subnet.Trim(),
-                Internal: _internal);
+                Internal: _internal));
 
-            _problem = await Engine.CreateNetworkAsync(request);
-
-            if (_problem is null) Close("create");
+            return _problem is null;
         }
         finally
         {
             _saving = false;
-            StateHasChanged();
         }
     }
 }

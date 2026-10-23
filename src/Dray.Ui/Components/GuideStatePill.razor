@@ -1,0 +1,49 @@
+@* What Dray measured for one engine in the add-a-host chooser. Tint + glyph + word, like every
+   other state in the app (DESIGN.md 2.4) — and nothing at all for an engine with no trace on this
+   machine, because "Not installed" on most tiles would be noise about the user's own choices. *@
+
+@if (State != GuideState.Absent)
+{
+    <span class="pill pill--@Tone" title="@Title">
+        <span class="pill__glyph" aria-hidden="true">@Glyph</span>
+        <span>@Word</span>
+    </span>
+}
+
+@code {
+    [Parameter] public GuideState State { get; set; }
+
+    string Tone => State switch
+    {
+        GuideState.Connected => "ok",
+        GuideState.NotAnswering => "warn",
+        _ => "neutral",
+    };
+
+    string Glyph => State switch
+    {
+        GuideState.Connected => "●",
+        GuideState.NotAnswering => "⚠",
+        GuideState.Listed => "◉",
+        GuideState.Listening => "◉",
+        _ => "○",
+    };
+
+    string Word => State switch
+    {
+        GuideState.Connected => "Connected",
+        GuideState.NotAnswering => "Not answering",
+        GuideState.Listed => "Added",
+        GuideState.Listening => "Running",
+        _ => "Installed",
+    };
+
+    string Title => State switch
+    {
+        GuideState.Connected => "Already a host, and answering.",
+        GuideState.NotAnswering => "Already a host, but it did not answer when Dray last asked.",
+        GuideState.Listed => "Already a host. Dray has not asked it anything yet.",
+        GuideState.Listening => "Its socket is live on this machine.",
+        _ => "Installed on this machine, and not running.",
+    };
+}

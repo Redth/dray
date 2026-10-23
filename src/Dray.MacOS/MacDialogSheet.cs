@@ -2,248 +2,380 @@ using AppKit;
 using CoreGraphics;
 using Dray.Core.Shell;
 using Foundation;
-using Microsoft.AspNetCore.Components.WebView.Maui;
 
 namespace Dray.MacOS;
 
 /// <summary>
-/// A dialog on macOS: an <c>NSAlert</c> sheet whose accessory view is a Blazor WebView.
+/// A dialog on macOS: an <c>NSPanel</c> sheet with an AppKit title, a Blazor body, and an AppKit
+/// button row.
 /// <para>
-/// The three regions of docs/NATIVE-SHELL.md section 4 map onto an alert exactly, which is why
-/// this is an alert rather than a hand-built <c>NSPanel</c>. <c>MessageText</c> is the title row,
-/// <c>InformativeText</c> the subtitle, the accessory view is the body, and <c>AddButton</c> is the
-/// button row — with AppKit deciding the order, the default button, the Escape binding and the
-/// sheet animation rather than any of that being written here. A panel would have meant
-/// reimplementing all four, and getting them slightly wrong on every OS release.
+/// Not an <c>NSAlert</c>, which is what this was first. An alert closes itself on any button press
+/// and lays its buttons out once, so a form could not validate, could not stay open while the engine
+/// worked, and a guided flow could not change its buttons between steps — which is why every form
+/// in the app had ended up drawing its own buttons in HTML instead. docs/NATIVE-SHELL.md section 4.3
+/// names this as the frame for "a body that is more than a form", and every body is now that.
 /// </para>
 /// <para>
-/// The body is a second <c>BlazorWebView</c>. It shares the app's service provider, so the
-/// component inside it talks to the same <c>EngineManager</c> and the same store as the page
-/// behind — it is another view of the running app, not a second copy of it.
+/// What the alert did for free is done here with the same AppKit pieces, not imitated: the default
+/// button is an <c>NSButton</c> whose key equivalent is Return, so AppKit draws it in the accent and
+/// presses it; Cancel's is Escape; a destructive one is marked with <c>hasDestructiveAction</c>; and
+/// it is still a sheet on the document window.
 /// </para>
 /// </summary>
 public sealed class MacDialogSheet(IServiceProvider services)
 {
-    /// <summary>
-    /// What each size is in points.
-    /// <para>
-    /// Fixed rather than measured: an alert lays its accessory view out once, at the size the view
-    /// reports, and a web body's height is not known until after it has rendered — which is after
-    /// the alert has already sized itself. Asking for a size up front is the honest version of
-    /// that constraint, and it is why <see cref="DialogSize"/> exists rather than a pixel count.
-    /// </para>
-    /// </summary>
-    static CGSize SizeOf(DialogSize size) => size switch
+    public Task<string?> ShowAsync(DialogSession session, CancellationToken ct = default)
     {
-        DialogSize.Small => new CGSize(420, 160),
-        DialogSize.Large => new CGSize(760, 520),
-        _ => new CGSize(560, 320),
-    };
-
-    public Task<string?> ShowAsync(DialogRequest request, CancellationToken ct = default)
-    {
-        var tcs = new TaskCompletionSource<string?>();
-
         NSApplication.SharedApplication.InvokeOnMainThread(() =>
         {
             try
             {
-                Present(request, tcs);
+                new MacDialogFrame(services, session).Present();
             }
             catch (Exception ex)
             {
                 // A dialog that cannot be presented must not leave its caller awaiting forever.
                 Console.Error.WriteLine($"[dray:dialog] {ex}");
-                tcs.TrySetResult(null);
+                session.Dismiss();
             }
         });
 
-        // The window going away cancels the sheet with it, and the caller gets a dismissal rather
+        // The window going away dismisses the sheet with it, and the caller gets a dismissal rather
         // than a task that never completes.
-        if (ct.CanBeCanceled) ct.Register(() => tcs.TrySetResult(null));
+        if (ct.CanBeCanceled)
+            ct.Register(() => NSApplication.SharedApplication.InvokeOnMainThread(session.Dismiss));
 
-        return tcs.Task;
+        return session.Completion;
     }
+}
 
-    void Present(DialogRequest request, TaskCompletionSource<string?> tcs)
+/// <summary>
+/// One presented sheet, and the AppKit controls that draw its session.
+/// </summary>
+sealed class MacDialogFrame
+{
+    /// <summary>Space between the sheet's edge and everything in it — AppKit's own sheet margin.</summary>
+    const double Margin = 20;
+
+    /// <summary>
+    /// How far the WebView reaches past the margin on every side, and how far the body is padded
+    /// inside it — the <c>--s2</c> padding on <c>.surface</c> in DialogSurface.razor.css. A focused
+    /// control draws its ring outside its own box, up to four pixels out, and a WebView clips at its
+    /// edge; the padding gives the ring room, and widening the view by the same amount keeps the
+    /// content aligned with the AppKit title and buttons. The two numbers must stay equal.
+    /// </summary>
+    const double Inset = 8;
+
+    /// <summary>The shortest body worth drawing, before the content has said how tall it is.</summary>
+    const double MinBody = 48;
+
+    readonly IServiceProvider _services;
+    readonly DialogSession _session;
+    readonly DialogPanel _panel;
+    readonly MacDialogBody _body;
+    readonly NSTextField _title;
+    readonly NSTextField _subtitle;
+    readonly NSStackView _row;
+    readonly NSProgressIndicator _spinner;
+    readonly NSLayoutConstraint _bodyHeight;
+    readonly Dictionary<string, NSButton> _buttons = new(StringComparer.Ordinal);
+    readonly double _width;
+
+    NSWindow? _parent;
+    bool _presented;
+    IReadOnlyList<DialogButton> _drawn = [];
+
+    public MacDialogFrame(IServiceProvider services, DialogSession session)
     {
-        var alert = new NSAlert
-        {
-            AlertStyle = request.ButtonList.Any(b => b.Role == DialogButtonRole.Destructive)
-                ? NSAlertStyle.Critical
-                : NSAlertStyle.Informational,
+        _services = services;
+        _session = session;
+        _width = WidthOf(session.Request.Size);
 
-            MessageText = request.Title,
-            InformativeText = request.Subtitle ?? string.Empty,
+        var bodyWidth = _width - 2 * (Margin - Inset);
+        var initial = InitialHeightOf(session.Request.Size);
+
+        _panel = new DialogPanel(session, new CGRect(0, 0, _width, 200));
+
+        _title = NSTextField.CreateLabel(session.Title);
+        _title.Font = NSFont.BoldSystemFontOfSize(NSFont.SystemFontSize)!;
+        _title.LineBreakMode = NSLineBreakMode.TruncatingTail;
+
+        _subtitle = NSTextField.CreateWrappingLabel(session.Subtitle ?? string.Empty);
+        _subtitle.Font = NSFont.SystemFontOfSize(NSFont.SmallSystemFontSize)!;
+        _subtitle.TextColor = NSColor.SecondaryLabel;
+        _subtitle.PreferredMaxLayoutWidth = (nfloat)(_width - 2 * Margin);
+
+        _body = new MacDialogBody(services, session, new CGSize(bodyWidth, initial));
+
+        _spinner = new NSProgressIndicator
+        {
+            Style = NSProgressIndicatorStyle.Spinning,
+            ControlSize = NSControlSize.Small,
+            Indeterminate = true,
         };
 
-        // AppKit's order: the first button added is rightmost and is the default. The sorting
-        // itself lives in Core, with tests — the head only says which convention it wants, and
-        // this one is the opposite of the browser's.
-        var order = request.Ordered(DialogButtonOrder.CommitFirst);
-
-        var buttons = new List<NSButton>(order.Count);
-
-        foreach (var button in order)
+        _row = new NSStackView
         {
-            var added = alert.AddButton(request.Current(button).Label);
+            Orientation = NSUserInterfaceLayoutOrientation.Horizontal,
+            Spacing = 12,
+            TranslatesAutoresizingMaskIntoConstraints = false,
+        };
 
-            // A destructive button is never the one Return commits. DialogRequest refuses to name
-            // one as the default; this makes sure AppKit does not either.
-            if (button.Role == DialogButtonRole.Destructive)
-            {
-                added.KeyEquivalent = string.Empty;
+        var header = NSStackView.FromViews([_title, _subtitle]);
+        header.Orientation = NSUserInterfaceLayoutOrientation.Vertical;
+        header.Alignment = NSLayoutAttribute.Leading;
+        header.Spacing = 4;
+        header.TranslatesAutoresizingMaskIntoConstraints = false;
 
-                // AppKit's own marking for an action that cannot be undone — the platform's
-                // version of the danger fill the web head draws (DESIGN.md section 2.5).
-                added.HasDestructiveAction = true;
-            }
+        var content = new NSView { TranslatesAutoresizingMaskIntoConstraints = false };
+        content.AddSubview(header);
+        content.AddSubview(_body.View);
+        content.AddSubview(_row);
 
-            // Escape presses cancel, which is what DialogButtonRole.Cancel promises. AppKit only
-            // infers that from a button titled exactly "Cancel", and Close is not.
-            if (button.Role == DialogButtonRole.Cancel) added.KeyEquivalent = "\u001b";
+        _bodyHeight = _body.View.HeightAnchor.ConstraintEqualTo((nfloat)initial);
 
-            buttons.Add(added);
-        }
+        NSLayoutConstraint.ActivateConstraints(
+        [
+            content.WidthAnchor.ConstraintEqualTo((nfloat)_width),
 
-        var size = SizeOf(request.Size);
-        var host = new MacDialogBody(services, request, size);
+            header.TopAnchor.ConstraintEqualTo(content.TopAnchor, (nfloat)Margin),
+            header.LeadingAnchor.ConstraintEqualTo(content.LeadingAnchor, (nfloat)Margin),
+            header.TrailingAnchor.ConstraintEqualTo(content.TrailingAnchor, (nfloat)(-Margin)),
 
-        alert.AccessoryView = host.View;
+            // The gaps AppKit's own sheets use — 12 under the title, 16 above the buttons —
+            // measured to the content, not to the WebView, which reaches Inset past it.
+            _body.View.TopAnchor.ConstraintEqualTo(header.BottomAnchor, (nfloat)(12 - Inset)),
+            _body.View.LeadingAnchor.ConstraintEqualTo(content.LeadingAnchor, (nfloat)(Margin - Inset)),
+            _body.View.WidthAnchor.ConstraintEqualTo((nfloat)bodyWidth),
+            _bodyHeight,
 
+            _row.TopAnchor.ConstraintEqualTo(_body.View.BottomAnchor, (nfloat)(16 - Inset)),
+            _row.LeadingAnchor.ConstraintEqualTo(content.LeadingAnchor, (nfloat)Margin),
+            _row.TrailingAnchor.ConstraintEqualTo(content.TrailingAnchor, (nfloat)(-Margin)),
+            _row.BottomAnchor.ConstraintEqualTo(content.BottomAnchor, (nfloat)(-Margin)),
+        ]);
+
+        _panel.ContentView = content;
+
+        DrawTitle();
+        DrawButtons();
+
+        _session.Changed += OnChanged;
+        _session.Closed += OnClosed;
+    }
+
+    /// <summary>Widths in points. A form, a guided flow, or something being read.</summary>
+    static double WidthOf(DialogSize size) => size switch
+    {
+        DialogSize.Small => 440,
+        DialogSize.Large => 720,
+        _ => 560,
+    };
+
+    /// <summary>What the body is drawn at before it has measured itself — never seen if it measures in time.</summary>
+    static double InitialHeightOf(DialogSize size) => size switch
+    {
+        DialogSize.Small => 120,
+        DialogSize.Large => 420,
+        _ => 240,
+    };
+
+    public void Present()
+    {
         // Key, then main, then whatever there is. A window that is not key is still the window this
-        // dialog is about, and falling through to RunModal because the app happened to be in the
-        // background blocks the main thread until someone dismisses it — which is a hang, not a
-        // dialog. RunModal is for the case where there is genuinely no window to attach to.
-        var window = NSApplication.SharedApplication.KeyWindow
+        // dialog is about.
+        _parent = NSApplication.SharedApplication.KeyWindow
             ?? NSApplication.SharedApplication.MainWindow
             ?? (Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault()?.Handler?.PlatformView as NSWindow);
 
-        LiveButtons? live = null;
-
-        void Finish(nint response)
+        if (_parent is null)
         {
-            // NSAlertFirstButtonReturn is 1000 and they count up in the order added.
-            var index = (int)(response - (nint)NSAlertButtonReturn.First);
-
-            live?.Dispose();
-            host.Dispose();
-
-            // A form's controller knows its own result — including one the body closed with itself,
-            // which no button index describes.
-            tcs.TrySetResult(request.Controller is { } controller
-                ? controller.Result
-                : index >= 0 && index < order.Count ? order[index].Id : null);
-        }
-
-        // Ends the alert the way AppKit would have on a press: as a sheet, or as a modal session.
-        void End(nint response)
-        {
-            if (window is null) NSApplication.SharedApplication.StopModalWithCode(response);
-            else window.EndSheet(alert.Window, (NSModalResponse)(long)response);
-        }
-
-        if (request.Controller is { } form) live = new LiveButtons(request, form, order, buttons, End);
-
-        if (window is null)
-        {
-            Finish((nint)(long)alert.RunModal());
+            // Nothing to attach a sheet to. A free-standing panel rather than RunModal, which would
+            // block the main thread the body's own WebView needs to render.
+            Resize(animate: false);
+            _panel.Center();
+            _panel.MakeKeyAndOrderFront(null);
+            _presented = true;
             return;
         }
 
-        // A sheet, not a free-floating window: this is about the document in front of the user.
-        alert.BeginSheet(window, response => Finish((nint)(long)response));
+        // Shown once the body has measured itself, so the sheet slides out at its real height
+        // instead of sliding out and then jumping. Bounded: a body that never reports still opens.
+        if (_session.ContentHeight is null)
+        {
+            NSTimer.CreateScheduledTimer(0.4, false, _ => BeginSheet());
+            return;
+        }
+
+        BeginSheet();
+    }
+
+    void BeginSheet()
+    {
+        if (_presented || _session.IsClosed || _parent is null) return;
+
+        _presented = true;
+        Resize(animate: false);
+
+        _parent.BeginSheet(_panel, _ => { });
+    }
+
+    void OnChanged() => NSApplication.SharedApplication.InvokeOnMainThread(() =>
+    {
+        if (_session.IsClosed) return;
+
+        DrawTitle();
+        DrawButtons();
+
+        if (!_presented && _session.ContentHeight is not null)
+        {
+            BeginSheet();
+            return;
+        }
+
+        Resize(animate: _presented);
+    });
+
+    void OnClosed(string? _) => NSApplication.SharedApplication.InvokeOnMainThread(() =>
+    {
+        _session.Changed -= OnChanged;
+        _session.Closed -= OnClosed;
+
+        if (_presented && _panel.SheetParent is { } parent) parent.EndSheet(_panel);
+        _panel.OrderOut(null);
+
+        _body.Dispose();
+    });
+
+    void DrawTitle()
+    {
+        _title.StringValue = _session.Title;
+
+        // The panel's own title is never drawn on a sheet, but it is what VoiceOver announces.
+        _panel.Title = _session.Title;
+
+        var subtitle = _session.Subtitle ?? string.Empty;
+        _subtitle.StringValue = subtitle;
+        _subtitle.Hidden = subtitle.Length == 0;
     }
 
     /// <summary>
-    /// A <see cref="DialogController"/> projected onto an alert's buttons.
-    /// <para>
-    /// An alert ends the moment any of its buttons is pressed, which is right for a question and
-    /// wrong for a form: Pull has to start a pull and stay open to show it. So each button's action
-    /// is pointed here instead, the body is asked, and the sheet is ended only when it says so.
-    /// Titles and enabled states follow the body as it changes them.
-    /// </para>
+    /// Redraw the button row from the session. Buttons are kept by id and updated in place, so a
+    /// button that is only changing its label or its enabled state does not flicker or lose focus.
     /// </summary>
-    sealed class LiveButtons : IDisposable
+    void DrawButtons()
     {
-        readonly DialogRequest _request;
-        readonly DialogController _controller;
-        readonly IReadOnlyList<DialogButton> _order;
-        readonly List<NSButton> _buttons;
-        readonly Action<nint> _end;
+        var buttons = _session.Buttons;
+        if (buttons.SequenceEqual(_drawn)) return;
 
-        // NSButton targets are weak; without these references the targets are collected and the
-        // buttons silently stop responding (docs/NATIVE-SHELL.md section 1.5b).
-        readonly List<NSObject> _targets = [];
+        _drawn = buttons;
 
-        public LiveButtons(
-            DialogRequest request, DialogController controller, IReadOnlyList<DialogButton> order,
-            List<NSButton> buttons, Action<nint> end)
+        foreach (var stale in _buttons.Keys.Except(buttons.Select(b => b.Id)).ToList())
         {
-            _request = request;
-            _controller = controller;
-            _order = order;
-            _buttons = buttons;
-            _end = end;
-
-            for (var i = 0; i < buttons.Count; i++)
-            {
-                var index = i;
-                var target = new ButtonTarget(() => Press(index));
-                _targets.Add(target);
-
-                buttons[i].Target = target;
-                buttons[i].Action = new ObjCRuntime.Selector("press:");
-            }
-
-            Apply();
-
-            controller.Changed += OnChanged;
-            controller.CloseRequested += OnCloseRequested;
+            _buttons[stale].RemoveFromSuperview();
+            _buttons.Remove(stale);
         }
 
-        void Apply()
+        // Return presses the default only while it can be pressed. A disabled default keeps no
+        // key equivalent, so Return does nothing rather than beeping at a form that is not ready.
+        var commit = _session.DefaultButton?.Id;
+
+        foreach (var spec in buttons)
         {
-            for (var i = 0; i < _order.Count; i++)
+            if (!_buttons.TryGetValue(spec.Id, out var button))
             {
-                var state = _request.Current(_order[i]);
-                _buttons[i].Title = state.Label;
-                _buttons[i].Enabled = state.IsEnabled;
+                var id = spec.Id;
+
+                button = new NSButton
+                {
+                    BezelStyle = NSBezelStyle.Push,
+                    ControlSize = NSControlSize.Regular,
+                };
+
+                button.Activated += (_, _) => _ = _session.PressAsync(id);
+                _buttons[id] = button;
             }
+
+            button.Title = spec.Label;
+            button.Enabled = spec.Pressable;
+            button.HasDestructiveAction = spec.Role == DialogButtonRole.Destructive;
+            button.KeyEquivalent = spec.Id == commit ? "\r"
+                : spec.Role == DialogButtonRole.Cancel ? "\u001b"
+                : string.Empty;
         }
 
-        void OnChanged() => NSApplication.SharedApplication.InvokeOnMainThread(Apply);
+        // Leading buttons at the leading edge in the order given; the rest at the trailing edge in
+        // the order every web and GTK dialog also uses — cancel, the others, then the commit
+        // rightmost, which is where AppKit's own alerts put it.
+        var leading = buttons.Where(b => b.Leading).Select(b => (NSView)_buttons[b.Id]).ToArray();
+        var trailing = DialogRequest.Order(buttons, DialogButtonOrder.CommitLast)
+            .Select(b => (NSView)_buttons[b.Id])
+            .ToList();
 
-        void OnCloseRequested() => NSApplication.SharedApplication.InvokeOnMainThread(() => _end(Response(-1)));
-
-        async void Press(int index)
+        // The platform's progress indicator, beside the row, while anything in it is working.
+        if (buttons.Any(b => b.Busy))
         {
-            try
-            {
-                if (await _controller.PressAsync(_order[index].Id))
-                    NSApplication.SharedApplication.InvokeOnMainThread(() => _end(Response(index)));
-            }
-            catch (Exception ex)
-            {
-                // The body failed to answer. Staying open keeps whatever it was showing on screen.
-                Console.Error.WriteLine($"[dray:dialog] '{_request.Title}' {_order[index].Id}: {ex}");
-            }
+            trailing.Insert(0, _spinner);
+            _spinner.Hidden = false;
+            _spinner.StartAnimation(null);
+        }
+        else
+        {
+            _spinner.StopAnimation(null);
+            _spinner.Hidden = true;
         }
 
-        /// <summary>The response code AppKit would have used for a button, or one past the last for none.</summary>
-        nint Response(int index) => (nint)NSAlertButtonReturn.First + (index >= 0 ? index : _order.Count);
-
-        public void Dispose()
-        {
-            _controller.Changed -= OnChanged;
-            _controller.CloseRequested -= OnCloseRequested;
-        }
+        _row.SetViews(leading, NSStackViewGravity.Leading);
+        _row.SetViews([.. trailing], NSStackViewGravity.Trailing);
     }
 
-    /// <summary>An <c>NSButton</c> action that runs a callback. Must be retained by the caller.</summary>
-    sealed class ButtonTarget(Action action) : NSObject
+    /// <summary>
+    /// Fit the sheet to its content: the body as tall as it measured, up to what the window can hold.
+    /// Anything taller scrolls inside the body rather than pushing the buttons off the screen.
+    /// </summary>
+    void Resize(bool animate)
     {
-        [Export("press:")]
-        public void Press(NSObject sender) => action();
+        var wanted = _session.ContentHeight is { } measured
+            ? measured + 2 * Inset
+            : InitialHeightOf(_session.Request.Size);
+
+        var available = (_parent?.ContentLayoutRect.Height ?? 800) - 180;
+        var height = Math.Clamp(wanted, MinBody, Math.Max(MinBody, available));
+
+        if (Math.Abs(_bodyHeight.Constant - height) >= 1) _bodyHeight.Constant = (nfloat)height;
+
+        _panel.ContentView!.LayoutSubtreeIfNeeded();
+
+        var fitting = _panel.ContentView.FittingSize;
+        var frame = _panel.FrameRectFor(new CGRect(0, 0, _width, fitting.Height));
+        var current = _panel.Frame;
+
+        // A sheet hangs from the top of its window, so it grows downwards: the top edge stays put.
+        var next = new CGRect(current.X, current.Y + current.Height - frame.Height, _width, frame.Height);
+        if (Math.Abs(next.Height - current.Height) < 1 && _presented) return;
+
+        _panel.SetFrame(next, display: true, animate: animate);
     }
+}
+
+/// <summary>
+/// The sheet's window. Exists for one override: Escape anywhere inside it — including in the
+/// WebView, which passes an unhandled Escape up the responder chain as cancelOperation — is a
+/// dismissal, exactly as it is for an alert.
+/// </summary>
+sealed class DialogPanel : NSPanel
+{
+    readonly DialogSession _session;
+
+    public DialogPanel(DialogSession session, CGRect frame)
+        : base(frame, NSWindowStyle.Titled, NSBackingStore.Buffered, false)
+    {
+        _session = session;
+        ReleaseWhenClosed(false);
+    }
+
+    public override bool CanBecomeKeyWindow => true;
+
+    [Export("cancelOperation:")]
+    public void CancelOperation(NSObject? sender) => _session.Dismiss();
 }

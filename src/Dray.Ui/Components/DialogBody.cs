@@ -4,60 +4,88 @@ using Microsoft.AspNetCore.Components;
 namespace Dray.Ui.Components;
 
 /// <summary>
-/// The body of a form dialog: owns its fields and its work, and drives the native button row it
-/// does not draw.
+/// The base of every dialog body: the Blazor middle of a native frame.
 /// <para>
-/// Opened with <see cref="IShellBridge.ShowDialogAsync"/> and a <see cref="DialogController"/>. The
-/// head draws the title and buttons — an <c>NSAlert</c>'s, a <c>ContentDialog</c>'s, or a
-/// <c>&lt;dialog&gt;</c>'s on the web — and this tells it what they say and whether they can be
-/// pressed, and decides what a press does. docs/NATIVE-SHELL.md section 4.
+/// A body never draws a title or a button. It says what its frame should show — <see cref="Title"/>
+/// and <see cref="Buttons"/>, read after every render so they follow the form as it is filled in —
+/// and it answers presses in <see cref="OnPressedAsync"/>. The head draws the rest with the
+/// platform's own controls: an <c>NSPanel</c> sheet on macOS, a <c>ContentDialog</c> on Windows, a
+/// <c>&lt;dialog&gt;</c> in a browser. docs/NATIVE-SHELL.md section 4.
+/// </para>
+/// <para>
+/// Opened through <see cref="IShellBridge.ShowDialogAsync(DialogSession, CancellationToken)"/>,
+/// never placed in a page — by convention through a static <c>ShowAsync</c> on the body, which
+/// returns what the page needs to know. On a native head the body is in a WebView of its own, so a
+/// page cannot hand it a callback; it does its work through the same singletons the page uses, and
+/// the page reads the button it closed with and <see cref="DialogSession.Value"/>.
 /// </para>
 /// </summary>
 public abstract class DialogBody : ComponentBase
 {
-    /// <summary>Cascaded by the host. Null only when rendered outside a dialog — the gallery.</summary>
-    [CascadingParameter] public DialogController? Dialog { get; set; }
+    DialogSession? _session;
 
-    public override Task SetParametersAsync(ParameterView parameters)
+    /// <summary>
+    /// The dialog this body is in. Cascaded by whichever head is presenting it; null only when the
+    /// body is rendered outside a dialog, as a gallery specimen.
+    /// </summary>
+    [CascadingParameter]
+    public DialogSession? Session
     {
-        parameters.SetParameterProperties(this);
+        get => _session;
+        set
+        {
+            if (ReferenceEquals(_session, value)) return;
 
-        // Here rather than in OnInitialized, which every body overrides for its own setup and
-        // would have to remember to chain.
-        if (Dialog is { Pressed: null } dialog) dialog.Pressed = PressedAsync;
-
-        return base.SetParametersAsync(ParameterView.Empty);
+            _session = value;
+            if (value is not null) value.Pressed = PressedAsync;
+        }
     }
 
     /// <summary>
-    /// Declare every button's current state. Called after each render, so a body states what its
-    /// buttons are rather than remembering to update them; the controller ignores a repeat.
+    /// Cancelled when the dialog closes, however it closes — what a pull or a build listens to so
+    /// it stops reading when the user walks away. Never cancelled outside a dialog.
     /// </summary>
-    protected abstract void DeclareButtons();
+    protected CancellationToken Closing => _session?.Closing ?? CancellationToken.None;
+
+    /// <summary>The title the frame should show now, or null to keep the request's.</summary>
+    protected virtual string? Title => null;
+
+    /// <summary>The subtitle to show with <see cref="Title"/>.</summary>
+    protected virtual string? Subtitle => null;
+
+    /// <summary>The button row the frame should show now, or null to keep the request's.</summary>
+    protected virtual IReadOnlyList<DialogButton>? Buttons => null;
 
     /// <summary>
-    /// A button was pressed, on the renderer's thread. Return true to close the dialog with it.
+    /// A button was pressed, on the renderer's thread. Return true to close the dialog with it. The
+    /// default closes, which is right for a body that only shows something.
     /// <para>
-    /// Return promptly. Work that takes time — a pull, a build — is started here and left running;
-    /// the head is holding its button event open until this returns.
+    /// May take as long as the work does: the frame is not held while it runs, Cancel still closes
+    /// the dialog, and <see cref="Closing"/> tells the work to stop.
     /// </para>
     /// </summary>
-    protected abstract Task<bool> OnButtonAsync(string buttonId);
+    protected virtual Task<bool> OnPressedAsync(string id) => Task.FromResult(true);
 
-    protected override void OnAfterRender(bool firstRender) => DeclareButtons();
+    /// <summary>Close from inside the body — a choice made in the content rather than the button row.</summary>
+    protected void Close(string id, object? value = null) => _session?.Close(id, value);
 
-    /// <summary>Set one button's state.</summary>
-    protected void Button(string id, string label, bool enabled = true, bool busy = false)
-        => Dialog?.Set(id, new DialogButtonState(label, enabled, busy));
+    /// <summary>
+    /// Pushes the frame's state after every render, so a button follows the form without each body
+    /// remembering to say so. The session compares by value, so an unchanged row redraws nothing.
+    /// </summary>
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (_session is not { IsClosed: false } session) return;
 
-    /// <summary>Close the dialog from the body — after a create succeeds, say.</summary>
-    protected void Close(string buttonId, object? value = null) => Dialog?.Close(buttonId, value);
+        if (Title is { } title) session.SetTitle(title, Subtitle);
+        if (Buttons is { } buttons) session.SetButtons(buttons);
+    }
 
     /// <summary>
     /// The head's press, moved onto the renderer. A native head reports it from its own UI thread,
     /// and the body's state may only be touched from Blazor's.
     /// </summary>
-    Task<bool> PressedAsync(string buttonId)
+    Task<bool> PressedAsync(string id)
     {
         var result = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -65,7 +93,7 @@ public abstract class DialogBody : ComponentBase
         {
             try
             {
-                result.TrySetResult(await OnButtonAsync(buttonId));
+                result.TrySetResult(await OnPressedAsync(id));
             }
             catch (Exception ex)
             {

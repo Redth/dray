@@ -71,12 +71,12 @@ public sealed class WinDialog(IServiceProvider services)
         })();
         """;
 
-    public async Task<string?> ShowAsync(DialogRequest request, CancellationToken ct = default)
+    public async Task<string?> ShowAsync(DialogSession session, CancellationToken ct = default)
     {
         await Gate.WaitAsync(ct);
         try
         {
-            return await WinWindow.OnUiAsync(() => PresentAsync(request, ct));
+            return await WinWindow.OnUiAsync(() => PresentAsync(session, ct));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -112,15 +112,16 @@ public sealed class WinDialog(IServiceProvider services)
         }
     }
 
-    async Task<string?> PresentAsync(DialogRequest request, CancellationToken ct)
+    async Task<string?> PresentAsync(DialogSession session, CancellationToken ct)
     {
+        var request = session.Request;
         var context = WinWindow.MauiContext
             ?? throw new InvalidOperationException("No window to present a dialog from.");
 
-        // Set before the body exists: the surface reads it as it mounts, and a request arriving
+        // Set before the body exists: the surface reads it as it mounts, and a session arriving
         // afterwards would render an empty dialog for a frame.
         var state = services.GetRequiredService<NativeDialogState>();
-        state.Set(request);
+        state.Set(session);
 
         var webView = new BlazorWebView { HostPage = "wwwroot/dialog.html" };
         webView.RootComponents.Add(new RootComponent
@@ -136,8 +137,9 @@ public sealed class WinDialog(IServiceProvider services)
         var pad = ThicknessResource("ContentDialogPadding") ?? new Xaml.Thickness(24);
         var titleGap = ThicknessResource("ContentDialogTitleMargin")?.Bottom ?? 12;
 
-        // The dialog's document has no PlatformThemeSync of its own, so without this the body
-        // renders in the generated palette rather than the Windows one around it.
+        // Seeded before the first paint. The body's own PlatformThemeSync keeps it in step after
+        // that, but it runs once Blazor is up, and the first frame would otherwise be the
+        // generated palette rather than the Windows one around it.
         var theme = services.GetRequiredService<IPlatformTheme>();
         WebViewSetup.SeedTheme(webView, theme, BodyInsets(pad, titleGap));
 
@@ -169,21 +171,21 @@ public sealed class WinDialog(IServiceProvider services)
         body.Height = height + titleGap + pad.Bottom;
         body.Margin = new Xaml.Thickness(-pad.Left, 0, -pad.Right, -pad.Bottom);
 
-        var content = new Xaml.Controls.StackPanel();
-        if (!string.IsNullOrEmpty(request.Subtitle))
+        // Always present and hidden when empty, because a body can give itself a subtitle on a
+        // later step and the frame has to have somewhere to put it.
+        var subtitle = new Xaml.Controls.TextBlock
         {
-            content.Children.Add(new Xaml.Controls.TextBlock
-            {
-                Text = request.Subtitle,
-                TextWrapping = Xaml.TextWrapping.Wrap,
-                Margin = new Xaml.Thickness(0, titleGap, 0, 0),
-            });
-        }
+            TextWrapping = Xaml.TextWrapping.Wrap,
+            Margin = new Xaml.Thickness(0, titleGap, 0, 0),
+        };
+
+        var content = new Xaml.Controls.StackPanel();
+        content.Children.Add(subtitle);
         content.Children.Add(body);
 
         var dialog = new Xaml.Controls.ContentDialog
         {
-            Title = request.Title,
+            Title = session.Title,
             Content = content,
             XamlRoot = WinWindow.XamlRoot,
             Style = Resource("DefaultContentDialogStyle"),
@@ -205,23 +207,26 @@ public sealed class WinDialog(IServiceProvider services)
         // nowhere until the field was clicked.
         dialog.Opened += (_, _) => body.Focus(Xaml.FocusState.Programmatic);
 
-        var map = Map(request, dialog);
         if (request.ButtonList.Any(b => b.Role == DialogButtonRole.Destructive)) WinDanger.Style(dialog);
 
-        // A form's body drives the buttons and decides what a press does; a plain question closes
-        // on the first one. See DialogController.
-        using var live = request.Controller is { } controller ? new LiveButtons(dialog, request, controller) : null;
+        // The body drives the title and the buttons, and decides what a press does; the frame is
+        // closed when the session closes, however that happens. See DialogSession.
+        using var live = new LiveFrame(dialog, session, subtitle);
 
         try
         {
             using var _ = ct.Register(() => dialog.DispatcherQueue.TryEnqueue(() =>
             {
-                request.Controller?.Dismissed();
+                session.Dismiss();
                 dialog.Hide();
             }));
 
-            var result = await dialog.ShowAsync();
-            return request.Controller is { } c ? c.Result : map(result);
+            await dialog.ShowAsync();
+
+            // Whatever closed the frame — a press the body accepted, Escape, the window going
+            // away — the session has settled by now, and its result is the answer.
+            session.Dismiss();
+            return session.Result;
         }
         finally
         {
@@ -231,216 +236,164 @@ public sealed class WinDialog(IServiceProvider services)
     }
 
     /// <summary>
-    /// Lays the request's buttons onto a ContentDialog's three, and returns how to read its result.
+    /// A <see cref="DialogSession"/> projected onto a ContentDialog.
     /// <para>
-    /// The committing button is primary, one ordinary choice is secondary, and cancel is the close
-    /// button — which is also what Escape presses, matching what <see cref="DialogButtonRole.Cancel"/>
-    /// promises. A dialog with nothing to decide puts its one button there too, so Escape and Done
-    /// are the same answer. Return commits only <see cref="DialogRequest.DefaultButton"/>; a
-    /// destructive button is never default, because Return is pressed by people who have stopped
-    /// reading.
+    /// A ContentDialog has three buttons, and a session can have more and change them between
+    /// steps. The slots are reassigned on every change: the committing button is primary, cancel is
+    /// the close button — also what Escape presses — and the secondary slot takes a leading button
+    /// (a Back) if there is one, else the first ordinary choice. Anything left over is not shown
+    /// and is logged, never silently swapped for something else; every body's leftovers are a
+    /// second way to the same place (Add host tests before it saves, so Test is a convenience).
+    /// A dialog whose only button is a Done puts it in the close slot, so Escape and Done agree.
+    /// </para>
+    /// <para>
+    /// Presses never hold the button event open. Each click is cancelled — the frame stays up — and
+    /// handed to the session, which runs the body's work for as long as it takes and closes the
+    /// dialog itself when the body says so. That is what lets Cancel stop a pull: no deferral is
+    /// pending, so the close button is live the whole time.
     /// </para>
     /// </summary>
-    static Func<Xaml.Controls.ContentDialogResult, string?> Map(DialogRequest request, Xaml.Controls.ContentDialog dialog)
-    {
-        var buttons = request.ButtonList;
-        var cancel = request.CancelButton;
-
-        if (buttons.Count == 1)
-        {
-            var only = buttons[0];
-            dialog.CloseButtonText = only.Label;
-            dialog.DefaultButton = Xaml.Controls.ContentDialogButton.Close;
-            return _ => only.Id;
-        }
-
-        var (commit, other) = Slots(request);
-
-        // Three is what a ContentDialog has. Anything past that is dropped loudly rather than
-        // silently — a fourth choice needs a different body, not a hidden button.
-        var placed = new[] { commit, other, cancel }.Where(b => b is not null).Count();
-        if (placed < buttons.Count)
-            CrashLog.Write($"[dray:dialog] '{request.Title}' declares {buttons.Count} buttons; a ContentDialog shows {placed}.");
-
-        if (commit is not null) dialog.PrimaryButtonText = request.Current(commit).Label;
-        if (other is not null) dialog.SecondaryButtonText = request.Current(other).Label;
-        if (cancel is not null) dialog.CloseButtonText = request.Current(cancel).Label;
-
-        dialog.DefaultButton = request.DefaultButton is { } d && d == commit
-            ? Xaml.Controls.ContentDialogButton.Primary
-            : Xaml.Controls.ContentDialogButton.None;
-
-        return result => result switch
-        {
-            Xaml.Controls.ContentDialogResult.Primary => commit?.Id,
-            Xaml.Controls.ContentDialogResult.Secondary => other?.Id,
-            _ => cancel?.Id,
-        };
-    }
-
-    /// <summary>Which request button sits in the primary slot and which in the secondary.</summary>
-    static (DialogButton? Commit, DialogButton? Other) Slots(DialogRequest request) => (
-        request.ButtonList.FirstOrDefault(b => b.Role is DialogButtonRole.Confirm or DialogButtonRole.Destructive),
-        request.ButtonList.FirstOrDefault(b => b.Role == DialogButtonRole.Normal));
-
-    /// <summary>
-    /// A <see cref="DialogController"/> projected onto a ContentDialog's three buttons.
-    /// <para>
-    /// Each click holds the button event open with a deferral while the body decides, and cancels
-    /// it when the body keeps the dialog open — which is how a Pull button starts a pull without the
-    /// dialog going away. Escape arrives as a close with no button, and is put to the body as its
-    /// cancel button, so a body that cannot abandon running work can refuse it. The close button has
-    /// no enabled state of its own; the controller refuses a press of a disabled one instead.
-    /// </para>
-    /// </summary>
-    sealed class LiveButtons : IDisposable
+    sealed class LiveFrame : IDisposable
     {
         readonly Xaml.Controls.ContentDialog _dialog;
-        readonly DialogRequest _request;
-        readonly DialogController _controller;
+        readonly DialogSession _session;
+        readonly Xaml.Controls.TextBlock _subtitle;
 
         /// <summary>The dialog's queue, taken on the UI thread rather than read off the dialog later.</summary>
         readonly Microsoft.UI.Dispatching.DispatcherQueue _queue;
 
-        /// <summary>A button press is being answered by the body; set and read on the UI thread.</summary>
-        bool _pressing;
+        DialogButton? _primary;
+        DialogButton? _secondary;
+        DialogButton? _close;
+        string _logged = "";
 
-        readonly DialogButton? _commit;
-        readonly DialogButton? _other;
-        readonly DialogButton? _cancel;
-
-        public LiveButtons(Xaml.Controls.ContentDialog dialog, DialogRequest request, DialogController controller)
+        public LiveFrame(Xaml.Controls.ContentDialog dialog, DialogSession session, Xaml.Controls.TextBlock subtitle)
         {
             _dialog = dialog;
-            _request = request;
-            _controller = controller;
+            _session = session;
+            _subtitle = subtitle;
             _queue = dialog.DispatcherQueue;
-            (_commit, _other) = Slots(request);
-            _cancel = request.ButtonList.Count == 1 ? request.ButtonList[0] : request.CancelButton;
 
             Apply();
 
-            controller.Changed += OnChanged;
-            controller.CloseRequested += OnCloseRequested;
+            session.Changed += OnChanged;
+            session.Closed += OnClosed;
             dialog.PrimaryButtonClick += OnPrimary;
             dialog.SecondaryButtonClick += OnSecondary;
             dialog.CloseButtonClick += OnClose;
             dialog.Closing += OnClosing;
         }
 
+        /// <summary>Redraw the title, subtitle and slots from the session. UI thread only.</summary>
         void Apply()
         {
-            if (_commit is not null)
+            _dialog.Title = _session.Title;
+            _subtitle.Text = _session.Subtitle ?? string.Empty;
+            _subtitle.Visibility = string.IsNullOrEmpty(_session.Subtitle)
+                ? Xaml.Visibility.Collapsed
+                : Xaml.Visibility.Visible;
+
+            var buttons = _session.Buttons;
+
+            if (buttons.Count == 1)
             {
-                var state = _request.Current(_commit);
-                _dialog.PrimaryButtonText = state.Label;
-                _dialog.IsPrimaryButtonEnabled = state.IsEnabled;
+                (_primary, _secondary, _close) = (null, null, buttons[0]);
+            }
+            else
+            {
+                _primary = buttons.FirstOrDefault(b => b.Role is DialogButtonRole.Confirm or DialogButtonRole.Destructive);
+                _secondary = buttons.FirstOrDefault(b => b.Leading)
+                    ?? buttons.FirstOrDefault(b => b.Role == DialogButtonRole.Normal);
+                _close = DialogRequest.CancelOf(buttons);
             }
 
-            if (_other is not null)
-            {
-                var state = _request.Current(_other);
-                _dialog.SecondaryButtonText = state.Label;
-                _dialog.IsSecondaryButtonEnabled = state.IsEnabled;
-            }
+            _dialog.PrimaryButtonText = _primary?.Label ?? string.Empty;
+            _dialog.IsPrimaryButtonEnabled = _primary?.Pressable ?? false;
+            _dialog.SecondaryButtonText = _secondary?.Label ?? string.Empty;
+            _dialog.IsSecondaryButtonEnabled = _secondary?.Pressable ?? false;
+            _dialog.CloseButtonText = _close?.Label ?? string.Empty;
 
-            if (_cancel is not null) _dialog.CloseButtonText = _request.Current(_cancel).Label;
+            _dialog.DefaultButton = _session.DefaultButton is { } d && d.Id == _primary?.Id
+                ? Xaml.Controls.ContentDialogButton.Primary
+                : _close is not null && buttons.Count == 1
+                    ? Xaml.Controls.ContentDialogButton.Close
+                    : Xaml.Controls.ContentDialogButton.None;
+
+            // Said once per distinct row rather than on every redraw: a body re-declares its
+            // buttons after each render, and a busy one renders often.
+            var placed = new[] { _primary, _secondary, _close }.Where(b => b is not null).Select(b => b!.Id).ToHashSet();
+            var dropped = string.Join(", ", buttons.Where(b => !placed.Contains(b.Id)).Select(b => b.Id));
+            if (dropped.Length > 0 && dropped != _logged)
+                CrashLog.Write($"[dray:dialog] '{_session.Title}' has more buttons than a ContentDialog shows; not shown: {dropped}.");
+            _logged = dropped;
         }
 
-        void OnChanged() => _queue.TryEnqueue(Apply);
+        void OnChanged() => Enqueue(Apply);
 
         /// <summary>
-        /// The body closing the dialog itself.
-        /// <para>
-        /// During a press, the press closes the frame when it returns (<see cref="Press"/>). That is
-        /// the common case — a sign-in or a create that closes once its work has succeeded — and
-        /// it arrives on whatever thread the body's work resumed on, where queueing to the UI
-        /// thread threw: the throw went back up into the body's close, and a sign-in that had worked
-        /// stayed on screen. Outside a press, the frame is hidden through the queue, and a failure to
-        /// reach it is logged rather than thrown at the body.
-        /// </para>
+        /// The session closed — a press the body accepted, the body closing itself, or a dismissal.
+        /// Arrives on whatever thread the body's work resumed on, so the frame is hidden through
+        /// the queue, and a failure to reach it is logged rather than thrown back into the body.
         /// </summary>
-        void OnCloseRequested()
-        {
-            if (_pressing) return;
+        void OnClosed(string? _) => Enqueue(_dialog.Hide);
 
+        void Enqueue(Microsoft.UI.Dispatching.DispatcherQueueHandler action)
+        {
             try
             {
-                _queue.TryEnqueue(_dialog.Hide);
+                _queue.TryEnqueue(action);
             }
             catch (Exception ex)
             {
-                CrashLog.Write($"[dray:dialog] '{_request.Title}' close: {ex}");
+                CrashLog.Write($"[dray:dialog] '{_session.Title}': {ex}");
             }
         }
 
-        void OnPrimary(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _commit);
+        void OnPrimary(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _primary);
 
-        void OnSecondary(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _other);
+        void OnSecondary(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _secondary);
 
-        void OnClose(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _cancel);
+        void OnClose(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogButtonClickEventArgs e) => Press(e, _close);
 
-        async void Press(Xaml.Controls.ContentDialogButtonClickEventArgs e, DialogButton? button)
+        /// <summary>
+        /// Every click keeps the frame up; the session decides, and closes it when the body agrees.
+        /// </summary>
+        void Press(Xaml.Controls.ContentDialogButtonClickEventArgs e, DialogButton? button)
         {
+            e.Cancel = true;
             if (button is null) return;
 
-            var deferral = e.GetDeferral();
-            _pressing = true;
+            _ = PressAsync(button.Id);
+        }
+
+        async Task PressAsync(string id)
+        {
             try
             {
-                // A body that finishes its work and closes itself during the press (a sign-in, once
-                // the helper has stored it) answers "stay open", because it has already closed. A
-                // settled controller never holds the frame open: the press closes it.
-                e.Cancel = !await _controller.PressAsync(button.Id) && !_controller.IsClosed;
+                await _session.PressAsync(id);
             }
             catch (Exception ex)
             {
                 // The body failed to answer. Staying open keeps whatever it was showing on screen,
                 // which is better than closing on an error nobody saw.
-                CrashLog.Write($"[dray:dialog] '{_request.Title}' {button.Id}: {ex}");
-                e.Cancel = true;
-            }
-            finally
-            {
-                _pressing = false;
-                deferral.Complete();
+                CrashLog.Write($"[dray:dialog] '{_session.Title}' {id}: {ex}");
             }
         }
 
         /// <summary>
-        /// Every close passes through here. After a press or a body's own close the controller has
-        /// already settled; what is left is Escape.
+        /// Every close passes through here. After a press or a body's own close the session has
+        /// settled and the frame is going because it was told to; what is left is Escape, which
+        /// is a dismissal — the way out of a dialog is never something the body gets to refuse.
         /// </summary>
-        async void OnClosing(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogClosingEventArgs e)
+        void OnClosing(Xaml.Controls.ContentDialog sender, Xaml.Controls.ContentDialogClosingEventArgs e)
         {
-            if (_controller.IsClosed) return;
-
-            if (_cancel is null)
-            {
-                _controller.Dismissed();
-                return;
-            }
-
-            var deferral = e.GetDeferral();
-            try
-            {
-                e.Cancel = !await _controller.PressAsync(_cancel.Id);
-            }
-            catch (Exception ex)
-            {
-                CrashLog.Write($"[dray:dialog] '{_request.Title}' escape: {ex}");
-                e.Cancel = true;
-            }
-            finally
-            {
-                deferral.Complete();
-            }
+            if (!_session.IsClosed) _session.Dismiss();
         }
 
         public void Dispose()
         {
-            _controller.Changed -= OnChanged;
-            _controller.CloseRequested -= OnCloseRequested;
+            _session.Changed -= OnChanged;
+            _session.Closed -= OnClosed;
             _dialog.PrimaryButtonClick -= OnPrimary;
             _dialog.SecondaryButtonClick -= OnSecondary;
             _dialog.CloseButtonClick -= OnClose;

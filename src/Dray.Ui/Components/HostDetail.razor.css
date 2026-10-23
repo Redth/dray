@@ -1,0 +1,172 @@
+.hostd {
+    min-width: 0;
+}
+
+.hostd__head {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s4);
+}
+
+.hostd__title {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.hostd__nameline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1) var(--s3);
+}
+
+.hostd__name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-size: var(--text-lg);
+    font-weight: var(--text-lg-weight);
+    line-height: var(--text-lg-lh);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hostd__engine {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: var(--text-sm);
+}
+
+.hostd__actions {
+    flex: 0 0 auto;
+    align-self: flex-start;
+}
+
+.hostd__problem {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    margin: 0 var(--s4) var(--s3);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-md);
+    background: var(--danger-tint);
+    color: var(--danger-ink);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+}
+
+.hostd__problem ::deep .icon {
+    flex: 0 0 auto;
+    margin-top: 2px;
+}
+
+/* The facts sit flush with the header's text column, so the card reads as one block rather than a
+   heading over a table. */
+.hostd__facts {
+    grid-template-columns: minmax(auto, 7rem) minmax(0, 1fr);
+    padding: 0 var(--s4) var(--s4);
+    border-bottom: 1px solid var(--line);
+}
+
+.hostd__endpoint {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    margin-top: -4px;
+    margin-bottom: -4px;
+}
+
+.hostd__endpoint .mono {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.hostd__section {
+    padding: var(--s4);
+    border-bottom: 1px solid var(--line);
+}
+
+.hostd__sectionhead {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    margin-bottom: var(--s3);
+}
+
+.hostd__h {
+    color: var(--ink);
+    font-size: var(--text-md);
+    font-weight: var(--text-md-weight);
+}
+
+.hostd__count {
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.hostd__service {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+}
+
+.hostd__note {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--text-sm);
+}
+
+/* Supported capabilities as a row of quiet chips: nine facts the user rarely needs to read, so
+   they take one line instead of three rows of a grid. */
+.hostd__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+}
+
+.hostd__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    height: 24px;
+    padding: 0 var(--s2);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--ink);
+    font-size: var(--text-sm);
+}
+
+.hostd__chip ::deep .icon {
+    color: var(--ok);
+}
+
+.hostd__missing {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: var(--s3) var(--s4);
+    margin-top: var(--s4);
+}
+
+.hostd__skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+}
+
+/* The command-line panel is the last section and needs no rule beneath it. */
+.hostd ::deep .cli {
+    margin-top: 0;
+}
+
+.hostd ::deep .cli > .panel__head {
+    padding: var(--s4) var(--s4) 0;
+    border-bottom: 0;
+}
+
+.hostd ::deep .cli > .panel__body {
+    padding: var(--s3) var(--s4) var(--s4);
+}

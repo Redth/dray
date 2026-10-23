@@ -1,0 +1,87 @@
+@* The gallery's specimen of the dialog frame: every state the frame has to draw, driven from a
+   body the way a real one drives it. A commit that is off until the form is complete, a press
+   that stays open while it works, a refusal reported in place, and a second step that changes the
+   title and the whole button row — the four things the old alert-based frame could not do. *@
+@inherits DialogBody
+
+@if (!_details)
+{
+    <div class="field">
+        <label class="field__label" for="gal-name">Container name</label>
+        <input id="gal-name" class="input" placeholder="api" autocomplete="off" spellcheck="false"
+               @bind="_name" @bind:event="oninput" />
+    </div>
+
+    <p class="gal-dlg__hint">
+        Save is off until there is a name. Type <span class="mono">taken</span> to see a refusal
+        reported in place; anything else saves after a moment of work. Return presses Save, Escape
+        cancels.
+    </p>
+
+    @if (_problem is { } problem)
+    {
+        <p class="gal-dlg__problem" role="alert">@problem</p>
+    }
+
+    <Button Label="Show details" Variant="ButtonVariant.Ghost" Icon="IconRef.ChevronRight"
+            OnClick="() => _details = true" />
+}
+else
+{
+    <p>
+        A second step. The title and the button row both changed, and Back sits at the leading edge
+        apart from the decision — the frame follows the body rather than being fixed when it opened.
+    </p>
+}
+
+@code {
+    string _name = "";
+    string? _problem;
+    bool _saving;
+    bool _details;
+
+    protected override string? Title => _details ? "Container details — more" : "Container details";
+
+    protected override IReadOnlyList<DialogButton> Buttons => _details
+        ? [DialogButton.Back(), DialogButton.Confirm("done", "Done")]
+        :
+        [
+            DialogButton.Cancel(),
+            DialogButton.Confirm("save", _saving ? "Saving…" : "Save") with
+            {
+                Enabled = _name.Trim().Length > 0,
+                Busy = _saving,
+            },
+        ];
+
+    protected override async Task<bool> OnPressedAsync(string id)
+    {
+        switch (id)
+        {
+            case "back":
+                _details = false;
+                StateHasChanged();
+                return false;
+
+            case "save":
+                _saving = true;
+                _problem = null;
+                StateHasChanged();
+
+                await Task.Delay(900);
+                _saving = false;
+
+                if (_name.Trim() == "taken")
+                {
+                    _problem = "A container called taken already exists. Choose another name.";
+                    StateHasChanged();
+                    return false;
+                }
+
+                return true;
+
+            default:
+                return true;
+        }
+    }
+}

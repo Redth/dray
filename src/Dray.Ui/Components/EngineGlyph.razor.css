@@ -1,0 +1,22 @@
+.glyph {
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--muted);
+    transition: background var(--motion-base) var(--motion-ease), color var(--motion-base) var(--motion-ease);
+}
+
+.glyph--lg {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--r-lg);
+}
+
+.glyph.is-active {
+    background: color-mix(in oklab, var(--brand) 14%, var(--surface));
+    color: var(--brand);
+}

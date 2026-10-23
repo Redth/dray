@@ -79,8 +79,7 @@
     /// </summary>
     public static async Task<string?> ShowAsync(IShellBridge shell, string? image = null)
     {
-        var dialog = new DialogController();
-        await shell.ShowDialogAsync(new DialogRequest(
+        var session = new DialogSession(new DialogRequest(
             "Run a container",
             typeof(RunDialog),
             Parameters: new Dictionary<string, object?> { [nameof(Image)] = image },
@@ -88,23 +87,22 @@
 
             // Wider than a plain form: three of these fields are multi-line, and a narrow box turns
             // a two-column port mapping into something that wraps.
-            Size: DialogSize.Large,
-            Controller: dialog));
+            Size: DialogSize.Large));
+        await shell.ShowDialogAsync(session);
 
-        return dialog.Result == "run" ? dialog.Value as string : null;
+        return session.Result == "run" ? session.Value as string : null;
     }
 
     /// <summary>Pre-filled when the dialog is opened from a specific image's row.</summary>
     [Parameter] public string? Image { get; set; }
 
-    protected override void DeclareButtons()
-    {
-        Button("cancel", "Cancel", enabled: !_running);
-        Button("run", _start ? "Run" : "Create",
-            enabled: !_running && _image.Trim().Length > 0, busy: _running);
-    }
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel("Cancel") with { Enabled = !_running },
+        DialogButton.Confirm("run", _start ? "Run" : "Create") with { Enabled = !_running && _image.Trim().Length > 0, Busy = _running },
+    ];
 
-    protected override async Task<bool> OnButtonAsync(string buttonId)
+    protected override async Task<bool> OnPressedAsync(string buttonId)
     {
         if (buttonId == "run")
         {

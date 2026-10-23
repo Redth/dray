@@ -1,0 +1,11 @@
+/* Sized by its content, never by its container: this is the element the native head measures, and
+   an element that stretched to fill the sheet would report the sheet's height back to it.
+
+   flow-root so a first or last child's margin is inside the box rather than collapsing through it
+   — a measurement that missed a margin would size the sheet a few pixels short and scroll. */
+.dlgcontent {
+    display: flow-root;
+    min-width: 0;
+    color: var(--muted);
+    font-size: var(--text-base);
+}

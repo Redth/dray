@@ -15,7 +15,7 @@
 <div class="field">
     <label class="field__label" for="push-ref">Image</label>
     <input id="push-ref" class="input mono" placeholder="ghcr.io/owner/app:1.2"
-           @bind="_reference" @bind:event="oninput" @onkeydown="OnKeyDown"
+           @bind="_reference" @bind:event="oninput"
            autocomplete="off" spellcheck="false" disabled="@_pushing" />
 </div>
 
@@ -52,38 +52,32 @@ else if (!_pushing && _layers.Count == 0)
     /// </summary>
     public static async Task ShowAsync(IShellBridge shell, string? reference)
     {
-        var dialog = new DialogController();
-        await shell.ShowDialogAsync(new DialogRequest(
+        var session = new DialogSession(new DialogRequest(
             "Push an image",
             typeof(PushDialog),
             Parameters: new Dictionary<string, object?> { [nameof(Reference)] = reference },
-            Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("push", "Push")],
-            Controller: dialog));
+            Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("push", "Push")]));
+        await shell.ShowDialogAsync(session);
     }
 
     /// <summary>The image to push, pre-filled from the row this was opened on.</summary>
     [Parameter] public string? Reference { get; set; }
 
-    protected override void DeclareButtons()
-    {
-        Button("cancel", _pushing ? "Cancel" : "Close");
-        Button("push", _pushing ? "Pushing…" : "Push",
-            enabled: !_pushing && !string.IsNullOrWhiteSpace(_reference), busy: _pushing);
-    }
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(_pushing ? "Cancel" : "Close"),
+        DialogButton.Confirm("push", _pushing ? "Pushing…" : "Push") with { Enabled = !_pushing && !string.IsNullOrWhiteSpace(_reference), Busy = _pushing },
+    ];
 
-    protected override async Task<bool> OnButtonAsync(string buttonId)
+    protected override Task<bool> OnPressedAsync(string buttonId)
     {
-        if (buttonId == "push")
-        {
-            // Started and left running: the dialog stays open to show it.
-            _ = StartAsync();
-            return false;
-        }
+        // Started and left running: the dialog stays open to show it. Cancel never reaches here —
+        // the session closes the dialog, and closing cancels the token the stream is linked to, so
+        // Dray stops reading it. The engine finishes what it started; saying otherwise would be a lie, and
+        // a half-pushed image is not a state Dray can create.
+        if (buttonId == "push") _ = StartAsync();
 
-        // Cancelling stops Dray reading the stream; the engine finishes what it started. Saying
-        // otherwise would be a lie, and a half-pushed image is not a state Dray can create.
-        if (_cts is { } cts) await cts.CancelAsync();
-        return true;
+        return Task.FromResult(false);
     }
 
     string _reference = "";
@@ -137,10 +131,6 @@ else if (!_pushing && _layers.Count == 0)
         => string.Equals(a.TrimEnd('/'), b.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
            || a.Contains(b, StringComparison.OrdinalIgnoreCase);
 
-    async Task OnKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && !_pushing && !string.IsNullOrWhiteSpace(_reference)) await StartAsync();
-    }
 
     async Task StartAsync()
     {
@@ -153,7 +143,9 @@ else if (!_pushing && _layers.Count == 0)
         _layers.Clear();
         _order.Clear();
 
-        _cts = new CancellationTokenSource();
+        // Linked to the dialog's own closing, so Cancel, Escape or the window going away all stop
+        // Dray reading the stream — the body is not asked first when the way out is pressed.
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(Closing);
 
         // Started from the head's button as well as from Enter, and only an event handler re-renders
         // by itself — so the buttons learn they are busy from here.

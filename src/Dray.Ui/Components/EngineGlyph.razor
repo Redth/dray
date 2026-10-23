@@ -1,0 +1,15 @@
+@* The square an engine's glyph sits in, in the host list, the detail card and the chooser. A glyph
+   for the kind of connection, never a vendor's logo (DESIGN.md 10). *@
+
+<span class="glyph @(Large ? "glyph--lg" : null) @(Active ? "is-active" : null)" aria-hidden="true">
+    <Icon Name="Icon" Size="@(Large ? IconSize.Lg : IconSize.Md)" />
+</span>
+
+@code {
+    [Parameter, EditorRequired] public IconRef Icon { get; set; }
+
+    [Parameter] public bool Large { get; set; }
+
+    /// <summary>The engine in use. Carries the brand tint — one of the few places it appears.</summary>
+    [Parameter] public bool Active { get; set; }
+}
