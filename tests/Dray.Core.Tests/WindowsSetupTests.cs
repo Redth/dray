@@ -92,12 +92,122 @@ public class WindowsSetupTests
         Assert.Equal("wsl.distro", Assert.Single(WindowsSetupPlan.ForLinuxContainers(state)).Id);
     }
 
+    /// <summary>
+    /// A distribution is not an engine. The old plan stopped here and showed an empty track; the
+    /// step after a distribution is putting an engine in it.
+    /// </summary>
     [Fact]
-    public void SuggestsNoDistributionWhenThereIsAUsableOne()
+    public void OnceThereIsADistributionTheNextStepIsAnEngine()
     {
-        var state = State(distros: [new WslDistro("Ubuntu", 2, true, true)]);
+        var steps = WindowsSetupPlan.ForLinuxContainers(State(distros: [new WslDistro("Ubuntu", 2, true, true)]));
 
-        Assert.Empty(WindowsSetupPlan.ForLinuxContainers(state));
+        Assert.DoesNotContain(steps, s => s.Id == "wsl.distro");
+        Assert.Equal("engine.install", Assert.Single(steps).Id);
+    }
+
+    /// <summary>
+    /// A distribution is registered to the user who installs it. Elevating would install it for
+    /// whichever administrator answered the prompt — on a machine with a separate admin account,
+    /// the wrong person.
+    /// </summary>
+    [Fact]
+    public void InstallsADistributionWithoutElevatingAndWithoutAConsole()
+    {
+        var step = Assert.Single(WindowsSetupPlan.ForLinuxContainers(State(distros: [])));
+
+        Assert.False(step.NeedsElevation);
+        Assert.Equal(SetupStepKind.InApp, step.Kind);
+        Assert.Contains("--no-launch", step.Arguments);
+        Assert.NotNull(step.Duration);
+    }
+
+    [Fact]
+    public void OffersToCreateAnAccountInADistributionThatHasNone()
+    {
+        var ubuntu = new WslDistro("Ubuntu", 2, false, true);
+        var state = State(distros: [ubuntu]) with { Target = new DistroSetup(ubuntu, DistroEngine.None, HasUser: false) };
+
+        var steps = WindowsSetupPlan.ForLinuxContainers(state);
+
+        var account = steps.Single(s => s.Id == "linux.user");
+        Assert.Equal(SetupStepKind.CreateLinuxUser, account.Kind);
+        Assert.True(account.Optional);
+        Assert.Contains(steps, s => s.Id == "engine.install");
+    }
+
+    [Theory]
+    [InlineData(DistroEngine.None, "engine.install")]
+    [InlineData(DistroEngine.Unknown, "engine.install")]
+    [InlineData(DistroEngine.Stopped, "engine.start")]
+    [InlineData(DistroEngine.Running, "engine.connect")]
+    public void TheEngineStepFollowsWhatIsInTheDistribution(DistroEngine engine, string expected)
+    {
+        var ubuntu = new WslDistro("Ubuntu", 2, true, true);
+        var state = State(distros: [ubuntu]) with { Target = new DistroSetup(ubuntu, engine, HasUser: true) };
+
+        Assert.Equal(expected, Assert.Single(WindowsSetupPlan.ForLinuxContainers(state)).Id);
+    }
+
+    /// <summary>The engine install runs as root inside the distribution, so the script is shown whole.</summary>
+    [Fact]
+    public void TheEngineInstallShowsTheScriptItRunsAsRoot()
+    {
+        var step = Assert.Single(WindowsSetupPlan.ForLinuxContainers(State(distros: [new WslDistro("Ubuntu", 2, true, true)])));
+
+        Assert.Equal(WindowsSetupPlan.InstallEngineScript, step.Script);
+        Assert.Equal(["-d", "Ubuntu", "-u", "root", "--exec", "sh", "-c", WindowsSetupPlan.InstallEngineScript], step.Arguments);
+        Assert.Contains("get.docker.com", step.Script);
+    }
+
+    /// <summary>The route works in the default distribution, else a running one — not whichever sorts first.</summary>
+    [Fact]
+    public void TargetsTheDefaultDistribution()
+    {
+        var state = State(distros:
+        [
+            new WslDistro("Alpine", 2, true, false),
+            new WslDistro("Ubuntu", 2, false, true),
+        ]);
+
+        Assert.Equal("Ubuntu", state.TargetDistro!.Name);
+    }
+
+    /// <summary>
+    /// Docker Desktop installed is one action from Linux containers, so its route comes first — but
+    /// the engine in WSL is still offered beside it, because that is a real choice.
+    /// </summary>
+    [Fact]
+    public void DockerDesktopInTheOtherModeIsOneSwitchAway()
+    {
+        var state = State() with { Desktop = new DockerDesktopState(true, true, DesktopEngineMode.Windows) };
+
+        var routes = WindowsSetupPlan.LinuxRoutes(state);
+
+        Assert.Equal(["linux.desktop", "linux.wsl"], routes.Select(r => r.Id));
+        Assert.True(routes[0].Recommended);
+
+        var step = Assert.Single(routes[0].Steps);
+        Assert.Equal("desktop.linux", step.Id);
+        Assert.Equal(DesktopEngineMode.Linux, step.DesktopMode);
+    }
+
+    [Fact]
+    public void AStoppedDockerDesktopIsStartedRatherThanSwitched()
+    {
+        var state = State() with { Desktop = new DockerDesktopState(true, false, null) };
+
+        Assert.Equal("desktop.start", Assert.Single(WindowsSetupPlan.LinuxRoutes(state)[0].Steps).Id);
+    }
+
+    /// <summary>Without Docker Desktop, the free route is the recommended one and Docker Desktop is the alternative.</summary>
+    [Fact]
+    public void WithoutDockerDesktopTheEngineInWslComesFirst()
+    {
+        var routes = WindowsSetupPlan.LinuxRoutes(State());
+
+        Assert.Equal(["linux.wsl", "linux.desktop"], routes.Select(r => r.Id));
+        Assert.True(routes[0].Recommended);
+        Assert.Equal("desktop.install", Assert.Single(routes[1].Steps).Id);
     }
 
     /// <summary>
@@ -108,9 +218,9 @@ public class WindowsSetupTests
     [Fact]
     public void OffersTheFeatureStepEvenWhenItCannotBeSure()
     {
-        Assert.NotEmpty(WindowsSetupPlan.ForWindowsContainers(State(containers: SetupFact.Unknown)));
-        Assert.NotEmpty(WindowsSetupPlan.ForWindowsContainers(State(containers: SetupFact.Absent)));
-        Assert.Empty(WindowsSetupPlan.ForWindowsContainers(State(containers: SetupFact.Present)));
+        Assert.Contains(WindowsSetupPlan.ForWindowsContainers(State(containers: SetupFact.Unknown)), s => s.Id == "feature.containers");
+        Assert.Contains(WindowsSetupPlan.ForWindowsContainers(State(containers: SetupFact.Absent)), s => s.Id == "feature.containers");
+        Assert.DoesNotContain(WindowsSetupPlan.ForWindowsContainers(State(containers: SetupFact.Present)), s => s.Id == "feature.containers");
     }
 
     /// <summary>
@@ -138,21 +248,56 @@ public class WindowsSetupTests
     [Fact]
     public void RendersTheCommandTheUserWouldType()
     {
-        var step = Assert.Single(WindowsSetupPlan.ForWindowsContainers(State()));
+        var step = WindowsSetupPlan.ForWindowsContainers(State()).Single(s => s.Id == "feature.containers");
 
         Assert.Equal(
             "dism.exe /online /enable-feature /featurename:Containers /all /norestart",
             step.CommandLine);
     }
 
-    /// <summary>Dray does not install an engine, and says so rather than leaving a gap in the list.</summary>
+    /// <summary>
+    /// Dray installs the engine as well as the feature now (PRODUCT.md): a feature with no engine to
+    /// drive it is not a working setup.
+    /// </summary>
     [Fact]
-    public void ExplainsThatItWillNotInstallAnEngine()
+    public void OffersAnEngineForWindowsContainersAfterTheFeature()
     {
-        var advice = WindowsSetupPlan.EngineAdvice(State());
+        var steps = WindowsSetupPlan.ForWindowsContainers(State());
 
-        Assert.NotNull(advice);
-        Assert.Contains("does not install one", advice);
+        Assert.Equal(["feature.containers", "desktop.install"], steps.Select(s => s.Id));
+    }
+
+    [Fact]
+    public void DockerDesktopInLinuxModeIsSwitchedForWindowsContainers()
+    {
+        var state = State(containers: SetupFact.Present) with { Desktop = new DockerDesktopState(true, true, DesktopEngineMode.Linux) };
+
+        Assert.Equal("desktop.windows", Assert.Single(WindowsSetupPlan.ForWindowsContainers(state)).Id);
+    }
+
+    /// <summary>Windows Server has Microsoft's own route, and does not need Docker Desktop for it.</summary>
+    [Fact]
+    public void WindowsServerGetsMicrosoftsEngineScript()
+    {
+        var steps = WindowsSetupPlan.ForWindowsContainers(State() with { IsServer = true });
+
+        var engine = steps.Single(s => s.Id == "engine.windows");
+        Assert.Contains(engine.Arguments, a => a.Contains("install-docker-ce.ps1"));
+        Assert.DoesNotContain(steps, s => s.Id == "desktop.install");
+    }
+
+    /// <summary>
+    /// Home has no Hyper-V and no Containers feature, so there is nothing to install — and a machine
+    /// whose Linux containers work is set up, not missing half.
+    /// </summary>
+    [Fact]
+    public void WindowsHomeIsExplainedRatherThanOfferedSteps()
+    {
+        var home = State(linuxEngine: true) with { IsHomeEdition = true };
+
+        Assert.Empty(WindowsSetupPlan.WindowsRoutes(home));
+        Assert.Contains("Home", WindowsSetupPlan.EngineAdvice(home));
+        Assert.True(home.IsComplete);
     }
 }
 

@@ -1,0 +1,52 @@
+.cpl {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+}
+
+.cpl__item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--s3);
+    row-gap: 2px;
+    align-items: baseline;
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+}
+
+.cpl__sev {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 0 var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    grid-row: span 2;
+    align-self: start;
+}
+
+.cpl__sev--error {
+    background: var(--danger-tint);
+    color: var(--danger-ink);
+}
+
+.cpl__sev--warning {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+}
+
+/* Compose's own words — worth selecting to search for. */
+.cpl__message {
+    overflow-wrap: anywhere;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.cpl__where {
+    font-size: var(--text-xs);
+}
+
+.cpl__note {
+    margin: var(--s4) 0 0;
+    font-size: var(--text-sm);
+}

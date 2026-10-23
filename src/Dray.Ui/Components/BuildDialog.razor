@@ -2,10 +2,7 @@
 
    The engine's output is shown verbatim rather than reformatted: people read build logs by pattern,
    and rewriting them makes a familiar thing unfamiliar at exactly the moment something has gone
-   wrong.
-
-   A dialog body: the title and buttons are the platform's. The button's label counts the engine's
-   steps while it works, so the progress is in the native row rather than a bar drawn here. *@
+   wrong. *@
 @inherits DialogBody
 @implements IAsyncDisposable
 @inject EngineManager Engine
@@ -104,27 +101,34 @@ else if (_output.Count == 0)
 }
 
 @code {
-    /// <summary>The page refreshes its image list once this closes.</summary>
-    public static DialogRequest Request() => new(
-        "Build an image",
-        typeof(BuildDialog),
-        Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("build", "Build")],
-        Size: DialogSize.Large);
+    /// <summary>
+    /// Open it. Completes when it closes; the page refreshes then, and the build — which may have
+    /// finished long before — needs no callback across into the dialog's own WebView to say so.
+    /// </summary>
+    public static async Task ShowAsync(IShellBridge shell)
+    {
+        var session = new DialogSession(new DialogRequest(
+            "Build an image",
+            typeof(BuildDialog),
+            Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("build", "Build")]));
+        await shell.ShowDialogAsync(session);
+    }
 
     protected override IReadOnlyList<DialogButton> Buttons =>
     [
         DialogButton.Cancel(_building ? "Cancel" : "Close"),
-        DialogButton.Confirm("build", _building ? Progress : "Build") with
-        {
-            Enabled = _context.Trim().Length > 0,
-            Busy = _building,
-        },
+        DialogButton.Confirm("build", _building ? Progress : "Build") with { Enabled = !_building && _context.Trim().Length > 0, Busy = _building },
     ];
 
-    protected override async Task<bool> OnPressedAsync(string id)
+    protected override Task<bool> OnPressedAsync(string buttonId)
     {
-        await StartAsync();
-        return false;
+        // Started and left running: the dialog stays open to show it. Cancel never reaches here —
+        // the session closes the dialog, and closing cancels the token the stream is linked to, so
+        // Dray stops reading it. The engine finishes the layer it is on; saying otherwise would be a
+        // lie, and a build is not a transaction Dray can roll back.
+        if (buttonId == "build") _ = StartAsync();
+
+        return Task.FromResult(false);
     }
 
     string _context = "";
@@ -148,10 +152,11 @@ else if (_output.Count == 0)
     string? Builder => _builder.Length == 0 ? null : _builder;
 
     /// <summary>
-    /// Asked for when the dialog opens rather than when the page loads: this shells out to a
+    /// Asked for once, when the dialog opens rather than when the page loads: this shells out to a
     /// program that may not be installed, and most sessions never build anything.
     /// </summary>
     protected override async Task OnInitializedAsync() => _builders = await Engine.ListBuildersAsync();
+
     bool _building;
     string? _error;
     string? _done;
@@ -180,7 +185,12 @@ else if (_output.Count == 0)
         _done = null;
         _step = null;
         _output.Clear();
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(Session.Closing);
+        // Linked to the dialog's own closing, so Cancel, Escape or the window going away all stop
+        // Dray reading the stream — the body is not asked first when the way out is pressed.
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(Closing);
+
+        // Started from the head's button, and only an event handler re-renders by itself — so the
+        // buttons learn they are busy from here.
         StateHasChanged();
 
         var request = new BuildRequest(
@@ -224,8 +234,6 @@ else if (_output.Count == 0)
         }
         catch (OperationCanceledException)
         {
-            // Cancelling stops Dray reading the stream; the engine finishes the layer it is on.
-            // Saying otherwise would be a lie — a build is not a transaction Dray can roll back.
             _done = "Build cancelled.";
         }
         catch (Exception ex)
@@ -237,6 +245,7 @@ else if (_output.Count == 0)
             _building = false;
             _cts?.Dispose();
             _cts = null;
+            StateHasChanged();
         }
     }
 

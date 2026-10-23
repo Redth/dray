@@ -98,7 +98,7 @@ public enum DialogSize
 /// <para>
 /// The page says what it wants and the head decides what that is made of, exactly as
 /// <see cref="PageChrome"/> does for the toolbar. Nothing here names a widget, because the answer
-/// is an <c>NSAlert</c> sheet on macOS, a <c>ContentDialog</c> on Windows, an
+/// is an <c>NSPanel</c> sheet on macOS, a <c>ContentDialog</c> on Windows, an
 /// <c>AdwMessageDialog</c> on GTK, and a <c>&lt;dialog&gt;</c> in a browser — and a page that knew
 /// which would be a page that had to be changed to add the next head.
 /// </para>

@@ -1,0 +1,427 @@
+@* A stack at a glance: where to reach it, what it is using, what it is made of, and whether any
+   of its images has moved at the registry.
+
+   Every fact here is the engine's or the files', never a guess. A port link is a binding the engine
+   reports, not a line in the compose file that may not have been deployed; an image is "up to
+   date" only when its registry said so — otherwise it says it was not checked, and why. *@
+@implements IAsyncDisposable
+@inject EngineManager Engine
+@inject StatsHub Stats
+@inject RegistryReader Registries
+@inject IShellBridge Shell
+
+<div class="ov">
+    @if (Links.Count > 0 || Icon is not null)
+    {
+        <div class="ov__links">
+            @if (Icon is { } icon)
+            {
+                <img class="ov__icon" src="@icon" alt="" />
+            }
+
+            @foreach (var (title, url, note) in Links)
+            {
+                var captured = url;
+
+                <button type="button" class="ov__link" title="@url" @onclick="() => Shell.OpenExternalAsync(captured)">
+                    <Icon Name="IconRef.External" Size="IconSize.Sm" />
+                    <span>@title</span>
+                    @if (note is { Length: > 0 })
+                    {
+                        <span class="muted mono ov__linknote">@note</span>
+                    }
+                </button>
+            }
+        </div>
+    }
+
+    <div class="ov__grid">
+        <section class="panel ov__panel" aria-labelledby="ov-use">
+            <div class="panel__head">
+                <h3 id="ov-use" class="panel__title">In use now</h3>
+                @if (Running.Count > 0)
+                {
+                    <span class="muted ov__sub">@Running.Count running</span>
+                }
+            </div>
+
+            @if (Running.Count == 0)
+            {
+                <p class="muted ov__empty">Nothing is running, so there is nothing to measure.</p>
+            }
+            else if (Engine.Selected?.Capabilities.SupportsStats == false)
+            {
+                <p class="muted ov__empty">This engine does not report resource use.</p>
+            }
+            else
+            {
+                <div class="ov__totals">
+                    <div class="ov__total">
+                        <span class="muted">CPU</span>
+                        <span class="ov__figure">@Humanize.Percent(TotalCpu)</span>
+                    </div>
+                    <div class="ov__total">
+                        <span class="muted">Memory</span>
+                        <span class="ov__figure">@(TotalMemory is { } m ? Humanize.Bytes(m) : "—")</span>
+                    </div>
+                </div>
+
+                <table class="table ov__table">
+                    <tbody>
+                        @foreach (var service in Stack.Services.Where(s => s.RunningCount > 0))
+                        {
+                            var (cpu, memory) = UsageOf(service);
+
+                            <tr>
+                                <td>@service.Name</td>
+                                <td class="num muted">@Humanize.Percent(cpu)</td>
+                                <td class="num muted">@(memory is { } bytes ? Humanize.Bytes(bytes) : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section class="panel ov__panel" aria-labelledby="ov-images">
+            <div class="panel__head">
+                <h3 id="ov-images" class="panel__title">Images</h3>
+                <Button Label="Check for updates" Icon="IconRef.Refresh" Variant="ButtonVariant.Ghost"
+                        Busy="_checking" Disabled="@(_checking || Images.Count == 0)" OnClick="CheckAgainAsync" />
+            </div>
+
+            @if (Images.Count == 0)
+            {
+                <p class="muted ov__empty">No containers yet, so no images have been pulled for this stack here.</p>
+            }
+            else
+            {
+                <table class="table ov__table">
+                    <tbody>
+                        @foreach (var image in Images)
+                        {
+                            <tr>
+                                <td class="mono">@image</td>
+                                <td class="num">
+                                    @if (UpdatePill(image) is { } pill)
+                                    {
+                                        <span title="@(_updates.GetValueOrDefault(image)?.Detail)"><StatePill Status="pill" /></span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                @if (_updates.Values.Any(u => u.State == ImageUpdateState.Available))
+                {
+                    <p class="note ov__note">
+                        <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                        <span>Pull and update fetches the new images and recreates what uses them, if the stack is running.</span>
+                    </p>
+                }
+            }
+        </section>
+
+        <section class="panel ov__panel" aria-labelledby="ov-networks">
+            <div class="panel__head">
+                <h3 id="ov-networks" class="panel__title">Networks</h3>
+            </div>
+
+            @if (_networks is null)
+            {
+                <p class="muted ov__empty">Reading…</p>
+            }
+            else if (_networks.Count == 0)
+            {
+                <p class="muted ov__empty">None of its own. Compose creates a default network on the first Deploy.</p>
+            }
+            else
+            {
+                <table class="table ov__table">
+                    <tbody>
+                        @foreach (var network in _networks)
+                        {
+                            <tr>
+                                <td class="mono">@network.Name</td>
+                                <td class="muted">@network.Driver</td>
+                                <td class="num muted">@Humanize.Count(network.Members.Count) attached</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section class="panel ov__panel" aria-labelledby="ov-volumes">
+            <div class="panel__head">
+                <h3 id="ov-volumes" class="panel__title">Volumes</h3>
+            </div>
+
+            @if (_volumes is null)
+            {
+                <p class="muted ov__empty">Reading…</p>
+            }
+            else if (_volumes.Count == 0)
+            {
+                <p class="muted ov__empty">No named volumes. Anything a container writes outside one goes with the container.</p>
+            }
+            else
+            {
+                <table class="table ov__table">
+                    <tbody>
+                        @foreach (var volume in _volumes)
+                        {
+                            <tr>
+                                <td class="mono"><a href="@($"/volumes/{Uri.EscapeDataString(volume.Name)}")">@volume.Name</a></td>
+                                <td class="num muted">@(volume.SizeBytes is { } size ? Humanize.Bytes(size) : "size not reported")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public StackSummary Stack { get; set; } = default!;
+
+    IReadOnlyList<NetworkSummary>? _networks;
+    IReadOnlyList<VolumeSummary>? _volumes;
+    readonly Dictionary<string, ImageUpdate> _updates = new(StringComparer.Ordinal);
+    bool _checking;
+    string? _loadedFor;
+    string _watching = "";
+    bool _renderQueued;
+
+    IReadOnlyList<ContainerSummary> Running => [.. Stack.Services.SelectMany(s => s.Replicas).Where(r => r.State == DockerState.Running)];
+
+    IReadOnlyList<string> Images => [.. Stack.Services.SelectMany(s => s.Replicas).Select(r => r.Image).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Follow whatever is running now; StatsHub stops the streams for anything that is not.
+        var running = string.Join(',', Running.Select(r => r.Id));
+
+        if (running != _watching)
+        {
+            _watching = running;
+            await Stats.WatchAsync(Running.Select(r => r.Id));
+        }
+
+        Stats.Updated -= OnStats;
+        Stats.Updated += OnStats;
+
+        _ = LoadDocumentAsync();
+
+        // Again whenever what the stack is made of changes — a deploy creates its networks and
+        // volumes and pulls its images, and a page opened on a draft must not keep the draft's view.
+        var shape = $"{Stack.Name}|{Stack.ContainerCount}";
+        if (_loadedFor != shape)
+        {
+            _loadedFor = shape;
+            _ = LoadResourcesAsync();
+        }
+
+        var images = string.Join(',', Images);
+        if (_checkedFor != images)
+        {
+            _checkedFor = images;
+            _ = CheckUpdatesAsync();
+        }
+    }
+
+    string? _checkedFor;
+
+    void OnStats()
+    {
+        if (_renderQueued) return;
+
+        // A reading arrives per container per second; one render a second for all of them is plenty.
+        _renderQueued = true;
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Delay(1000);
+            _renderQueued = false;
+            StateHasChanged();
+        });
+    }
+
+    async Task LoadResourcesAsync()
+    {
+        try
+        {
+            var networks = Engine.Selected?.Capabilities.SupportsNetworks == false ? [] : await Engine.ListNetworksAsync();
+            var volumes = Engine.Selected?.Capabilities.SupportsVolumes == false ? [] : await Engine.ListVolumesAsync();
+
+            // Compose labels every network and volume it creates with the project, which is the
+            // whole membership test — a network the stack only joins as external is not its own.
+            _networks = [.. networks.Where(n => n.Labels.GetValueOrDefault(ComposeLabels.Project) == Stack.Name).OrderBy(n => n.Name)];
+            _volumes = [.. volumes.Where(v => v.Stack == Stack.Name).OrderBy(v => v.Name)];
+        }
+        catch (Exception)
+        {
+            _networks ??= [];
+            _volumes ??= [];
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Ask each image's registry whether its tag has moved. When the stack's page opens and on
+    /// demand — never on a timer, and never at boot.
+    /// </summary>
+    async Task CheckUpdatesAsync()
+    {
+        if (_checking) return;
+
+        _checking = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var asked = new HashSet<string>(StringComparer.Ordinal);
+
+            // Until every image has an answer: one can appear while another is being asked about —
+            // a deploy creates its containers one after another — and it must not be skipped
+            // because a check was already running.
+            while (Images.FirstOrDefault(i => !asked.Contains(i) && (_manual || !_updates.ContainsKey(i))) is { } image)
+            {
+                asked.Add(image);
+                _updates[image] = await Engine.CheckImageUpdateAsync(image, Registries);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        finally
+        {
+            _checking = false;
+            _manual = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Set by the button: check every image again, not only the ones not yet asked about.</summary>
+    bool _manual;
+
+    Task CheckAgainAsync()
+    {
+        _manual = true;
+        return CheckUpdatesAsync();
+    }
+
+    ContainerStatus? UpdatePill(string image) => _updates.GetValueOrDefault(image) switch
+    {
+        null => _checking ? new ContainerStatus(StateTone.Neutral, "◌", "Checking") : null,
+        { State: ImageUpdateState.Current } => new ContainerStatus(StateTone.Ok, "✓", "Up to date"),
+        { State: ImageUpdateState.Available } => new ContainerStatus(StateTone.Warn, "↑", "Tag has moved"),
+        _ => new ContainerStatus(StateTone.Neutral, "?", "Not checked"),
+    };
+
+    double? TotalCpu => Running.Select(r => Stats.Latest(r.Id)?.CpuPercent).Where(c => c is not null).Select(c => c!.Value) is var values && values.Any() ? values.Sum() : null;
+
+    long? TotalMemory => Running.Select(r => Stats.Latest(r.Id)).Where(s => s is not null).ToList() is { Count: > 0 } samples ? samples.Sum(s => s!.MemoryBytes) : null;
+
+    (double? Cpu, long? Memory) UsageOf(StackService service)
+    {
+        var samples = service.Replicas.Where(r => r.State == DockerState.Running).Select(r => Stats.Latest(r.Id)).Where(s => s is not null).ToList();
+
+        return samples.Count == 0
+            ? (null, null)
+            : (samples.Where(s => s!.CpuPercent is not null).Sum(s => s!.CpuPercent), samples.Sum(s => s!.MemoryBytes));
+    }
+
+    /// <summary>
+    /// The file's own links first, then every port the engine says is published — reachable at this
+    /// machine for a local engine, at the engine's host for a remote one.
+    /// </summary>
+    IReadOnlyList<(string Title, string Url, string? Note)> Links
+    {
+        get
+        {
+            var links = new List<(string, string, string?)>();
+
+            if (Document is { } document) links.AddRange(document.DrayLinks.Select(l => (l.Title, l.Url, (string?)null)));
+
+            var host = Engine.Selected?.Endpoint is { IsRemote: true, Host: { } remote } ? remote : "localhost";
+
+            foreach (var service in Stack.Services)
+            {
+                foreach (var port in service.Replicas.Where(r => r.State == DockerState.Running).SelectMany(r => r.Ports).Where(p => p.Protocol == "tcp").DistinctBy(p => p.HostPort))
+                {
+                    var scheme = port.ContainerPort is 443 or 8443 ? "https" : "http";
+                    links.Add(($"{host}:{port.HostPort}", $"{scheme}://{host}:{port.HostPort}", $"{service.Name} :{port.ContainerPort}"));
+                }
+            }
+
+            return links;
+        }
+    }
+
+    ComposeDocument? _document;
+    string? _documentFor;
+
+    ComposeDocument? Document => _document;
+
+    /// <summary>Read the first compose file, from wherever it is, once per file.</summary>
+    async Task LoadDocumentAsync()
+    {
+        var path = Stack.ConfigFiles.FirstOrDefault();
+        if (path == _documentFor) return;
+
+        _documentFor = path;
+        _document = null;
+
+        try
+        {
+            if (path is not null && await Engine.FilesFor(Stack).ReadAsync(path) is { } bytes)
+                _document = ComposeDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes));
+        }
+        catch (Exception)
+        {
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// The icon the file names, inlined: it is a file on this machine, and an image must never be
+    /// fetched from anywhere. Small images of the four types a browser renders safely, or none.
+    /// </summary>
+    string? Icon
+    {
+        get
+        {
+            // A local file only: inlining one from a remote host would be a round trip per render.
+            if (Document?.DrayIcon is not { } relative || Stack.ConfigFiles.FirstOrDefault() is not { } file || Stack.Provenance == StackProvenance.Remote) return null;
+
+            var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(file)!, relative));
+            var type = System.IO.Path.GetExtension(path).ToLowerInvariant() switch
+            {
+                ".svg" => "image/svg+xml",
+                ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".webp" => "image/webp",
+                _ => null,
+            };
+
+            try
+            {
+                return type is not null && new System.IO.FileInfo(path) is { Exists: true, Length: <= 256 * 1024 }
+                    ? $"data:{type};base64,{Convert.ToBase64String(System.IO.File.ReadAllBytes(path))}"
+                    : null;
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Stats.Updated -= OnStats;
+        await Stats.ClearAsync();
+    }
+}

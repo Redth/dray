@@ -15,6 +15,10 @@
   </Target>
 
   <ItemGroup>
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Small helpers stay internal because nothing outside Dray.Core should call them, and are
          still where the fiddly formatting and parsing rules live — so they are exactly what needs
          testing. -->

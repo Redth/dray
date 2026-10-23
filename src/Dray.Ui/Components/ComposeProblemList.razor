@@ -1,0 +1,49 @@
+@* What compose objected to, as a list — the body of the dialog that stops a Deploy which would
+   fail. Each problem is glyph, word and tint, and says where it is when compose said so. *@
+
+<ul class="cpl" aria-label="What compose reported">
+    @foreach (var problem in Problems.OrderBy(p => p.Severity))
+    {
+        var error = problem.Severity == ProblemSeverity.Error;
+
+        <li class="cpl__item">
+            <span class="cpl__sev cpl__sev--@(error ? "error" : "warning")">
+                <Icon Name="@(error ? IconRef.Error : IconRef.Warning)" Size="IconSize.Sm" />
+                @(error ? "Error" : "Warning")
+            </span>
+
+            <span class="cpl__message">@problem.Message</span>
+
+            @if (Where(problem) is { } where)
+            {
+                <span class="cpl__where mono muted">@where</span>
+            }
+        </li>
+    }
+</ul>
+
+@if (Note is { Length: > 0 } note)
+{
+    <p class="cpl__note muted">@note</p>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ComposeProblem> Problems { get; set; } = [];
+
+    [Parameter] public string? Note { get; set; }
+
+    static string? Where(ComposeProblem problem)
+    {
+        var file = problem.File is { } f ? System.IO.Path.GetFileName(f) : null;
+        var line = problem.Range is { } r ? $":{r.Line}" : null;
+        var path = problem.KeyPath.Count > 0 ? string.Join('.', problem.KeyPath) : null;
+
+        return (file, path) switch
+        {
+            (null, null) => null,
+            (null, _) => path,
+            (_, null) => file + line,
+            _ => $"{file}{line} · {path}",
+        };
+    }
+}

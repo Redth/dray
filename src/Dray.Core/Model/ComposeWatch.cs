@@ -44,11 +44,6 @@ public static class ComposeWatch
 
     /// <summary>
     /// The services that declare something to watch, in file order.
-    /// <para>
-    /// Same deliberate shallowness as <see cref="ComposeGraph"/>: this reads one key out of a file
-    /// whose overall structure it does not care about. A line it cannot make sense of costs that
-    /// service, not the answer.
-    /// </para>
     /// <code>
     /// services:
     ///   web:
@@ -60,71 +55,5 @@ public static class ComposeWatch
     /// </code>
     /// </summary>
     public static IReadOnlyList<string> Declares(string? yaml)
-    {
-        var found = new List<string>();
-
-        if (string.IsNullOrWhiteSpace(yaml)) return found;
-
-        var servicesIndent = -1;
-        var serviceIndent = -1;
-        var developIndent = -1;
-
-        string? service = null;
-
-        foreach (var raw in yaml.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
-        {
-            var line = raw.TrimEnd();
-            if (line.Length == 0 || line.TrimStart().StartsWith('#')) continue;
-
-            var indent = line.Length - line.TrimStart().Length;
-            var text = line.Trim();
-
-            if (servicesIndent < 0)
-            {
-                if (text is "services:") servicesIndent = indent;
-                continue;
-            }
-
-            // Another top-level key — out of the services block.
-            if (indent <= servicesIndent && text.EndsWith(':'))
-            {
-                service = null;
-                serviceIndent = -1;
-                developIndent = -1;
-                servicesIndent = text is "services:" ? indent : -1;
-                continue;
-            }
-
-            if (developIndent >= 0 && indent <= developIndent) developIndent = -1;
-
-            // A service name: one level in from `services:`.
-            if ((serviceIndent < 0 || indent == serviceIndent) && text.EndsWith(':'))
-            {
-                serviceIndent = indent;
-                service = text[..^1].Trim();
-                developIndent = -1;
-                continue;
-            }
-
-            if (service is null) continue;
-
-            if (text is "develop:")
-            {
-                developIndent = indent;
-                continue;
-            }
-
-            // `watch:` only counts inside develop. A top-level `watch:` on a service is not a
-            // thing compose reads, and counting it would offer a button that does nothing.
-            if (developIndent >= 0
-                && indent > developIndent
-                && text.StartsWith("watch:", StringComparison.Ordinal)
-                && !found.Contains(service, StringComparer.Ordinal))
-            {
-                found.Add(service);
-            }
-        }
-
-        return found;
-    }
+        => [.. ComposeDocument.Parse(yaml).Services.Where(s => s.DeclaresWatch).Select(s => s.Name)];
 }

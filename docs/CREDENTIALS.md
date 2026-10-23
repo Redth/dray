@@ -100,6 +100,33 @@ For cloud registries with their own helpers already installed — `docker-creden
 Those helpers mint short-lived tokens from an ambient identity, and a username and password field
 would be the wrong question.
 
+### 1.5 When Dray reads a secret at all
+
+Rendering the registries list uses the helper's `list`, which returns usernames and no secrets.
+`get` — the one call that returns a secret — is used for four things, each because it cannot be
+done without one, and each **only after the registry has refused to answer anonymously**, because a
+public image needs nothing and `get` can raise a keychain prompt:
+
+| Operation | Where the secret goes |
+|---|---|
+| Push | to the engine, in `X-Registry-Auth` |
+| Pull, when the registry refuses an anonymous pull | to the engine, in `X-Registry-Auth` |
+| Update check, when refused | to the engine, in `X-Registry-Auth` |
+| Listing a private repository's tags (`RegistryBrowser`) | to the registry, as basic auth to its token service |
+
+The last is the only case where Dray, rather than the engine, sends a credential over the network,
+so it carries three more rules:
+
+- **HTTPS only.** A registry on this machine may be read over plain HTTP, as Docker allows; its
+  credential is never sent that way.
+- **Only to the registry's own token service.** A registry names its token service in its
+  `WWW-Authenticate` challenge, which means it could name anyone. The credential goes only to the
+  registry's host or a host under its parent domain — `auth.docker.io` for `registry-1.docker.io`,
+  `gitlab.com` for `registry.gitlab.com` — and never where that parent is a bare public suffix.
+- **For one operation.** The token it buys lives in the operation's session object and is dropped
+  with it. A catalog — read as the user types — never asks the helper unless the user has signed in
+  to that registry, so typing a letter cannot raise a prompt for a registry they never chose.
+
 ---
 
 ## 2. Remote hosts

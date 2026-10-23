@@ -170,6 +170,30 @@ public interface IContainerRuntime : IAsyncDisposable
     /// <summary>An image's layers, newest first.</summary>
     Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default);
 
+    /// <summary>
+    /// What an image sets by itself — its environment, labels, command — so a container's own
+    /// settings can be told from the ones it inherited.
+    /// <para>
+    /// Null when this engine cannot say, which is an answer: a caller then keeps everything rather
+    /// than guessing which values were the image's. Defaulted, so an engine without image
+    /// inspection reports that rather than failing to compile.
+    /// </para>
+    /// </summary>
+    Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
+        => Task.FromResult<ImageDefaults?>(null);
+
+    /// <summary>
+    /// Whether <paramref name="reference"/>'s tag has moved at its registry since this engine
+    /// pulled it. Asked of the engine, which already has the registry's address and its network
+    /// path; the credential, when there is one, is for a private registry.
+    /// <para>
+    /// Defaulted to unknown: an engine that cannot ask is an engine whose images are not
+    /// "up to date", they are unchecked.
+    /// </para>
+    /// </summary>
+    Task<ImageUpdate> CheckImageUpdateAsync(string reference, RegistryCredential? credential, CancellationToken ct = default)
+        => Task.FromResult(ImageUpdate.Unknown("This engine cannot ask a registry about its images."));
+
     /// <summary>Delete an image. <paramref name="force"/> removes it even when a container uses it.</summary>
     Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default);
 
@@ -178,8 +202,15 @@ public interface IContainerRuntime : IAsyncDisposable
 
     /// <summary>
     /// Pull an image, reporting progress as the engine reports it — per layer, out of order.
+    /// <para>
+    /// The credential is passed in for the same reason as <see cref="PushImageAsync"/>'s, and is null
+    /// on the first attempt: a public image needs none, and fetching one can prompt. The engine never
+    /// reads the user's credential store itself — the CLI hands it the credential on every pull — so
+    /// without this a private image cannot be pulled from Dray at all.
+    /// </para>
     /// </summary>
-    IAsyncEnumerable<PullProgress> PullImageAsync(string reference, CancellationToken ct = default);
+    IAsyncEnumerable<PullProgress> PullImageAsync(
+        string reference, RegistryCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Push an image to its registry, reporting progress per layer as the engine reports it.
@@ -199,10 +230,17 @@ public interface IContainerRuntime : IAsyncDisposable
     /// Through the engine rather than over HTTP from here: the engine already holds the registry
     /// configuration and the credentials, and Dray reaching Docker Hub directly would be a second
     /// network path with its own proxy settings, its own TLS trust and its own way to be wrong.
+    /// What the engine cannot answer at all — which tags a repository has — is read from the
+    /// registry by <see cref="RegistryBrowser"/>, and only that.
+    /// </para>
+    /// <para>
+    /// A term prefixed with a host searches that registry, as <c>docker search quay.io/x</c> does.
+    /// Most registries have no search to offer and the engine says so by failing; the caller treats
+    /// that as an answer about the registry rather than as an error.
     /// </para>
     /// </summary>
     Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
-        string term, int limit = 25, CancellationToken ct = default);
+        string term, int limit = 25, ImageSearchFilters? filters = null, CancellationToken ct = default);
 
     /// <summary>
     /// Write an image to a tar archive on this machine.

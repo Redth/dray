@@ -180,7 +180,43 @@ public class DockerContextReaderTests
     }
 }
 
-/// <summary>An in-memory <c>~/.docker</c>.</summary>
+/// <summary>
+/// Windows' engines are named pipes, which are not files and cannot be probed for existence — so
+/// they are offered when discovering Windows and never anywhere else.
+/// </summary>
+public class WindowsPipeDiscoveryTests
+{
+    [Fact]
+    public void BothDockerDesktopEnginesAreOfferedOnWindows()
+    {
+        var hosts = new DockerContextReader(new FakeConfigSource { IsWindows = true }).Discover();
+
+        Assert.Contains(hosts, h => h.Endpoint.Raw == "//./pipe/dockerDesktopLinuxEngine");
+        Assert.Contains(hosts, h => h.Endpoint.Raw == "//./pipe/dockerDesktopWindowsEngine");
+        Assert.All(hosts, h => Assert.Equal(EndpointScheme.NamedPipe, h.Endpoint.Scheme));
+    }
+
+    [Fact]
+    public void NoPipeIsOfferedOffWindows()
+    {
+        var hosts = new DockerContextReader(new FakeConfigSource()).Discover();
+
+        Assert.DoesNotContain(hosts, h => h.Endpoint.Scheme == EndpointScheme.NamedPipe);
+    }
+
+    [Fact]
+    public void AContextForAPipeIsNotListedTwice()
+    {
+        // Docker Desktop's desktop-linux context names the same engine the probe finds.
+        var source = new FakeConfigSource { IsWindows = true }
+            .WithContext("desktop-linux", "npipe:////./pipe/dockerDesktopLinuxEngine");
+
+        var hosts = new DockerContextReader(source).Discover();
+
+        Assert.Single(hosts, h => h.Endpoint.Path == "//./pipe/dockerDesktopLinuxEngine");
+    }
+}
+
 /// <summary>
 /// Apple's runtime is a second engine, not a second socket, so discovery has to find it a
 /// different way and must not let it displace the engine the user's terminal is pointed at.
@@ -190,9 +226,7 @@ public class AppleContainerDiscoveryTests
     [Fact]
     public void TheAppleRuntimeIsFoundOnPath()
     {
-        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Apple's runtime only exists on macOS.");
-
-        var source = new FakeConfigSource()
+        var source = new FakeConfigSource { IsMacOS = true }
             .WithEnvironment("PATH", "/usr/bin:/opt/homebrew/bin")
             .WithExecutable("/opt/homebrew/bin/container");
 
@@ -208,7 +242,17 @@ public class AppleContainerDiscoveryTests
     [Fact]
     public void NothingIsOfferedWhenTheRuntimeIsNotInstalled()
     {
-        var source = new FakeConfigSource().WithEnvironment("PATH", "/usr/bin:/opt/homebrew/bin");
+        var source = new FakeConfigSource { IsMacOS = true }.WithEnvironment("PATH", "/usr/bin:/opt/homebrew/bin");
+
+        Assert.DoesNotContain(new DockerContextReader(source).Discover(), h => h.Origin == HostOrigin.AppleContainer);
+    }
+
+    [Fact]
+    public void ItIsNotLookedForOffMacOS()
+    {
+        var source = new FakeConfigSource()
+            .WithEnvironment("PATH", "/opt/homebrew/bin")
+            .WithExecutable("/opt/homebrew/bin/container");
 
         Assert.DoesNotContain(new DockerContextReader(source).Discover(), h => h.Origin == HostOrigin.AppleContainer);
     }
@@ -216,9 +260,7 @@ public class AppleContainerDiscoveryTests
     [Fact]
     public void ItNeverClaimsTheCurrentSlotFromADockerContext()
     {
-        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Apple's runtime only exists on macOS.");
-
-        var source = new FakeConfigSource()
+        var source = new FakeConfigSource { IsMacOS = true }
             .WithConfig("orbstack")
             .WithContext("orbstack", "unix:///b.sock")
             .WithEnvironment("PATH", "/opt/homebrew/bin")
@@ -235,9 +277,7 @@ public class AppleContainerDiscoveryTests
     [Fact]
     public void ItIsStillTheCurrentHostWhenItIsTheOnlyOne()
     {
-        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Apple's runtime only exists on macOS.");
-
-        var source = new FakeConfigSource()
+        var source = new FakeConfigSource { IsMacOS = true }
             .WithEnvironment("PATH", "/opt/homebrew/bin")
             .WithExecutable("/opt/homebrew/bin/container");
 
@@ -257,6 +297,14 @@ sealed class FakeConfigSource : IDockerConfigSource
     readonly Dictionary<string, string> _env = [];
 
     public string? ConfigDirectory { get; init; } = Root;
+
+    /// <summary>
+    /// Neither, unless a test says so: the machine running the tests must not decide what is
+    /// discovered, or the same test finds different hosts on each CI runner.
+    /// </summary>
+    public bool IsWindows { get; init; }
+
+    public bool IsMacOS { get; init; }
 
     public string? DockerConfigDirectory => ConfigDirectory;
 
@@ -300,6 +348,13 @@ sealed class FakeConfigSource : IDockerConfigSource
     public FakeConfigSource WithExecutable(string path)
     {
         _files[Normalize(path)] = "";
+        return this;
+    }
+
+    /// <summary>A directory, which is how a Mac application bundle is found.</summary>
+    public FakeConfigSource WithDirectory(string path)
+    {
+        _dirs.Add(Normalize(path));
         return this;
     }
 

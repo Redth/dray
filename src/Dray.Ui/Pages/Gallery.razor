@@ -104,7 +104,7 @@
         </div>
         <div class="gal__row">
             <Button Label="Open the add-a-host flow" Icon="IconRef.Plus"
-                    OnClick="() => Shell.ShowDialogAsync(AddHostDialog.Request())" />
+                    OnClick="() => AddHostDialog.ShowAsync(Shell)" />
         </div>
     </section>
 
@@ -168,8 +168,47 @@
         </div>
     </section>
 
+    @* Every platform's setup routes, whichever platform this page is open on: the Hosts page only
+       shows the machine's own, so this is the one place a Mac's or a Linux machine's can be reviewed
+       from Windows, and the reverse. Buttons do nothing here. *@
+    <section class="gal">
+        <h2 class="gal__h">Engine setup — every platform</h2>
+        <p class="gal__note">
+            PRODUCT.md: shown before it runs, run only when asked, elevated in the open, the vendor's
+            own installer. One step is the filled button, and never one that stops something.
+        </p>
+
+        @foreach (var (title, routes) in SetupFixtures)
+        {
+            <h3 class="gal__sub">@title</h3>
+            <div class="panel">
+                <div class="panel__body">
+                    @foreach (var route in routes)
+                    {
+                        <Track @key="route.Id" Route="route" Alternatives="@(routes.Count > 1)" />
+                    }
+                </div>
+            </div>
+        }
+    </section>
+
 </div>
 @code {
+    /// <summary>The states worth seeing: each platform from nothing, and part-way.</summary>
+    static readonly (string Title, IReadOnlyList<SetupRoute> Routes)[] SetupFixtures =
+    [
+        ("macOS — nothing installed, no Homebrew", MacSetupPlan.Routes(new MacSetupState(false, null, false, false, false, false))),
+        ("macOS — Homebrew, OrbStack installed", MacSetupPlan.Routes(new MacSetupState(false, "/opt/homebrew/bin/brew", false, false, false, true))),
+        ("Linux — with polkit", LinuxSetupPlan.Routes(new LinuxSetupState(false, false, false, false, true, "jon"))),
+        ("Linux — without polkit", LinuxSetupPlan.Routes(new LinuxSetupState(false, false, false, false, false, "jon"))),
+        ("Windows — WSL with a fresh Ubuntu, Docker Desktop in Windows mode", WindowsSetupPlan.LinuxRoutes(
+            new WindowsSetupState(SetupFact.Present, null, [new WslDistro("Ubuntu", 2, false, true)], SetupFact.Unknown, SetupFact.Present, false, true)
+            {
+                Desktop = new DockerDesktopState(true, true, DesktopEngineMode.Windows),
+                Target = new DistroSetup(new WslDistro("Ubuntu", 2, false, true), DistroEngine.None, HasUser: false),
+            })),
+    ];
+
     Task OpenDialogAsync() => Shell.ShowDialogAsync(new DialogRequest(
         "Container details",
         typeof(GalleryDialog),

@@ -1,0 +1,111 @@
+.deploy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s4);
+}
+
+/* Three ways to deploy, as three choices rather than a dropdown: each needs its sentence, and the
+   sentence is what makes the choice. */
+.deploy__presets {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+}
+
+.deploy__preset {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: var(--s2);
+    align-items: baseline;
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    text-align: left;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.deploy__preset:hover {
+    background: var(--surface-2);
+}
+
+/* Selected is a border, a check and the radio's own state — not colour alone. */
+.deploy__preset.is-selected {
+    border-color: var(--brand);
+}
+
+.deploy__mark {
+    grid-row: span 2;
+    color: var(--muted);
+    align-self: start;
+    padding-top: 2px;
+}
+
+.deploy__preset.is-selected .deploy__mark {
+    color: var(--brand);
+}
+
+.deploy__title {
+    font-size: var(--text-base);
+    font-weight: 500;
+}
+
+.deploy__body {
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+}
+
+.deploy__options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.deploy__options legend {
+    margin-bottom: var(--s2);
+}
+
+.deploy__toggle {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    font-size: var(--text-sm);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* The command is the one thing in the dialog worth selecting, and it has a copy button too. */
+.deploy__command {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    padding: var(--s2) var(--s2) var(--s2) var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+}
+
+.deploy__text {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    overflow-wrap: anywhere;
+    user-select: text;
+    -webkit-user-select: text;
+    padding-top: 3px;
+}
+
+.deploy__effect {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+}

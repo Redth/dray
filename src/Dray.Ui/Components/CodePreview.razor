@@ -1,0 +1,72 @@
+@* A read-only Monaco over text that changes — the New stack dialog's preview of the compose file
+   it is about to write. No toolbar, no save: CodeEditor is for files, this is for looking. Given
+   a schema, hovering a key still explains it, which is half of what makes a generated file
+   readable. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="preview" @ref="_host"></div>
+
+@code {
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+
+    [Parameter] public string Language { get; set; } = "yaml";
+
+    [Parameter] public string? Schema { get; set; }
+
+    [Parameter] public string Name { get; set; } = "compose.yaml";
+
+    ElementReference _host;
+    IJSObjectReference? _module;
+    IJSObjectReference? _editor;
+    DotNetObjectReference<CodePreview>? _self;
+    string? _shown;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/monaco.js");
+            _editor = await _module.InvokeAsync<IJSObjectReference>("editor.create", _host, _self,
+                new { text = Text, language = Language, readOnly = true, schema = Schema, name = Name });
+            _shown = Text;
+            return;
+        }
+
+        if (_editor is not null && _shown != Text)
+        {
+            _shown = Text;
+            await _module!.InvokeVoidAsync("editor.setValue", _editor, Text, Language);
+        }
+    }
+
+    [JSInvokable("OnDirtyChanged")]
+    public void OnDirtyChanged(bool dirty)
+    {
+    }
+
+    [JSInvokable("OnSaveRequested")]
+    public void OnSaveRequested()
+    {
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_editor is not null)
+            {
+                await _module!.InvokeVoidAsync("editor.dispose", _editor);
+                await _editor.DisposeAsync();
+            }
+
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+
+        _self?.Dispose();
+    }
+}

@@ -11,7 +11,7 @@
 }
 
 .noengine__options dt {
-    font-weight: var(--text-md-weight);
+    font-weight: 500;
 }
 
 .noengine__options dd {

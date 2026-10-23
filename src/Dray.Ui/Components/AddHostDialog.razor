@@ -1,8 +1,8 @@
 @* Adding a host: choose an engine, get it running, connect.
 
-   Two halves with two different jobs. For an engine on this machine Dray's part is to show what to
-   run and then look again — discovery already finds every one of these once it is up, and PRODUCT.md
-   keeps installing an engine the user's own step. For an engine elsewhere there is nothing to
+   Two halves with two different jobs. For an engine on this machine Dray's part here is to show what
+   to run and then look again — discovery already finds every one of these once it is up, and the
+   installs Dray runs itself are EngineSetup's, on the Hosts page. For an engine elsewhere there is nothing to
    discover, so Dray tests the connection and then records it as a Docker context, which is what
    the docker command reads too. Either way Dray stores nothing of its own (docs/CREDENTIALS.md).
 
@@ -13,6 +13,7 @@
 @inject DockerCliContext Cli
 @inject IDockerConfigSource ConfigSource
 @inject IShellBridge Shell
+@inject HostSwitcher Switcher
 
 @if (_guide is null)
 {
@@ -162,13 +163,16 @@ else
     /// <summary>The engine that answered the last test, and the endpoint it answered on.</summary>
     (string Endpoint, RuntimeCapabilities Caps)? _tested;
 
-    /// <summary>The request that opens this flow — from the Hosts page, or straight into one guide.</summary>
-    public static DialogRequest Request(string? startWith = null) => new(
+    /// <summary>
+    /// Open the flow — from the Hosts page, or straight into one guide. The host it adds is selected
+    /// before it closes, and the page follows the engine, so there is nothing to hand back.
+    /// </summary>
+    public static Task ShowAsync(IShellBridge shell, string? startWith = null) => shell.ShowDialogAsync(new DialogRequest(
         "Add a host",
         typeof(AddHostDialog),
         startWith is null ? null : new Dictionary<string, object?> { [nameof(StartWith)] = startWith },
         Buttons: [DialogButton.Cancel()],
-        Size: DialogSize.Large);
+        Size: DialogSize.Large));
 
     protected override string Title => _guide switch
     {
@@ -262,8 +266,7 @@ else
             switch (id)
             {
                 case "use" when Status(guide).Host is { } host:
-                    await Engine.SelectAsync(host.Id);
-                    return true;
+                    return await UseAsync(host.Id);
 
                 case "look":
                     await LookAgainAsync(guide);
@@ -617,7 +620,7 @@ else
         _outcome = null;
         _tested = null;
 
-        var (caps, problem) = await Engine.TestAsync(parsed, Session.Closing);
+        var (caps, problem) = await Engine.TestAsync(parsed, Closing);
 
         if (caps is null)
         {
@@ -646,7 +649,7 @@ else
     {
         _outcome = null;
 
-        var (spec, problem) = await new MinikubeDockerEnv().ReadAsync(Session.Closing);
+        var (spec, problem) = await new MinikubeDockerEnv().ReadAsync(Closing);
 
         if (spec is null)
         {
@@ -680,7 +683,21 @@ else
             return false;
         }
 
-        await Engine.SelectAsync(name);
+        return await UseAsync(name);
+    }
+
+    /// <summary>
+    /// Switch to a host through the switcher, as the picker does — choosing one of Docker Desktop's
+    /// engines can mean switching Docker Desktop, which it says first. Stays open to say why not.
+    /// </summary>
+    async Task<bool> UseAsync(string hostId)
+    {
+        if (await Switcher.ChooseAsync(hostId) is { } refused)
+        {
+            _outcome = (false, refused);
+            return false;
+        }
+
         return true;
     }
 

@@ -87,6 +87,10 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             // it fail is the outcome ContainerAction.cs calls worse than no button at all.
             SupportsPause = containerOs != ContainerOs.Windows || isolation == "hyperv",
 
+            // Which engine answered, as opposed to which address was dialled. On Windows those
+            // differ: docker_engine is whichever of Docker Desktop's engines is current.
+            EngineId = string.IsNullOrWhiteSpace(info.ID) ? null : info.ID,
+
             ApiVersion = version.APIVersion,
             EngineVersion = version.Version,
             Flavor = flavor,
@@ -106,7 +110,8 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             SupportsEvents = true,
 
             // Compose and buildx are CLI plugins on the client side, not engine features, so they
-            // are probed separately by the shell rather than read off the daemon.
+            // are probed separately rather than read off the daemon. EngineManager sets this one
+            // once it knows both halves — a compose here, and a way for it to reach this host.
             SupportsCompose = false,
             SupportsBuildKit = flavor == EngineFlavor.Docker,
 
@@ -423,6 +428,14 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default)
         => DockerImages.HistoryAsync(Client, imageId, ct);
 
+    public Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
+        => DockerImages.DefaultsAsync(Client, image, ct);
+
+    public Task<ImageUpdate> CheckImageUpdateAsync(string reference, RegistryCredential? credential, CancellationToken ct = default)
+        => _raw is { } raw
+            ? DockerImages.CheckUpdateAsync(Client, raw, reference, credential, ct)
+            : Task.FromResult(ImageUpdate.Unknown("Not connected to an engine."));
+
     public Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default)
         => DockerImages.RemoveAsync(Client, imageId, force, ct);
 
@@ -430,14 +443,37 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         => DockerImages.TagAsync(Client, imageId, repository, tag, ct);
 
     public async Task<IReadOnlyList<ImageSearchResult>> SearchImagesAsync(
-        string term, int limit = 25, CancellationToken ct = default)
+        string term, int limit = 25, ImageSearchFilters? filters = null, CancellationToken ct = default)
     {
         if (_raw is null) throw new InvalidOperationException("Not connected to an engine.");
         if (string.IsNullOrWhiteSpace(term)) return [];
 
         var path = $"/images/search?term={Uri.EscapeDataString(term.Trim())}&limit={Math.Clamp(limit, 1, 100)}";
+        if (filters?.ToQuery() is { } query) path += "&filters=" + Uri.EscapeDataString(query);
 
-        return ImageSearch.Parse(await _raw.GetStringAsync(path, ct).ConfigureAwait(false));
+        // With the status rather than throwing on it: a registry with no search makes the engine
+        // answer 500 with the reason in the body — "unexpected status code 404" for ghcr.io — and
+        // "Response status code does not indicate success" would throw that reason away.
+        var (status, body) = await _raw.GetWithStatusAsync(path, null, ct).ConfigureAwait(false);
+        if ((int)status >= 400) throw new RuntimeConnectionException(DescribeSearchFailure(body));
+
+        return ImageSearch.Parse(body, ImageReferenceDraft.Parse(term).Registry);
+    }
+
+    /// <summary>The engine's own sentence from an error body, or the body itself.</summary>
+    static string DescribeSearchFailure(string body)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("message", out var message) && message.GetString() is { Length: > 0 } text)
+                return text;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+
+        return string.IsNullOrWhiteSpace(body) ? "The engine could not search." : body.Trim();
     }
 
     public Task SaveImageAsync(
@@ -455,8 +491,9 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         string reference, RegistryCredential? credential, CancellationToken ct = default)
         => DockerImages.PushAsync(Client, reference, credential, ct);
 
-    public IAsyncEnumerable<PullProgress> PullImageAsync(string reference, CancellationToken ct = default)
-        => DockerImages.PullAsync(Client, reference, ct);
+    public IAsyncEnumerable<PullProgress> PullImageAsync(
+        string reference, RegistryCredential? credential = null, CancellationToken ct = default)
+        => DockerImages.PullAsync(Client, reference, credential, ct);
 
     public IAsyncEnumerable<BuildProgress> BuildImageAsync(BuildRequest request, CancellationToken ct = default)
         => DockerBuild.RunAsync(Client, request, ct);

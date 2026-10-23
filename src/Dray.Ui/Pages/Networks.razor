@@ -121,7 +121,6 @@
             }
         }
     </div>
-
 </EngineScope>
 
 @code {
@@ -136,11 +135,6 @@
     string _search = "";
 
     protected override Task OnInitializedAsync() => LoadAsync();
-
-    async Task CreateAsync()
-    {
-        if (await Shell.ShowDialogAsync(NetworkDialog.Request()) == "create") await LoadAsync();
-    }
 
     IReadOnlyList<NetworkSummary> Visible
     {
@@ -243,6 +237,11 @@
                    no heading at all is worse than a toolbar with one button. *@
                 ChromeAction.Secondary("hosts", "Switch engine…", IconRef.Host),
             ]);
+
+    async Task CreateAsync()
+    {
+        if (await NetworkDialog.ShowAsync(Shell)) await LoadAsync();
+    }
 
     async Task HandleAction(string id)
     {

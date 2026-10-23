@@ -66,6 +66,17 @@ public static class Humanize
         _ => (value / 1_000_000d).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "M",
     };
 
+    /// <summary>
+    /// A count too big for an int — Docker Hub's pull counts run to thirteen billion. Same rounding
+    /// as <see cref="Count(int)"/>, with a B once the millions run out.
+    /// </summary>
+    public static string Count(long value) => value switch
+    {
+        < 0 => "—",
+        < 1_000_000_000 => Count((int)value),
+        _ => (value / 1_000_000_000d).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "B",
+    };
+
     public static string Percent(double? value)
         => value is null ? "—" : value.Value.ToString("0.#", CultureInfo.InvariantCulture) + "%";
 

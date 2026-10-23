@@ -85,15 +85,27 @@ public sealed class DockerRawApi : IDisposable
                 if (endpoint.Tls is { } tls) ApplyTls(handler, tls);
                 break;
 
+            // Through the same relay the typed client uses: a process that has the socket, with
+            // HTTP over its stdio. This used to refuse both schemes — and since connecting builds
+            // one of these, every WSL and SSH host failed to connect after its version and info
+            // had already come back through the relay. Found the first time a real wsl.exe ran.
+            case EndpointScheme.Wsl or EndpointScheme.Ssh when Transport.RelayCommands.For(endpoint) is { } relay:
+                baseAddress = new Uri("http://localhost");
+                handler.ConnectCallback = (_, _) => ValueTask.FromResult<Stream>(Transport.ProcessRelayStream.Start(relay));
+                break;
+
             default:
-                throw new RuntimeConnectionException(
-                    $"The raw API cannot reach a {endpoint.Scheme} endpoint. SSH endpoints are tunnelled to a local socket first.");
+                throw new RuntimeConnectionException($"The raw API cannot reach a {endpoint.Scheme} endpoint.");
         }
 
         _http = new HttpClient(handler)
         {
             BaseAddress = baseAddress,
-            Timeout = timeout ?? DockerClientFactory.DefaultTimeout,
+
+            // A relay's first request may be booting a distribution, as for the typed client.
+            Timeout = timeout ?? (endpoint.Scheme is EndpointScheme.Wsl or EndpointScheme.Ssh
+                ? DockerClientFactory.RelayTimeout
+                : DockerClientFactory.DefaultTimeout),
         };
     }
 
@@ -163,6 +175,17 @@ public sealed class DockerRawApi : IDisposable
             // An engine that returned something unparseable is still worth showing verbatim.
             return raw;
         }
+    }
+
+    /// <summary>GET a path with extra headers, and return the status with the body rather than throwing on one.</summary>
+    public async Task<(System.Net.HttpStatusCode Status, string Body)> GetWithStatusAsync(
+        string path, IReadOnlyDictionary<string, string>? headers, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, _prefix + path);
+        foreach (var (key, value) in headers ?? new Dictionary<string, string>()) request.Headers.TryAddWithoutValidation(key, value);
+
+        using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
     }
 
     public async Task<string> GetStringAsync(string path, CancellationToken ct = default)

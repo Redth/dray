@@ -24,10 +24,8 @@ namespace Dray.MacOS;
 /// </summary>
 public sealed class MacDialogSheet(IServiceProvider services)
 {
-    public Task<string?> ShowAsync(DialogRequest request, CancellationToken ct = default)
+    public Task<string?> ShowAsync(DialogSession session, CancellationToken ct = default)
     {
-        var session = new DialogSession(request);
-
         NSApplication.SharedApplication.InvokeOnMainThread(() =>
         {
             try

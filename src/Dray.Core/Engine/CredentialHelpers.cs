@@ -40,7 +40,13 @@ public sealed record RegistryEntry(
     /// <summary>Docker Hub is stored under a long legacy URL nobody would recognise.</summary>
     public const string DockerHub = "https://index.docker.io/v1/";
 
-    public string DisplayName => Server == DockerHub ? "Docker Hub" : Server;
+    /// <summary>
+    /// Docker Hub by name, anything else by host: a registry found in a helper's store is keyed by
+    /// URL (<c>https://ghcr.io</c>), and the scheme is noise in a list of registries.
+    /// </summary>
+    public string DisplayName => string.Equals(Server, DockerHub, StringComparison.OrdinalIgnoreCase)
+        ? "Docker Hub"
+        : RegistryReader.Strip(Server);
 
     /// <summary>True when the user could sign in from Dray, rather than the helper minting tokens itself.</summary>
     public bool AcceptsSignIn => !HelperMissing && !IsAmbient;
@@ -120,6 +126,12 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
     /// configured and its secret is in the helper's store". The file is a list of registries, not
     /// a list of secrets.
     /// </para>
+    /// <para>
+    /// The default helper's own list counts too. A registry signed into from Dray has no
+    /// <c>auths</c> entry, because Dray does not write <c>config.json</c> (docs/CREDENTIALS.md
+    /// section 4), and needs none: the CLI asks <c>credsStore</c> for any registry it is not told
+    /// otherwise about. Without this it would be signed in and missing from the list.
+    /// </para>
     /// </summary>
     public async Task<IReadOnlyList<RegistryEntry>> ListAsync(CancellationToken ct = default)
     {
@@ -131,7 +143,35 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
         foreach (var server in config.Auths?.Keys ?? Enumerable.Empty<string>()) servers.Add(server);
         foreach (var server in config.CredHelpers?.Keys ?? Enumerable.Empty<string>()) servers.Add(server);
 
-        var probed = new Dictionary<string, bool>(StringComparer.Ordinal);
+        // Each helper's `list` once: it answers both whether the helper is installed and who is
+        // signed in where, and it returns no secrets.
+        var lists = new Dictionary<string, Dictionary<string, string>?>(StringComparer.Ordinal);
+        async Task<Dictionary<string, string>?> ListOf(string helper)
+        {
+            if (!lists.TryGetValue(helper, out var list))
+            {
+                list = await HelperListAsync(helper, ct).ConfigureAwait(false);
+                lists[helper] = list;
+            }
+
+            return list;
+        }
+
+        if (config.CredsStore is { } store && await ListOf(store).ConfigureAwait(false) is { } stored)
+        {
+            foreach (var server in stored.Keys.Where(IsRegistryKey))
+            {
+                // The helper keys by URL and config.json by host, so the same registry can arrive
+                // from both under two spellings.
+                if (servers.Any(known => SameServer(known, server))) continue;
+
+                // A per-registry helper owns this one, so the default's copy is stale.
+                if (config.CredHelpers?.Keys.Any(k => SameServer(k, server)) == true) continue;
+
+                servers.Add(server);
+            }
+        }
+
         var entries = new List<RegistryEntry>(servers.Count);
 
         foreach (var server in servers)
@@ -148,14 +188,10 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
 
             if (helper is not null)
             {
-                if (!probed.TryGetValue(helper, out var present))
-                {
-                    present = await IsInstalledAsync(helper, ct).ConfigureAwait(false);
-                    probed[helper] = present;
-                }
+                var list = await ListOf(helper).ConfigureAwait(false);
 
-                missing = !present;
-                if (present) username = await UsernameAsync(helper, server, ct).ConfigureAwait(false);
+                missing = list is null;
+                if (list is not null) username = UsernameIn(list, server);
             }
 
             // A username is readable from a plaintext entry without touching the helper — and it is
@@ -175,10 +211,50 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
         return entries;
     }
 
+    /// <summary>
+    /// The helper a registry's credential goes to: its own in <c>credHelpers</c>, else the default
+    /// <c>credsStore</c> — the order the CLI looks in, so a sign-in lands where <c>docker pull</c>
+    /// will ask. Null when neither is configured, and Dray will not fall back to plaintext.
+    /// </summary>
+    public string? HelperFor(string server)
+    {
+        var config = ReadConfig();
+        if (config is null) return null;
+
+        return config.CredHelpers?.FirstOrDefault(kv => SameServer(kv.Key, server)).Value ?? config.CredsStore;
+    }
+
+    /// <summary>
+    /// A registry as the user typed it, as the CLI names it: nothing, or any of Docker Hub's
+    /// hostnames, is Docker Hub's legacy URL, as with <c>docker login</c>; anything else is its host,
+    /// without a scheme or a trailing slash.
+    /// </summary>
+    public static string NormalizeServer(string? typed)
+    {
+        var host = Strip((typed ?? string.Empty).Trim());
+
+        return host.Length == 0 || host.ToLowerInvariant() is "docker.io" or "index.docker.io"
+            or "registry-1.docker.io" or "hub.docker.com" or "index.docker.io/v1"
+            ? RegistryEntry.DockerHub
+            : host;
+    }
+
+    /// <summary>
+    /// Whether a key in a helper's list names a registry. Docker Desktop keeps its own sign-in
+    /// in the same store, under <c>https://index.docker.io/v1/access-token</c> and
+    /// <c>…/refresh-token</c>: a host with a path, which no registry key has, except Docker Hub's
+    /// legacy URL itself.
+    /// </summary>
+    internal static bool IsRegistryKey(string key)
+        => string.Equals(key, RegistryEntry.DockerHub, StringComparison.OrdinalIgnoreCase)
+            || (Strip(key) is { Length: > 0 } host && !host.Contains('/'));
+
     DockerConfigFile? ReadConfig()
     {
-        var path = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".docker", "config.json");
+        // The same directory context discovery reads, so DOCKER_CONFIG moves both together, as it
+        // does for the CLI.
+        if (source.DockerConfigDirectory is not { } directory) return null;
+        var path = System.IO.Path.Combine(directory, "config.json");
 
         try
         {
@@ -194,61 +270,56 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
         }
     }
 
-    /// <summary>Whether <c>docker-credential-{helper}</c> is on PATH.</summary>
-    async Task<bool> IsInstalledAsync(string helper, CancellationToken ct)
+    /// <summary>
+    /// What <c>docker-credential-{helper} list</c> holds: server to username, and no secrets at all,
+    /// so Dray never has a token in memory just to render a table. Null when the helper is not
+    /// installed; empty when it runs but its output is not the protocol's.
+    /// <para>
+    /// <c>list</c> is also the cheapest subcommand that proves the binary runs. <c>version</c> is not
+    /// part of the protocol and not every helper implements it.
+    /// </para>
+    /// </summary>
+    async Task<Dictionary<string, string>?> HelperListAsync(string helper, CancellationToken ct)
     {
+        ProcessResult result;
         try
         {
-            // `list` is the cheapest subcommand that proves the binary runs. `version` is not part
-            // of the protocol and not every helper implements it.
-            var result = await _runner
+            result = await _runner
                 .RunAsync(Executable(helper), ["list"], null, ct)
                 .ConfigureAwait(false);
-
-            return result.ExitCode == 0;
         }
         catch (Exception)
         {
             // Not on PATH, or a dangling symlink into an uninstalled app — the exact failure that
             // motivated docs/CREDENTIALS.md §1.3.
-            return false;
+            return null;
+        }
+
+        if (result.ExitCode != 0) return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(result.StandardOutput) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
         }
     }
 
     /// <summary>
-    /// The username stored for a registry.
-    /// <para>
-    /// Uses <c>list</c> rather than <c>get</c>: <c>list</c> returns server-to-username pairs and no
-    /// secrets at all, so Dray never has a token in memory just to render a table.
-    /// </para>
+    /// The username a helper's list holds for a registry. The helper keys by URL —
+    /// <c>https://ghcr.io</c> — while config.json keys by bare host; matching exactly finds nothing,
+    /// which reads as "no username stored" for every registry on the machine.
     /// </summary>
-    async Task<string?> UsernameAsync(string helper, string server, CancellationToken ct)
+    static string? UsernameIn(Dictionary<string, string> list, string server)
     {
-        try
+        foreach (var (key, value) in list)
         {
-            var result = await _runner
-                .RunAsync(Executable(helper), ["list"], null, ct)
-                .ConfigureAwait(false);
-
-            if (result.ExitCode != 0) return null;
-
-            var map = JsonSerializer.Deserialize<Dictionary<string, string>>(result.StandardOutput);
-            if (map is null) return null;
-
-            // The helper keys by URL — "https://ghcr.io" — while config.json keys by bare host.
-            // Matching exactly finds nothing, which reads as "no username stored" for every
-            // registry on the machine.
-            foreach (var (key, value) in map)
-            {
-                if (SameServer(key, server)) return Normalize(value);
-            }
-
-            return null;
+            if (SameServer(key, server)) return Normalize(value);
         }
-        catch (Exception)
-        {
-            return null;
-        }
+
+        return null;
     }
 
     /// <summary>
@@ -258,7 +329,7 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
     internal static bool SameServer(string a, string b)
         => string.Equals(Strip(a), Strip(b), StringComparison.OrdinalIgnoreCase);
 
-    static string Strip(string server)
+    internal static string Strip(string server)
     {
         var s = server;
 
@@ -348,9 +419,10 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
     /// and no secrets at all, precisely so that rendering a table never puts a token in memory.
     /// </para>
     /// <para>
-    /// Pushing an image is the one operation that cannot be done without the secret: the engine
-    /// needs an auth header, and there is no way to delegate that to the helper. Anything that can
-    /// be done without calling this must not call it.
+    /// Called only for what cannot be done without the secret — a push, and a pull, update check or
+    /// tag listing the registry has already refused anonymously; docs/CREDENTIALS.md section 1.5
+    /// lists them. The engine needs an auth header and there is no way to delegate that to the
+    /// helper. Anything that can be done without calling this must not call it.
     /// </para>
     /// </summary>
     /// <returns>The credential, or null when the helper has none for this registry.</returns>

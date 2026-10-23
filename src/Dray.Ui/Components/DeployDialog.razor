@@ -1,0 +1,159 @@
+@* The body of the Deploy dialog: how to deploy, and the exact command that will run.
+
+   The command is shown, not described. "Recreate all" means something specific, and the flags are
+   that meaning — seeing `--force-recreate` before pressing Deploy is how someone learns what the
+   preset does, and copying it is how they run the same thing from a terminal later. Dockhand's
+   best idea, kept honest by the same builder producing both the preview and the run. *@
+@inject IShellBridge Shell
+
+<div class="deploy">
+    <div class="deploy__presets" role="radiogroup" aria-label="How to deploy">
+        @foreach (var (preset, title, body) in Presets)
+        {
+            var captured = preset;
+            var selected = Request.Options == preset;
+
+            <button type="button" role="radio" aria-checked="@(selected.ToString().ToLowerInvariant())"
+                    class="deploy__preset @(selected ? "is-selected" : null)" @onclick="() => ChooseAsync(captured)">
+                <span class="deploy__mark" aria-hidden="true">
+                    <Icon Name="@(selected ? IconRef.Check : IconRef.ChevronRight)" Size="IconSize.Sm" />
+                </span>
+                <span class="deploy__title">@title</span>
+                <span class="deploy__body muted">@body</span>
+            </button>
+        }
+    </div>
+
+    @if (Effect is { } effect)
+    {
+        @* What Deploy will do, by service — compose's own definition of changed, read from the
+           hash it stamps on every container. The question someone asks before pressing Deploy. *@
+        <div class="deploy__effect" role="status">
+            <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+            <span>@effect</span>
+        </div>
+    }
+
+    @if (Request.Warnings.Count > 0)
+    {
+        <ComposeProblemList Problems="Request.Warnings" />
+    }
+
+    <fieldset class="deploy__options">
+        <legend class="field__label">Options</legend>
+
+        <label class="deploy__toggle">
+            <input type="checkbox" checked="@Request.Options.Pull" @onchange="e => SetAsync(o => o with { Pull = (bool)e.Value! })" />
+            <span>Pull images first <span class="muted">— picks up a tag that has moved</span></span>
+        </label>
+
+        <label class="deploy__toggle">
+            <input type="checkbox" checked="@Request.Options.Build" @onchange="e => SetAsync(o => o with { Build = (bool)e.Value! })" />
+            <span>Rebuild services that build <span class="muted">— for a <code class="mono">build:</code> section</span></span>
+        </label>
+
+        <label class="deploy__toggle">
+            <input type="checkbox" checked="@Request.Options.ForceRecreate" @onchange="e => SetAsync(o => o with { ForceRecreate = (bool)e.Value! })" />
+            <span>Recreate every container <span class="muted">— even ones compose sees no change in</span></span>
+        </label>
+
+        <label class="deploy__toggle">
+            <input type="checkbox" checked="@Request.Options.RemoveOrphans" @onchange="e => SetAsync(o => o with { RemoveOrphans = (bool)e.Value! })" />
+            <span>Remove containers for services no longer in the file</span>
+        </label>
+    </fieldset>
+
+    <div class="field">
+        <span class="field__label">Command</span>
+
+        <div class="deploy__command">
+            <code class="mono deploy__text">@(_command ?? "…")</code>
+            <Button Label="Copy command" Icon="IconRef.Copy" IconOnly="true" Variant="ButtonVariant.Ghost"
+                    Disabled="@(_command is null)" OnClick="() => Shell.WriteClipboardAsync(_command!)" />
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>The choices, read back by whoever opened the dialog once Deploy is pressed.</summary>
+    [Parameter, EditorRequired] public DeployRequest Request { get; set; } = default!;
+
+    static readonly (DeployOptions Preset, string Title, string Body)[] Presets =
+    [
+        (DeployOptions.OnlyChanged, "Only what changed", "Create what is missing, recreate what was edited, leave the rest running."),
+        (DeployOptions.PullAndApply, "Pull, then apply", "Fetch newer images first; containers whose image moved are recreated."),
+        (DeployOptions.RecreateAll, "Recreate everything", "Every container replaced — for a change compose cannot see, like an edited mounted file."),
+    ];
+
+    string? _command;
+
+    /// <summary>
+    /// One sentence on what the chosen options will do to this stack, or null when the drift is not
+    /// known. Pulling changes the answer in a way nothing here can know before the pull, and says so.
+    /// </summary>
+    string? Effect
+    {
+        get
+        {
+            if (Request.Drift is not { } drift) return null;
+
+            var changed = Names(drift, ServiceDrift.Changed);
+            var created = Names(drift, ServiceDrift.NotCreated);
+            var removed = Request.Options.RemoveOrphans ? Names(drift, ServiceDrift.Removed) : [];
+            var kept = Names(drift, ServiceDrift.Unchanged);
+
+
+            if (Request.Options.ForceRecreate)
+            {
+                return created.Count > 0
+                    ? $"Recreates every service, and creates {List(created)}."
+                    : "Recreates every service, changed or not.";
+            }
+
+            var parts = new List<string>();
+            if (changed.Count > 0) parts.Add($"recreates {List(changed)}, edited since it was deployed");
+
+            // Compose does not see these; Deploy adds a recreate for them, and says why.
+            foreach (var (service, files) in Request.ChangedFiles.OrderBy(c => c.Key, StringComparer.Ordinal))
+                parts.Add($"recreates {service}, because {List(files)} changed — compose alone would leave it running the old {(files.Count == 1 ? "file" : "files")}");
+            if (created.Count > 0) parts.Add($"creates {List(created)}");
+            if (removed.Count > 0) parts.Add($"removes {List(removed)}, no longer in the file");
+
+            var pulled = Request.Options.Pull ? " Anything whose image the pull moves is recreated too." : "";
+
+            if (parts.Count == 0)
+                return $"Nothing in the files has changed since this was deployed, so nothing is recreated.{pulled}";
+
+            var sentence = string.Join("; ", parts);
+            var rest = kept.Count > 0 ? $" Leaves {List(kept)} running." : "";
+
+            return $"{char.ToUpperInvariant(sentence[0])}{sentence[1..]}.{rest}{pulled}";
+        }
+    }
+
+    static List<string> Names(IReadOnlyDictionary<string, ServiceDrift> drift, ServiceDrift kind)
+        => [.. drift.Where(d => d.Value == kind).Select(d => d.Key).Order(StringComparer.OrdinalIgnoreCase)];
+
+    static string List(IReadOnlyList<string> names) => names.Count switch
+    {
+        1 => names[0],
+        2 => $"{names[0]} and {names[1]}",
+        _ => $"{string.Join(", ", names.Take(names.Count - 1))} and {names[^1]}",
+    };
+
+    protected override Task OnInitializedAsync() => DescribeAsync();
+
+    Task ChooseAsync(DeployOptions preset)
+    {
+        Request.Options = preset;
+        return DescribeAsync();
+    }
+
+    Task SetAsync(Func<DeployOptions, DeployOptions> change)
+    {
+        Request.Options = change(Request.Options);
+        return DescribeAsync();
+    }
+
+    async Task DescribeAsync() => _command = await Request.Describe(Request.Options);
+}

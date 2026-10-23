@@ -19,8 +19,8 @@ public sealed class WebShellBridge(WebConfirmService confirms, WebDialogService 
     /// The one head that draws the whole dialog itself, because a browser has no other frame.
     /// <c>DialogHost</c> renders it over <c>&lt;dialog&gt;</c>.
     /// </summary>
-    public Task<string?> ShowDialogAsync(DialogRequest request, CancellationToken ct = default)
-        => dialogs.ShowAsync(request, ct);
+    public Task<string?> ShowDialogAsync(DialogSession session, CancellationToken ct = default)
+        => dialogs.ShowAsync(session, ct);
 
     public Task<string?> PickFileAsync(FilePickerOptions options, CancellationToken ct = default)
         => Task.FromResult<string?>(null);

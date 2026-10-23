@@ -8,20 +8,26 @@
     display: flex;
     align-items: center;
     gap: var(--s2);
-    margin: 0 0 var(--s2);
+    margin: 0 0 var(--s1);
     font-size: var(--text-md);
-    font-weight: var(--text-md-weight);
+    font-weight: 500;
 }
 
-.track__done,
-.track__advice {
-    margin: 0;
+/* Words, not a colour: which route Dray would take is said, and reads the same in greyscale. */
+.track__badge {
+    padding: 0 var(--s2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    font-weight: var(--text-xs-weight);
+    color: var(--muted);
+}
+
+.track__summary,
+.track__done {
+    margin: 0 0 var(--s3);
     max-width: 72ch;
     font-size: var(--text-sm);
-}
-
-.track__advice {
-    margin-top: var(--s3);
 }
 
 .track__step + .track__step {
@@ -36,7 +42,7 @@
 }
 
 .track__steptitle {
-    font-weight: var(--text-md-weight);
+    font-weight: 500;
 }
 
 .track__why {
@@ -47,13 +53,38 @@
 
 /* The command reads as something to be run, and is selectable so it can be copied — one of the
    places DESIGN.md 2.6 keeps selection on, because the range is the unit of interest. */
-.track__cmd {
+.track__cmd,
+.track__output {
     padding: var(--s2) var(--s3);
     background: var(--surface-2);
     border: 1px solid var(--line);
     border-radius: var(--r-sm);
     overflow-x: auto;
     user-select: text;
+}
+
+.track__cmd pre,
+.track__output pre {
+    margin: 0;
+    font-size: var(--text-sm);
+    white-space: pre;
+}
+
+.track__cmdnote {
+    margin: 0 0 var(--s1);
+    font-size: var(--text-sm);
+}
+
+/* A log, so it scrolls inside itself rather than growing the page without end (DESIGN.md 5). */
+.track__output {
+    margin-top: var(--s2);
+    max-height: 18rem;
+    overflow-y: auto;
+}
+
+.track__elapsed {
+    margin: 0 0 var(--s1);
+    font-size: var(--text-sm);
 }
 
 .track__cost {

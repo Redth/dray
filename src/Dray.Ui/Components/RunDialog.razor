@@ -7,9 +7,7 @@
    which Dray can already bring up.
 
    Every box takes the syntax people already have in their shell history, because a dialog that
-   invented its own would be one people retype things for.
-
-   A dialog body: the title and buttons are the platform's. *@
+   invented its own would be one people retype things for. *@
 @inherits DialogBody
 @inject EngineManager Engine
 
@@ -74,31 +72,52 @@
 }
 
 @code {
+    /// <summary>
+    /// Open it, pre-filled with <paramref name="image"/> when opened from an image's row. Returns
+    /// the new container's name — or its image, when the engine invented the name — once the engine
+    /// has accepted it, or null when the dialog was cancelled.
+    /// </summary>
+    public static async Task<string?> ShowAsync(IShellBridge shell, string? image = null)
+    {
+        var session = new DialogSession(new DialogRequest(
+            "Run a container",
+            typeof(RunDialog),
+            Parameters: new Dictionary<string, object?> { [nameof(Image)] = image },
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("run", "Run")],
+
+            // Wider than a plain form: three of these fields are multi-line, and a narrow box turns
+            // a two-column port mapping into something that wraps.
+            Size: DialogSize.Large));
+        await shell.ShowDialogAsync(session);
+
+        return session.Result == "run" ? session.Value as string : null;
+    }
+
     /// <summary>Pre-filled when the dialog is opened from a specific image's row.</summary>
     [Parameter] public string? Image { get; set; }
 
-    /// <summary>
-    /// Closes with "run" once the engine has accepted it. The new container arrives on the
-    /// Containers page through the event stream, so there is nothing to hand back.
-    /// </summary>
-    public static DialogRequest Request(string? image = null) => new(
-        "Run a container",
-        typeof(RunDialog),
-        image is null ? null : new Dictionary<string, object?> { [nameof(Image)] = image },
-        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("run", "Run")],
-        Size: DialogSize.Large);
-
     protected override IReadOnlyList<DialogButton> Buttons =>
     [
-        DialogButton.Cancel(),
-        DialogButton.Confirm("run", _start ? "Run" : "Create") with
-        {
-            Enabled = _image.Trim().Length > 0 && Problem is null,
-            Busy = _running,
-        },
+        DialogButton.Cancel("Cancel") with { Enabled = !_running },
+        DialogButton.Confirm("run", _start ? "Run" : "Create") with { Enabled = !_running && _image.Trim().Length > 0, Busy = _running },
     ];
 
-    protected override Task<bool> OnPressedAsync(string id) => SubmitAsync();
+    protected override async Task<bool> OnPressedAsync(string buttonId)
+    {
+        if (buttonId == "run")
+        {
+            await SubmitAsync();
+
+            // An unusable name stops the run before the engine is asked, and clears the last
+            // refusal without passing the re-render in SubmitAsync's finally.
+            StateHasChanged();
+
+            // A run closes the dialog itself, and only once the engine has accepted it.
+            return false;
+        }
+
+        return true;
+    }
 
     string _image = "";
     string _name = "";
@@ -141,6 +160,8 @@
         }
     }
 
+    // Once, when the dialog opens. Not in OnParametersSetAsync: the host re-renders the body
+    // whenever a button changes, which would refill an image field the user had cleared.
     protected override async Task OnInitializedAsync()
     {
         if (Image is { Length: > 0 } image) _image = image;
@@ -208,7 +229,7 @@
 
         try
         {
-            var remote = await Engine.SearchImagesAsync(term, 6, ct);
+            var remote = await Engine.SearchImagesAsync(term, 6, ct: ct);
 
             // Anything already here is already in the list above, and the registry's name for it
             // is usually a longer spelling of the same thing.
@@ -233,13 +254,16 @@
         }
     }
 
-    async Task<bool> SubmitAsync()
+    async Task SubmitAsync()
     {
         _failure = null;
 
-        if (Problem is not null) return false;
+        if (Problem is not null) return;
 
         _running = true;
+
+        // Submitted from the head's button, and only an event handler re-renders by itself — so
+        // the buttons learn they are busy from here.
         StateHasChanged();
 
         try
@@ -259,11 +283,13 @@
             };
 
             _failure = await Engine.RunAsync(request);
-            return _failure is null;
+
+            if (_failure is null) Close("run", request.Name ?? request.Image);
         }
         finally
         {
             _running = false;
+            StateHasChanged();
         }
     }
 }

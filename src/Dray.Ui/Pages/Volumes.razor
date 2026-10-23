@@ -72,7 +72,6 @@
                        Placeholder="No volumes" />
         }
     </div>
-
 </EngineScope>
 
 @code {
@@ -83,11 +82,6 @@
     string _search = "";
 
     protected override Task OnInitializedAsync() => LoadAsync();
-
-    async Task CreateAsync()
-    {
-        if (await Shell.ShowDialogAsync(VolumeDialog.Request()) == "create") await LoadAsync();
-    }
 
     IReadOnlyList<VolumeSummary> Visible
     {
@@ -204,6 +198,11 @@
                    no heading at all is worse than a toolbar with one button. *@
                 ChromeAction.Secondary("hosts", "Switch engine…", IconRef.Host),
             ]);
+
+    async Task CreateAsync()
+    {
+        if (await VolumeDialog.ShowAsync(Shell)) await LoadAsync();
+    }
 
     async Task HandleAction(string id)
     {

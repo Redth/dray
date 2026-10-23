@@ -37,6 +37,7 @@
            @onkeydown="OnKeyDownAsync"
            @onkeydown:preventDefault="_swallowKey"
            @onfocus="OnFocusAsync"
+           @onclick="() => _open = true"
            @onblur="OnBlur" />
 
     @* Always rendered so aria-controls points at something real, which it must even while
@@ -161,11 +162,15 @@
 
     public async Task FocusAsync() => await _input.FocusAsync();
 
-    async Task OnFocusAsync()
-    {
-        _open = true;
-        await FetchAsync(Query);
-    }
+    /// <summary>
+    /// Fetch on focus, open on intent: typing, ArrowDown, or a click.
+    /// <para>
+    /// Not opened by focus itself. A dialog focuses its first field as it opens, and a list that
+    /// opened on that covered the fields below before the user had asked for anything. The fetch
+    /// still starts here, so the list is ready the moment they do.
+    /// </para>
+    /// </summary>
+    async Task OnFocusAsync() => await FetchAsync(Query);
 
     /// <summary>
     /// Closing is deferred, because a click on a row blurs the input before the click lands.

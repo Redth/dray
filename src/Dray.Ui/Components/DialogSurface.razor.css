@@ -1,18 +1,22 @@
-/* The body fills the region of the sheet the platform gave it, and scrolls inside it once the
-   content is taller than the sheet may grow. The head sizes that region from the content's own
-   measured height, so in the ordinary case nothing scrolls at all.
+/* The body fills the region of the frame the platform gave it, and scrolls inside it once the
+   content is taller than the frame may grow. The macOS head sizes that region from the content's
+   own measured height, so in the ordinary case nothing scrolls at all.
 
-   Inset on every side, because a WebView clips at its own edge and a focus ring is drawn outside
+   Padded on every side, because a WebView clips at its own edge and a focus ring is drawn outside
    the control it belongs to — two pixels of outline at a two-pixel offset, so four past a field's
-   border. Without this a field against the edge loses its ring on that side. The native frame
-   widens the WebView by exactly this much (MacDialogFrame.Inset), so the content still lines up
-   with the AppKit title and buttons; change one and the other has to follow. */
+   border. Without this a field against an edge loses its ring on that side.
+
+   Two heads, two ways in. The macOS sheet widens its WebView by exactly --s2 past its text column
+   (MacDialogFrame.Inset), so the content lines up with the AppKit title and buttons; change one and
+   the other has to follow. The Windows head runs its WebView edge to edge and hands its own margins
+   over as --dialog-inset-*, which lets the content scroll under the dialog's whole width with the
+   scrollbar at its edge. max() rather than a sum: Windows's margins already have room for a ring. */
 .surface {
     /* The ground of a sheet is the platform's material, not a colour: AppKit draws it translucent
        and tinted by whatever is behind the window. An opaque panel colour over it reads as a grey
        slab beside AppKit's own buttons, which take the tint (DESIGN.md 9.1.1 — a material cannot be
-       matched by a colour). So the raised fills here are ink laid over the material at low
-       strength, the way a native control's fill is, and carry its tint in both appearances.
+       matched by a colour). So the raised fills here are ink laid over the ground at low strength,
+       the way a native control's fill is; on a head whose ground is solid they read the same.
 
        --bg is left opaque on purpose. It is what text fields and dropdowns paint, and both are
        solid on the platform too: a field is recessed, and a list floating over content must hide
@@ -22,7 +26,9 @@
 
     height: 100%;
     overflow: auto;
-    padding: var(--s2);
+    padding:
+        max(var(--dialog-inset-top, 0px), var(--s2)) max(var(--dialog-inset-right, 0px), var(--s2))
+        max(var(--dialog-inset-bottom, 0px), var(--s2)) max(var(--dialog-inset-left, 0px), var(--s2));
     color: var(--ink);
     font-size: var(--text-base);
 }

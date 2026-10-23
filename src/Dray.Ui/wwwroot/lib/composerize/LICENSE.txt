@@ -1,0 +1,2 @@
+composerize — https://github.com/composerize/composerize — MIT License
+Copyright (c) the composerize contributors.

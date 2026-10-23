@@ -24,12 +24,13 @@ else
 }
 
 @code {
-    /// <summary>Closes with "create" once the engine has made it, so the list behind can refresh.</summary>
-    public static DialogRequest Request() => new(
-        "Create a volume",
-        typeof(VolumeDialog),
-        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
-        Size: DialogSize.Small);
+    /// <summary>Open it. True when a volume was created, so the page knows to refresh.</summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell)
+        => await shell.ShowDialogAsync(new DialogRequest(
+            "Create a volume",
+            typeof(VolumeDialog),
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
+            Size: DialogSize.Small)) == "create";
 
     string _name = "";
     string? _problem;

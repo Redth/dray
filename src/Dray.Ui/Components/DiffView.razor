@@ -1,0 +1,43 @@
+@* Two versions of a file, side by side, in Monaco's diff editor — the body of the dialog that
+   shows what a save will write before it writes it. Read-only: it is a review, not a merge. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="diffview" @ref="_host"></div>
+
+@code {
+    [Parameter, EditorRequired] public string Original { get; set; } = "";
+
+    [Parameter, EditorRequired] public string Modified { get; set; } = "";
+
+    [Parameter] public string Language { get; set; } = "plaintext";
+
+    ElementReference _host;
+    IJSObjectReference? _module;
+    IJSObjectReference? _diff;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/monaco.js");
+        _diff = await _module.InvokeAsync<IJSObjectReference>("diff.create", _host, new { original = Original, modified = Modified, language = Language });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_diff is not null)
+            {
+                await _module!.InvokeVoidAsync("diff.dispose", _diff);
+                await _diff.DisposeAsync();
+            }
+
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+}

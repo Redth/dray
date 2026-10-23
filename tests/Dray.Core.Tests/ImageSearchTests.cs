@@ -103,4 +103,79 @@ public class ImageSearchTests
         // A well-formed answer of the wrong shape genuinely has no results in it.
         Assert.Empty(ImageSearch.Parse("""{"message":"page not found"}"""));
     }
+
+    /// <summary>
+    /// Captured from Docker 29 answering <c>/images/search?term=quay.io/prometheus</c>: no host on
+    /// the names, a README for a description, and a zero for stars that Quay never sent.
+    /// </summary>
+    const string Quay = """
+        [
+          {"star_count":0,"is_official":false,"name":"prometheus-operator/prometheus-config-reloader","is_automated":false,"description":""},
+          {"star_count":0,"is_official":false,"name":"prometheus/prometheus","is_automated":false,"description":"<h1 align=\"center\" style=\"border-bottom: none\">\n    <a href=\"https://prometheus.io\" target=\"_blank\"><img alt=\"Prometheus\" src=\"/documentation/images/prometheus-logo.svg\"></a><br>Prometheus\n</h1>\n\n<p align=\"center\">Visit <a href=\"https://prometheus.io\" target=\"_blank\">prometheus.io</a> for the full documentation,\nexamples and guides.</p>\n\n<div align=\"center\">\n\n[![CI](https://github.com/prometheus/prometheus/actions/workflows/ci.yml/badge.svg)](https://github.com/prometheus/prometheus/actions/workflows/ci.yml)\n"}
+        ]
+        """;
+
+    [Fact]
+    public void AnotherRegistrysResultsKeepTheirRegistry()
+    {
+        // Pulled as the engine gave it, "prometheus/prometheus" comes from Docker Hub — a different
+        // image, from a different publisher, or nothing at all.
+        var results = ImageSearch.Parse(Quay, "quay.io");
+
+        Assert.Equal("quay.io/prometheus/prometheus", results[1].Name);
+        Assert.Equal("prometheus/prometheus", results[1].ShortName);
+    }
+
+    [Fact]
+    public void ANameThatAlreadyHasARegistryIsLeftAlone()
+        => Assert.Equal("docker.io/library/redis", ImageSearch.Parse(Podman, "quay.io")[1].Name);
+
+    [Fact]
+    public void DockerHubResultsAreNotPrefixed()
+        => Assert.Equal("redis", ImageSearch.Parse(Docker, "docker.io")[0].Name);
+
+    [Fact]
+    public void StarsFromAnotherRegistryAreUnknownNotZero()
+        => Assert.All(ImageSearch.Parse(Quay, "quay.io"), r => Assert.Equal(-1, r.Stars));
+
+    [Fact]
+    public void AReadmeBecomesALineOfText()
+    {
+        var description = ImageSearch.Parse(Quay, "quay.io")[1].Description;
+
+        Assert.Equal("Prometheus Visit prometheus.io for the full documentation, examples and guides.", description);
+    }
+
+    [Fact]
+    public void AnEmptyDescriptionIsNone()
+        => Assert.Null(ImageSearch.Parse(Quay, "quay.io")[0].Description);
+
+    [Theory]
+    [InlineData("Redis is the world's fastest data platform.", "Redis is the world's fastest data platform.")]
+    [InlineData("**Bold** and `code` and __strong__", "Bold and code and strong")]
+    [InlineData("Uses my_app and C# tooling", "Uses my_app and C# tooling")]
+    [InlineData("# Heading\nBody", "Heading Body")]
+    [InlineData("Tom &amp; Jerry", "Tom & Jerry")]
+    public void PlainTextKeepsTheWords(string input, string expected)
+        => Assert.Equal(expected, ImageSearch.Plain(input));
+
+    [Fact]
+    public void ReferenceStyleBadgesAreDropped()
+    {
+        // Measured: Quay's node-exporter README, as the engine passes it through.
+        var text = ImageSearch.Plain("Node exporter [![CircleCI](https://circleci.com/x.svg)][circleci] [![Docker Repository on Quay][quay_image]][quay] Prometheus exporter for \\*NIX kernels.\n\n[quay]: https://quay.io/x");
+
+        Assert.Equal("Node exporter Prometheus exporter for *NIX kernels.", text);
+    }
+
+    [Fact]
+    public void ALongDescriptionIsCut()
+        => Assert.EndsWith("…", ImageSearch.Plain(new string('a', 500)));
+
+    [Fact]
+    public void TheOfficialFilterIsTheOneBothEnginesAccept()
+    {
+        Assert.Equal("""{"is-official":["true"]}""", new ImageSearchFilters(OfficialOnly: true).ToQuery());
+        Assert.Null(ImageSearchFilters.None.ToQuery());
+    }
 }

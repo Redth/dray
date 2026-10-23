@@ -20,28 +20,45 @@ builder.Services.AddSingleton<IPlatformTheme, GeneratedPaletteTheme>();
 builder.Services.AddSingleton<IDockerConfigSource, SystemDockerConfigSource>();
 builder.Services.AddSingleton<DockerContextReader>();
 
-// Windows setup and CLI-context help. Registered everywhere rather than behind an OS check: each
-// reports "not applicable" off Windows, and a service that exists only on one platform is one the
+// Engine setup for every platform, and CLI-context help. Registered everywhere rather than behind an
+// OS check: each reads only its own platform, and a service that exists only on one platform is one the
 // pages have to guard around.
 builder.Services.AddSingleton<WindowsSetupReader>();
+builder.Services.AddSingleton<MacSetupReader>();
+builder.Services.AddSingleton<LinuxSetupReader>();
 builder.Services.AddSingleton<SetupStepRunner>();
+builder.Services.AddSingleton<WslAccount>();
 builder.Services.AddSingleton<DockerCliContext>();
+builder.Services.AddSingleton<DockerDesktop>();
+builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
 // Two engines behind one seam. The composite dispatches on the endpoint's scheme, so an Apple
 // host in the picker gets Apple's runtime and everything else gets Docker's — and no page above
 // this line knows either exists.
 builder.Services.AddSingleton<IContainerRuntimeFactory>(
     new CompositeRuntimeFactory(new AppleRuntimeFactory(), new DockerRuntimeFactory()));
+// Stacks beyond what is running: remembered ones and the stacks folder. Paths only — see
+// StackRegistry for why nothing else is written.
+builder.Services.AddSingleton(new StackRegistry(Path.Combine(DrayPaths.ConfigDirectory, "stacks.json")));
+builder.Services.AddSingleton<StackCatalog>();
 builder.Services.AddSingleton<EngineManager>();
+builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
+builder.Services.AddSingleton<StackOperations>();
 // Scoped: it holds one live stream per watched container and must go away with the view
 // that asked for them.
 builder.Services.AddScoped<StatsHub>();
 builder.Services.AddScoped<PruneService>();
+builder.Services.AddScoped<StackActionService>();
 builder.Services.AddSingleton<RegistryReader>();
+// The registry's own API, for what the engine cannot answer: tags, and what each was built for.
+builder.Services.AddSingleton<RegistryBrowser>();
 
 // No native chrome here, so confirmations are rendered by ConfirmHost.
 builder.Services.AddScoped<WebConfirmService>();
 builder.Services.AddScoped<WebDialogService>();
 builder.Services.AddScoped<IShellBridge, WebShellBridge>();
+
+// Scoped because the bridge it confirms through is.
+builder.Services.AddScoped<HostSwitcher>();
 
 var app = builder.Build();
 

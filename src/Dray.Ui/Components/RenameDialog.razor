@@ -26,12 +26,14 @@ else
 @code {
     [Parameter, EditorRequired] public ContainerSummary Container { get; set; } = default!;
 
-    public static DialogRequest Request(ContainerSummary container) => new(
-        $"Rename {container.Name}",
-        typeof(RenameDialog),
-        new Dictionary<string, object?> { [nameof(Container)] = container },
-        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("rename", "Rename")],
-        Size: DialogSize.Small);
+    /// <summary>Open it. True once the engine has accepted the new name.</summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell, ContainerSummary container)
+        => await shell.ShowDialogAsync(new DialogRequest(
+            $"Rename {container.Name}",
+            typeof(RenameDialog),
+            new Dictionary<string, object?> { [nameof(Container)] = container },
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("rename", "Rename")],
+            Size: DialogSize.Small)) == "rename";
 
     string _name = "";
     string? _problem;

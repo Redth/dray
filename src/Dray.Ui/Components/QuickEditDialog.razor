@@ -1,0 +1,73 @@
+@* The body of the Add service / Add port / Add variable dialogs.
+
+   Three small forms, because these are the three things people add to a compose file most and
+   each is a line or two of YAML they would otherwise have to get the indentation of right. What
+   they produce is an insertion into the file — every other byte stays — and it lands unsaved in
+   the editor, selected, so the next thing to do is read it. *@
+
+<div class="qe">
+    @if (Request.Kind != QuickEditKind.Service)
+    {
+        <div class="field">
+            <label class="field__label" for="qe-service">Service</label>
+            <select id="qe-service" class="input" @bind="Request.Service">
+                @foreach (var service in Request.Services)
+                {
+                    <option value="@service">@service</option>
+                }
+            </select>
+        </div>
+    }
+
+    @switch (Request.Kind)
+    {
+        case QuickEditKind.Service:
+            <div class="field">
+                <label class="field__label" for="qe-name">Name</label>
+                <input id="qe-name" class="input mono" @bind="Request.Name" @bind:event="oninput" placeholder="web" spellcheck="false" autocomplete="off" />
+            </div>
+            <div class="field">
+                <label class="field__label" for="qe-image">Image</label>
+                <input id="qe-image" class="input mono" @bind="Request.Image" @bind:event="oninput" placeholder="nginx:1.27" spellcheck="false" autocomplete="off" />
+            </div>
+            <div class="field">
+                <label class="field__label" for="qe-port">Publish a port <span class="muted">— optional</span></label>
+                <input id="qe-port" class="input mono" @bind="Request.Port" @bind:event="oninput" placeholder="8080:80" spellcheck="false" autocomplete="off" />
+            </div>
+            break;
+
+        case QuickEditKind.Port:
+            <div class="field">
+                <label class="field__label" for="qe-port">Port</label>
+                <input id="qe-port" class="input mono" @bind="Request.Port" @bind:event="oninput" placeholder="8080:80" spellcheck="false" autocomplete="off" />
+                <span class="qe__hint muted">This machine's port, then the container's: <span class="mono">8080:80</span>. Add <span class="mono">/udp</span> for UDP.</span>
+            </div>
+            break;
+
+        case QuickEditKind.Variable:
+            <div class="qe__pair">
+                <div class="field">
+                    <label class="field__label" for="qe-key">Name</label>
+                    <input id="qe-key" class="input mono" @bind="Request.Key" @bind:event="oninput" placeholder="LOG_LEVEL" spellcheck="false" autocomplete="off" />
+                </div>
+                <div class="field">
+                    <label class="field__label" for="qe-value">Value</label>
+                    <input id="qe-value" class="input mono" @bind="Request.Value" @bind:event="oninput" placeholder="info" spellcheck="false" autocomplete="off" />
+                </div>
+            </div>
+            <span class="qe__hint muted">
+                Written into the compose file itself. A password belongs in the stack's .env instead — reference it here as
+                <span class="mono">${NAME}</span>.
+            </span>
+            break;
+    }
+
+    @if (Request.Problem is { } problem)
+    {
+        <p class="qe__problem" role="alert">@problem</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public QuickEditRequest Request { get; set; } = default!;
+}

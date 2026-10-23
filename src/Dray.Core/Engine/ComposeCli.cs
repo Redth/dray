@@ -15,10 +15,33 @@ public sealed record ComposeCommand(string Executable, IReadOnlyList<string> Lea
     public string Display => LeadingArguments.Count == 0
         ? Executable
         : $"{Executable} {string.Join(' ', LeadingArguments)}";
+
+    /// <summary>
+    /// True for the Docker CLI plugin, which accepts the CLI's global flags — <c>--context</c>,
+    /// <c>-H</c>, the TLS options — ahead of <c>compose</c>. The standalone binary and podman's
+    /// wrapper take none of them and are addressed through the environment instead.
+    /// </summary>
+    public bool TakesDockerFlags => Executable == "docker" && LeadingArguments.Count > 0;
 }
 
 /// <summary>One line of output from a compose command.</summary>
-public sealed record ComposeOutput(string Text, bool IsError);
+public sealed record ComposeOutput(string Text, bool IsError)
+{
+    /// <summary>
+    /// How the process ended. Set on the last item of a run and nowhere else.
+    /// <para>
+    /// Null on every line, and null when the runner could not say — a test fake replaying a
+    /// transcript, or a run the consumer abandoned. Unreported is not zero: a run with no exit code
+    /// is not a run that succeeded, and only a reported zero may be shown as one.
+    /// </para>
+    /// </summary>
+    public int? ExitCode { get; init; }
+
+    /// <summary>The item that says how the process ended, rather than a line it printed.</summary>
+    public bool IsExit => ExitCode is not null;
+
+    public static ComposeOutput Exited(int exitCode) => new(string.Empty, IsError: false) { ExitCode = exitCode };
+}
 
 /// <summary>
 /// Driving compose.
@@ -29,9 +52,18 @@ public sealed record ComposeOutput(string Text, bool IsError);
 /// someone presses Up.
 /// </para>
 /// </summary>
-public sealed class ComposeCli(IProcessRunner? runner = null)
+public sealed class ComposeCli(
+    IProcessRunner? runner = null,
+    Func<IReadOnlyDictionary<string, string>>? environment = null)
 {
     readonly IProcessRunner _runner = runner ?? new SystemProcessRunner();
+
+    /// <summary>The process runner, shared with whatever else runs compose's neighbours — ssh to a host.</summary>
+    public IProcessRunner Runner => _runner;
+
+    // A function rather than a snapshot so a test can hand it a fixed environment, and the app
+    // reads the real one at the moment of each run.
+    readonly Func<IReadOnlyDictionary<string, string>> _environment = environment ?? ComposeEnvironment.Current;
 
     /// <summary>
     /// The ways compose ships, best first.
@@ -52,9 +84,50 @@ public sealed class ComposeCli(IProcessRunner? runner = null)
     ComposeCommand? _found;
     bool _probed;
 
+    /// <summary>What each WSL distribution answered, by name — compose there is its own install.</summary>
+    readonly Dictionary<string, ComposeCommand?> _inDistro = new(StringComparer.OrdinalIgnoreCase);
+
+    static readonly Dictionary<string, string> Utf8 = new() { ["WSL_UTF8"] = "1" };
+
     /// <summary>
-    /// Find a working compose, or null. Probed once and remembered — this shells out, and the
-    /// answer does not change while the app is running.
+    /// The compose that can drive <paramref name="endpoint"/>, or null.
+    /// <para>
+    /// For an engine inside a WSL distribution that is the distribution's own compose: its socket
+    /// has no address on Windows, so a Windows compose cannot reach it, and the paths compose
+    /// recorded on its containers are Linux paths that only mean something in there. For every
+    /// other engine it is this machine's compose, pointed at the engine by <c>DOCKER_HOST</c>.
+    /// Apple's engine has none.
+    /// </para>
+    /// </summary>
+    public async Task<ComposeCommand?> DetectAsync(DockerEndpoint? endpoint, CancellationToken ct = default)
+    {
+        if (endpoint?.Scheme == EndpointScheme.AppleContainer) return null;
+        if (endpoint is not { Scheme: EndpointScheme.Wsl, Distro: { } distro }) return await DetectAsync(ct).ConfigureAwait(false);
+
+        if (_inDistro.TryGetValue(distro, out var known)) return known;
+
+        ComposeCommand? found = null;
+
+        try
+        {
+            var result = await _runner
+                .RunLongAsync("wsl.exe", ["-d", distro, "--exec", "docker", "compose", "version", "--short"], TimeSpan.FromSeconds(60), Utf8, ct)
+                .ConfigureAwait(false);
+
+            var version = WslDistroReader.Decode(result.StandardOutput).Trim();
+            if (result.ExitCode == 0 && version.Length > 0) found = new ComposeCommand("docker", ["compose"], version);
+        }
+        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // No wsl.exe, or the distribution would not start: no compose there that Dray can use.
+        }
+
+        return _inDistro[distro] = found;
+    }
+
+    /// <summary>
+    /// Find a working compose on this machine, or null. Probed once and remembered — this shells
+    /// out, and the answer does not change while the app is running.
     /// </summary>
     public async Task<ComposeCommand?> DetectAsync(CancellationToken ct = default)
     {
@@ -92,23 +165,151 @@ public sealed class ComposeCli(IProcessRunner? runner = null)
     }
 
     /// <summary>
+    /// What <see cref="DetectAsync"/> found, without asking again. Null both before the probe and
+    /// when it found nothing; <see cref="IsProbed"/> tells the two apart.
+    /// </summary>
+    public ComposeCommand? Found => _found;
+
+    public bool IsProbed => _probed;
+
+    /// <summary>
     /// Run a compose subcommand against a project, streaming its output as it arrives.
     /// <para>
     /// Streamed rather than collected: <c>up</c> on a stack that has to pull images runs for
-    /// minutes, and a spinner with nothing behind it is exactly what people distrust.
+    /// minutes, and a spinner with nothing behind it is exactly what people distrust. The last item
+    /// carries the exit code, which is what failure is — compose prints warnings to stderr on runs
+    /// that succeed, so reading its text for the word "error" gets both directions wrong.
     /// </para>
     /// </summary>
+    /// <param name="target">Which host the process addresses. See <see cref="ComposeTarget"/>.</param>
     /// <param name="project">The compose project name, passed as <c>-p</c>.</param>
     /// <param name="files">Compose files to use, or empty to let compose find them.</param>
-    public async IAsyncEnumerable<ComposeOutput> RunAsync(
+    public IAsyncEnumerable<ComposeOutput> RunAsync(
         ComposeCommand command,
+        ComposeTarget target,
         string project,
         IReadOnlyList<string> files,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
     {
-        var args = new List<string>(command.LeadingArguments) { "-p", project };
+        var run = Invocation(command, target, project, files, arguments, workingDirectory);
+
+        return _runner.StreamAsync(run.Executable, run.Arguments, run.WorkingDirectory, ComposeEnvironment.For(_environment(), target), ct);
+    }
+
+    /// <summary>
+    /// Ask compose what it makes of a stack: <c>compose config</c>, the same parse, merge,
+    /// interpolation and validation <c>up</c> runs first — so a file it accepts is one <c>up</c>
+    /// will read, and a problem it reports is one Deploy would have hit.
+    /// <para>
+    /// The authority, rather than anything Dray checks itself. The schema the editor validates
+    /// against catches a typo while typing; this catches what only compose knows — an undefined
+    /// dependency, a required variable with no value, an override that does not merge.
+    /// </para>
+    /// </summary>
+    public Task<Model.ComposeConfig> ConfigAsync(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        string? workingDirectory,
+        CancellationToken ct = default)
+        => CollectConfigAsync(RunAsync(command, target, project, files, ["config"], workingDirectory, ct));
+
+    /// <summary>Read a <c>compose config</c> run's output: the model on stdout, the problems on stderr.</summary>
+    internal static async Task<Model.ComposeConfig> CollectConfigAsync(IAsyncEnumerable<ComposeOutput> run)
+    {
+        var yaml = new System.Text.StringBuilder();
+        var errors = new System.Text.StringBuilder();
+        int? exitCode = null;
+
+        await foreach (var line in run.ConfigureAwait(false))
+        {
+            if (line.IsExit) exitCode = line.ExitCode;
+            else if (line.IsError) errors.AppendLine(line.Text);
+            else yaml.Append(line.Text).Append('\n');
+        }
+
+        return new Model.ComposeConfig(
+            exitCode == 0 ? yaml.ToString() : null,
+            Model.ComposeProblems.Parse(errors.ToString()),
+            exitCode);
+    }
+
+    /// <summary>Read a <c>compose config --hash</c> run's output, or null when compose refused.</summary>
+    internal static async Task<IReadOnlyDictionary<string, string>?> CollectHashesAsync(IAsyncEnumerable<ComposeOutput> run)
+    {
+        var output = new System.Text.StringBuilder();
+        int? exitCode = null;
+
+        await foreach (var line in run.ConfigureAwait(false))
+        {
+            if (line.IsExit) exitCode = line.ExitCode;
+            else if (!line.IsError) output.AppendLine(line.Text);
+        }
+
+        return exitCode == 0 ? Model.StackDrift.ParseHashes(output.ToString()) : null;
+    }
+
+    /// <summary>
+    /// Compose's hash of each service's configuration as the files say it now —
+    /// <c>compose config --hash '*'</c>. Null when compose refused the files: a stack it cannot parse
+    /// has no "now" to compare with.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, string>?> HashesAsync(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        string? workingDirectory,
+        CancellationToken ct = default)
+        => CollectHashesAsync(RunAsync(command, target, project, files, ["config", "--hash", "*"], workingDirectory, ct));
+
+    /// <summary>
+    /// One invocation as a person would type it: the program, then every argument, quoting the ones
+    /// a shell would split. For display — the run itself never goes through a shell.
+    /// </summary>
+    public static string Display(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        IReadOnlyList<string> arguments)
+    {
+        var run = Invocation(command, target, project, files, arguments, null);
+
+        var parts = new List<string> { run.Executable };
+        parts.AddRange(run.Arguments.Select(Quote));
+
+        // The environment is how the standalone binary is aimed; leaving it out of the shown command
+        // would show a command that targets a different host when pasted.
+        var prefix = string.Concat(target.Environment.Select(kv => $"{kv.Key}={Quote(kv.Value)} "));
+        return prefix + string.Join(' ', parts);
+    }
+
+    static string Quote(string value)
+        => value.Length > 0 && value.All(c => char.IsAsciiLetterOrDigit(c) || "-_./:=@,+%".Contains(c))
+            ? value
+            : "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+
+    /// <summary>
+    /// The full argument list for one compose invocation.
+    /// <para>
+    /// A pure function so that what Dray runs can be tested exactly, and so a UI that shows the
+    /// command before running it shows the one that will run rather than a description of it.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<string> Arguments(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        IReadOnlyList<string> arguments)
+    {
+        // Global flags first: `docker --context nas compose`, never `docker compose --context nas`,
+        // which compose rejects as an unknown flag.
+        List<string> args = [.. target.GlobalArguments, .. command.LeadingArguments, "-p", project];
 
         foreach (var file in files)
         {
@@ -118,12 +319,52 @@ public sealed class ComposeCli(IProcessRunner? runner = null)
 
         args.AddRange(arguments);
 
-        await foreach (var line in _runner
-            .StreamAsync(command.Executable, args, workingDirectory, ct)
-            .ConfigureAwait(false))
+        return args;
+    }
+
+    /// <summary>A compose run, fully decided: what to start, with what, and where.</summary>
+    internal sealed record ComposeRun(string Executable, IReadOnlyList<string> Arguments, string? WorkingDirectory);
+
+    /// <summary>
+    /// How one compose invocation runs, as a pure function — the thing the tests pin down.
+    /// <para>
+    /// Every engine but one gets this machine's compose, with the host on its command line
+    /// (<see cref="ComposeTarget"/>). An engine inside a WSL distribution is the exception: its
+    /// socket has no address on this side, and the paths compose recorded on its containers are
+    /// Linux paths that mean something only in there — so compose runs inside the distribution, in
+    /// the directory it recorded, as the distribution's default user so anything it writes belongs
+    /// to them. Verified on Windows: a stack in Ubuntu stopped and started through Dray.
+    /// </para>
+    /// </summary>
+    internal static ComposeRun Invocation(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory)
+    {
+        if (target.Distro is { } distro)
         {
-            yield return line;
+            List<string> compose = [.. command.LeadingArguments, "-p", project];
+
+            foreach (var file in files)
+            {
+                compose.Add("-f");
+                compose.Add(file);
+            }
+
+            compose.AddRange(arguments);
+
+            // --cd takes the Linux path as compose recorded it. --exec, as for the relay, so a
+            // profile's greeting does not become part of compose's output.
+            return new ComposeRun(
+                "wsl.exe",
+                ["-d", distro, "--cd", workingDirectory is { Length: > 0 } wd ? wd : "~", "--exec", command.Executable, .. compose],
+                null);
         }
+
+        return new ComposeRun(command.Executable, Arguments(command, target, project, files, arguments), workingDirectory);
     }
 }
 
@@ -164,6 +405,23 @@ public interface IProcessRunner
         => RunAsync(executable, arguments, workingDirectory, ct);
 
     /// <summary>
+    /// Run a program that is expected to take a while, and wait up to <paramref name="timeout"/>.
+    /// <para>
+    /// The other overloads are bounded for probes, which must never be the reason the app does not
+    /// start. Switching Docker Desktop's engine takes eleven seconds and starting it can take a
+    /// minute, so both would be killed half-way through by a probe's limit — and a mode switch cut
+    /// off in the middle is a worse state than one never begun.
+    /// </para>
+    /// </summary>
+    Task<ProcessResult> RunLongAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
+        => RunAsync(executable, arguments, null, environment, ct);
+
+    /// <summary>
     /// Run a program, writing <paramref name="input"/> to its stdin.
     /// <para>
     /// How the credential helper protocol works: the payload goes in on stdin, never on the command
@@ -187,6 +445,27 @@ public interface IProcessRunner
 
     IAsyncEnumerable<ComposeOutput> StreamAsync(
         string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct);
+
+    /// <summary>
+    /// Stream a program given exactly <paramref name="environment"/> — nothing inherited — and end
+    /// with an item carrying its exit code (<see cref="ComposeOutput.Exited"/>).
+    /// <para>
+    /// Exact rather than additive because the point is what the child does <i>not</i> see. See
+    /// <see cref="ComposeEnvironment"/> for why compose in particular must not see the user's shell.
+    /// </para>
+    /// <para>
+    /// Defaulted for the same reason as the environment overload of <c>RunAsync</c>: a fake that
+    /// replays a transcript has no environment to apply, and no exit code to report — so it
+    /// reports none, which callers treat as unknown rather than as success.
+    /// </para>
+    /// </summary>
+    IAsyncEnumerable<ComposeOutput> StreamAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        IReadOnlyDictionary<string, string> environment,
+        CancellationToken ct)
+        => StreamAsync(executable, arguments, workingDirectory, ct);
 }
 
 /// <summary>The real one.</summary>
@@ -205,17 +484,34 @@ public sealed class SystemProcessRunner : IProcessRunner
         string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct)
         => RunAsync(executable, arguments, workingDirectory, environment: null, ct);
 
-    public async Task<ProcessResult> RunAsync(
+    public Task<ProcessResult> RunAsync(
         string executable,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         IReadOnlyDictionary<string, string>? environment,
         CancellationToken ct)
+        => RunBoundedAsync(executable, arguments, workingDirectory, environment, ProbeTimeout, ct);
+
+    public Task<ProcessResult> RunLongAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
+        => RunBoundedAsync(executable, arguments, null, environment, timeout, ct);
+
+    static async Task<ProcessResult> RunBoundedAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        IReadOnlyDictionary<string, string>? environment,
+        TimeSpan limit,
+        CancellationToken ct)
     {
         using var process = Start(executable, arguments, workingDirectory, environment: environment);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(ProbeTimeout);
+        timeout.CancelAfter(limit);
 
         var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
         var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
@@ -303,13 +599,32 @@ public sealed class SystemProcessRunner : IProcessRunner
             await stderr.ConfigureAwait(false));
     }
 
-    public async IAsyncEnumerable<ComposeOutput> StreamAsync(
+    public IAsyncEnumerable<ComposeOutput> StreamAsync(
+        string executable, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct)
+        => StreamCoreAsync(executable, arguments, workingDirectory, environment: null, ct);
+
+    public IAsyncEnumerable<ComposeOutput> StreamAsync(
         string executable,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
+        IReadOnlyDictionary<string, string> environment,
+        CancellationToken ct)
+        => StreamCoreAsync(executable, arguments, workingDirectory, environment, ct);
+
+    /// <param name="environment">
+    /// Null to inherit Dray's environment and report no exit code, which is what every caller that
+    /// predates the exit code expects. Otherwise the child's whole environment, and the stream ends
+    /// with <see cref="ComposeOutput.Exited"/>.
+    /// </param>
+    async IAsyncEnumerable<ComposeOutput> StreamCoreAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        IReadOnlyDictionary<string, string>? environment,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        using var process = Start(executable, arguments, workingDirectory);
+        using var process = Start(
+            executable, arguments, workingDirectory, environment: environment, replaceEnvironment: environment is not null);
 
         // Both streams into one channel, in arrival order. Compose writes its progress to stderr
         // and its results to stdout, and separating them would show the user the ending before the
@@ -326,10 +641,15 @@ public sealed class SystemProcessRunner : IProcessRunner
             {
                 await readers.ConfigureAwait(false);
                 await process.WaitForExitAsync(ct).ConfigureAwait(false);
+
+                // After both pipes have drained, so the exit code is always the last thing read
+                // and never lands ahead of the line that explains it.
+                if (environment is not null) channel.Writer.TryWrite(ComposeOutput.Exited(process.ExitCode));
             }
             catch (Exception)
             {
-                // Reported through the exit code below; a broken pipe here is the process ending.
+                // Cancelled, or a broken pipe as the process ended. Either way there is no exit
+                // code to report, and inventing one would be worse than leaving it unknown.
             }
             finally
             {
@@ -365,7 +685,8 @@ public sealed class SystemProcessRunner : IProcessRunner
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         bool redirectInput = false,
-        IReadOnlyDictionary<string, string>? environment = null)
+        IReadOnlyDictionary<string, string>? environment = null,
+        bool replaceEnvironment = false)
     {
         var info = new ProcessStartInfo(executable)
         {
@@ -380,6 +701,9 @@ public sealed class SystemProcessRunner : IProcessRunner
         // ArgumentList rather than a joined string: it quotes each argument for the platform, so a
         // compose file under a path with a space works without Dray inventing escaping rules.
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
+
+        // Cleared first when the caller is stating the whole environment rather than adding to it.
+        if (replaceEnvironment) info.Environment.Clear();
 
         if (environment is not null)
         {
@@ -400,4 +724,88 @@ public sealed class SystemProcessRunner : IProcessRunner
             // Already gone, or not ours to kill.
         }
     }
+}
+
+/// <summary>
+/// Compose run on an SSH host, against files on that host.
+/// <para>
+/// For a stack whose files live where its engine does — which is where a stack started on a
+/// server keeps them, and where its containers' <c>working_dir</c> label says they are. Running
+/// compose there means a relative bind mount means what it says: <c>./data</c> is beside the
+/// compose file on that machine, not a path on this one the remote engine would bind as an empty
+/// directory. Docker's own answer is a remote context, which keeps compose here; that is right for
+/// files that live here, and is what a TCP host still does.
+/// </para>
+/// </summary>
+public sealed class RemoteCompose(SshShell shell, Func<IReadOnlyDictionary<string, string>>? environment = null)
+{
+    readonly Func<IReadOnlyDictionary<string, string>> _environment = environment ?? ComposeEnvironment.Current;
+    Task<string?>? _version;
+
+    public SshShell Shell { get; } = shell;
+
+    /// <summary>
+    /// The host's compose version, or null when it has none — probed once per host.
+    /// <para>
+    /// The probe is shared, so it runs under no caller's token: the first caller is often a check
+    /// that gets cancelled when the user saves again, and a probe cancelled with it was cached as
+    /// cancelled for good — every later run on the host then "cancelled" before starting. A caller
+    /// that stops waiting stops waiting; the probe finishes for the next one.
+    /// </para>
+    /// </summary>
+    public Task<string?> DetectAsync(CancellationToken ct = default) => (_version ??= ProbeAsync()).WaitAsync(ct);
+
+    async Task<string?> ProbeAsync()
+    {
+        try
+        {
+            var result = await Shell.RunAsync("docker compose version --short", CancellationToken.None).ConfigureAwait(false);
+            var version = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+
+            if (result.ExitCode == 0 && version is { Length: > 0 }) return version;
+        }
+        catch (Exception)
+        {
+        }
+
+        // Not cached: a host whose ssh failed once — a dropped connection, a sleeping laptop — is
+        // asked again next time rather than written off for the session.
+        _version = null;
+        return null;
+    }
+
+    /// <summary>
+    /// The command the host's shell runs: into the project directory, then compose with the same
+    /// arguments a local run would have — minus the variables a login shell might carry that would
+    /// quietly override <c>-f</c>'s neighbours in <c>.env</c>. <c>DOCKER_HOST</c> is left alone on
+    /// purpose: on the host it is how that user reaches their engine, rootless or not.
+    /// </summary>
+    public static string Command(string project, IReadOnlyList<string> files, IReadOnlyList<string> arguments, string? workingDirectory)
+    {
+        List<string> words = ["docker", "compose", "-p", project];
+
+        foreach (var file in files)
+        {
+            words.Add("-f");
+            words.Add(file);
+        }
+
+        words.AddRange(arguments);
+
+        var compose = "env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_PROFILES " + SshShell.Join(words);
+        return workingDirectory is { Length: > 0 } dir ? $"cd {SshShell.Quote(dir)} && {compose}" : compose;
+    }
+
+    public IAsyncEnumerable<ComposeOutput> RunAsync(
+        string project, IReadOnlyList<string> files, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct = default)
+        => Shell.StreamAsync(Command(project, files, arguments, workingDirectory), ComposeEnvironment.For(_environment(), new ComposeTarget([], new Dictionary<string, string>())), ct);
+
+    public string Display(string project, IReadOnlyList<string> files, IReadOnlyList<string> arguments, string? workingDirectory)
+        => Shell.Display(Command(project, files, arguments, workingDirectory));
+
+    public Task<Model.ComposeConfig> ConfigAsync(string project, IReadOnlyList<string> files, string? workingDirectory, CancellationToken ct = default)
+        => ComposeCli.CollectConfigAsync(RunAsync(project, files, ["config"], workingDirectory, ct));
+
+    public Task<IReadOnlyDictionary<string, string>?> HashesAsync(string project, IReadOnlyList<string> files, string? workingDirectory, CancellationToken ct = default)
+        => ComposeCli.CollectHashesAsync(RunAsync(project, files, ["config", "--hash", "*"], workingDirectory, ct));
 }

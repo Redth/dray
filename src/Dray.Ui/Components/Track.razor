@@ -1,80 +1,205 @@
-@* One of the two independent routes to a working engine. Separate rather than one merged checklist
-   because they are two engines that share nothing: someone who only wants Linux containers must not
-   be shown a Windows feature to enable, and the reverse. *@
+@* One route to a working engine: what it is, what it costs, and what is left to do on it.
+
+   A kind of container can have more than one route — Linux containers come from Docker Desktop or
+   from an engine in a WSL distribution — and they are shown side by side rather than merged,
+   because the user is choosing between them. *@
+@implements IDisposable
 
 <div class="track">
-    <h3 class="track__title">
-        @if (Done)
+    <h4 class="track__title">
+        @Route.Title
+        @if (Route.Recommended && Alternatives)
         {
-            <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+            <span class="track__badge">Recommended</span>
         }
-        @Title
-    </h3>
+    </h4>
 
-    @if (Done)
+    <p class="track__summary muted">@Route.Summary</p>
+
+    @if (Route.Steps.Count == 0)
     {
-        <p class="track__done muted">@DoneWord</p>
+        <p class="track__done muted">Nothing left to do on this route.</p>
     }
-    else
+
+    @foreach (var step in Route.Steps)
     {
-        @foreach (var step in Steps)
-        {
-            <div class="track__step" @key="step.Id">
-                <div class="track__stephead">
-                    <span class="track__steptitle">@step.Title</span>
-                    <Button Label="Run"
-                            Icon="IconRef.Play"
-                            Variant="ButtonVariant.Secondary"
-                            Busy="@(Running == step.Id)"
-                            Disabled="@(Running is not null)"
-                            OnClick="() => OnRun.InvokeAsync(step)" />
-                </div>
-
-                <p class="track__why muted">@step.Why</p>
-
-                @* The command is shown before it is run, every time. It is what makes this a
-                   suggestion rather than Dray quietly reconfiguring someone's machine — and it
-                   means they can run it themselves, or decide Dray is wrong about it. *@
-                <div class="track__cmd">
-                    <code class="mono">@step.CommandLine</code>
-                </div>
-
-                <p class="track__cost muted">
-                    @if (step.NeedsElevation)
+        <div class="track__step" @key="step.Id">
+            <div class="track__stephead">
+                <span class="track__steptitle">
+                    @step.Title
+                    @if (step.Optional)
                     {
-                        <span>Asks for administrator.</span>
+                        <span class="muted"> — optional</span>
                     }
-                    @if (step.NeedsRestart)
-                    {
-                        <span> Needs a restart to take effect.</span>
-                    }
-                    <span> Runs in its own window, so you can see what it does.</span>
-                </p>
+                </span>
+                <Button Label="@ActionLabel(step)"
+                        Icon="@ActionIcon(step)"
+                        Variant="@(IsPrimary(step) ? ButtonVariant.Primary : ButtonVariant.Secondary)"
+                        Busy="@(Running == step.Id)"
+                        Disabled="@(Running is not null)"
+                        OnClick="() => OnRun.InvokeAsync(step)" />
             </div>
-        }
 
-        @if (Advice is { Length: > 0 } advice)
-        {
-            <p class="track__advice muted">@advice</p>
-        }
+            <p class="track__why muted">@step.Why</p>
+
+            @* The command is shown before it is run, every time. It is what makes this a suggestion
+               rather than Dray quietly reconfiguring someone's machine — and it means they can run
+               it themselves, or decide Dray is wrong about it. A script run as root is shown whole. *@
+            @if (step.Kind is SetupStepKind.OpenUrl && step.Url is { } url)
+            {
+                <div class="track__cmd">
+                    <code class="mono">@url</code>
+                </div>
+            }
+            else if (step.Kind is not (SetupStepKind.CreateLinuxUser or SetupStepKind.Connect))
+            {
+                <div class="track__cmd">
+                    @if (step.Script is { } script)
+                    {
+                        @if (step.ScriptContext is { } context)
+                        {
+                            <p class="track__cmdnote muted">@context</p>
+                        }
+                        <pre class="mono">@script</pre>
+                    }
+                    else
+                    {
+                        <code class="mono">@step.CommandLine</code>
+                    }
+                </div>
+            }
+
+            <p class="track__cost muted">@string.Join(' ', Costs(step))</p>
+
+            @* The output belongs to the step that produced it, and stays after it finishes: a failed
+               install's last lines are the explanation. Selectable, because it is a log
+               (DESIGN.md 2.6). *@
+            @if (OutputFor == step.Id && Output.Count > 0)
+            {
+                <div class="track__output" role="log" aria-live="polite">
+                    @if (Running == step.Id)
+                    {
+                        <p class="track__elapsed muted">Running for @Elapsed</p>
+                    }
+                    <pre class="mono">@string.Join('\n', Output)</pre>
+                </div>
+            }
+            else if (Running == step.Id && step.Kind == SetupStepKind.InApp)
+            {
+                <p class="track__elapsed muted">Running for @Elapsed</p>
+            }
+        </div>
     }
 </div>
 
 @code {
-    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public SetupRoute Route { get; set; } = default!;
 
-    [Parameter] public bool Done { get; set; }
+    /// <summary>Whether other routes are shown beside this one — a lone route recommends nothing.</summary>
+    [Parameter] public bool Alternatives { get; set; }
 
-    /// <summary>What to say when there is nothing left to do. Never just "Done".</summary>
-    [Parameter] public string DoneWord { get; set; } = "";
-
-    [Parameter] public IReadOnlyList<SetupStep> Steps { get; set; } = [];
-
-    /// <summary>The id of the step running right now, so only that one shows a spinner.</summary>
+    /// <summary>The id of the step running right now, so only that one shows as busy.</summary>
     [Parameter] public string? Running { get; set; }
+
+    /// <summary>Which step <see cref="Output"/> came from.</summary>
+    [Parameter] public string? OutputFor { get; set; }
+
+    [Parameter] public IReadOnlyList<string> Output { get; set; } = [];
+
+    /// <summary>When the running step started, for the elapsed time beside its output.</summary>
+    [Parameter] public DateTimeOffset? StartedAt { get; set; }
 
     [Parameter] public EventCallback<SetupStep> OnRun { get; set; }
 
-    /// <summary>What Dray will not do, and why. Shown under the steps it will.</summary>
-    [Parameter] public string? Advice { get; set; }
+    /// <summary>
+    /// Re-renders once a second while a step runs, so the elapsed time moves. An installer that
+    /// prints three lines in eight minutes looks hung without it — and this is a clock on one
+    /// label, not a re-fetch of anything.
+    /// </summary>
+    PeriodicTimer? _ticker;
+
+    string Elapsed => StartedAt is { } started
+        ? (DateTimeOffset.Now - started) is var span && span.TotalHours >= 1 ? span.ToString(@"h\:mm\:ss") : span.ToString(@"m\:ss")
+        : "";
+
+    protected override void OnParametersSet()
+    {
+        if (Running is not null && Route.Steps.Any(s => s.Id == Running) && _ticker is null)
+        {
+            _ticker = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            _ = TickAsync(_ticker);
+        }
+        else if (Running is null || Route.Steps.All(s => s.Id != Running))
+        {
+            _ticker?.Dispose();
+            _ticker = null;
+        }
+    }
+
+    async Task TickAsync(PeriodicTimer ticker)
+    {
+        while (await ticker.WaitForNextTickAsync())
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// The next thing to do on the recommended route is the one filled button. Never a Docker
+    /// Desktop switch, which stops the other engine's containers: the brand colour does not go on
+    /// anything that stops something (DESIGN.md).
+    /// </summary>
+    bool IsPrimary(SetupStep step)
+        => Route.Recommended
+           && step == Route.Steps.FirstOrDefault(s => !s.Optional)
+           && step.Id is not ("desktop.linux" or "desktop.windows");
+
+    /// <summary>
+    /// What running a step costs, as sentences: the prompt it raises, what finishing it takes, where
+    /// it runs, how long. Joined in code rather than as adjacent elements, which Razor renders with
+    /// the spaces between them trimmed away — "as it runs.Takes a minute or two."
+    /// </summary>
+    static IEnumerable<string> Costs(SetupStep step)
+    {
+        if (step.NeedsElevation) yield return step.ElevationNote;
+        if (step.NeedsRestart) yield return step.RestartNote;
+
+        var where = step.Kind switch
+        {
+            SetupStepKind.Window => "Runs in its own window, so you can see what it does.",
+            SetupStepKind.InApp or SetupStepKind.WslSetting => "Its output appears here as it runs.",
+            SetupStepKind.Terminal => "Opens in Terminal, which asks for what it needs there.",
+            SetupStepKind.OpenUrl => "Opens in your browser.",
+            _ => null,
+        };
+
+        if (where is not null) yield return where;
+        if (step.Duration is { } duration) yield return duration;
+    }
+
+    static string ActionLabel(SetupStep step) => step.Kind switch
+    {
+        SetupStepKind.CreateLinuxUser => "Create account…",
+        SetupStepKind.Connect => "Use it",
+        SetupStepKind.DockerDesktop when step.Id == "desktop.start" => "Start",
+        SetupStepKind.DockerDesktop => "Switch",
+        SetupStepKind.Terminal => "Open in Terminal",
+        SetupStepKind.OpenUrl => "Download",
+        SetupStepKind.Manual => "Copy",
+        SetupStepKind.WslSetting => "Apply",
+        _ when step.Id.EndsWith(".start", StringComparison.Ordinal) || step.Id.EndsWith(".open", StringComparison.Ordinal) => "Start",
+        _ => step.Id.EndsWith(".install", StringComparison.Ordinal) || step.Id == "wsl.distro" ? "Install" : "Run",
+    };
+
+    static IconRef ActionIcon(SetupStep step) => step.Kind switch
+    {
+        SetupStepKind.CreateLinuxUser => IconRef.Plus,
+        SetupStepKind.Connect => IconRef.Check,
+        SetupStepKind.Terminal => IconRef.Terminal,
+        SetupStepKind.OpenUrl => IconRef.External,
+        SetupStepKind.Manual => IconRef.Copy,
+        _ => IconRef.Play,
+    };
+
+    public void Dispose() => _ticker?.Dispose();
 }

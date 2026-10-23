@@ -22,6 +22,11 @@ public static class MainClass
         ObjCRuntime.Runtime.MarshalManagedException += (_, e) =>
             Report("MARSHAL MANAGED", e.Exception);
 
+        // Opened from Finder, the app has launchd's PATH, which has none of the commands Dray
+        // runs — docker, compose, the credential helpers, Apple's container. First, before
+        // anything is discovered.
+        Dray.Core.Engine.MacSearchPath.Apply();
+
         NSApplication.Init();
         NSApplication.SharedApplication.Delegate = new DrayMacApplication();
         NSApplication.Main(args);

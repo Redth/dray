@@ -69,7 +69,6 @@
                        Placeholder="No images" />
         }
     </div>
-
 </EngineScope>
 
 @code {
@@ -83,13 +82,7 @@
     bool _noticeOk;
     string _search = "";
     int _danglingFilter;
-    async Task PullAsync()
-    {
-        await Shell.ShowDialogAsync(PullDialog.Request());
-        await LoadAsync();
-    }
 
-    /// <summary>The image reference the run dialog was opened for, or null when it is closed.</summary>
     /// <summary>
     /// What can be done with one image, most common first. Run leads because it is the point of
     /// having an image; a dangling one has no reference to run or push, so it gets neither.
@@ -122,40 +115,53 @@
     Task RunRowActionAsync((string Row, string Action) chosen)
         => ById(chosen.Row) is { } image ? RunRowAsync(chosen.Action, image) : Task.CompletedTask;
 
+    /// <summary>Pull, then refresh: the dialog may have pulled any number of images before closing.</summary>
+    async Task PullAsync()
+    {
+        await PullDialog.ShowAsync(Shell);
+        await LoadAsync();
+    }
+
+    /// <summary>Build, then refresh: the dialog may have built any number of images before closing.</summary>
+    async Task BuildAsync()
+    {
+        await BuildDialog.ShowAsync(Shell);
+        await LoadAsync();
+    }
+
     void OpenById(string id)
     {
         if (ById(id) is { } image) Nav.NavigateTo($"/images/{Uri.EscapeDataString(image.Id)}");
     }
 
-    Task RunRowAsync(string id, ImageSummary image)
+    async Task RunRowAsync(string id, ImageSummary image)
     {
         switch (id)
         {
             case "run":
-                return Shell.ShowDialogAsync(RunDialog.Request(image.Tags[0].Display));
+                await RunDialog.ShowAsync(Shell, image.Tags[0].Display);
+                break;
 
             case "tag":
-                return TagAsync(image);
+                if (await TagDialog.ShowAsync(Shell, image)) await LoadAsync();
+                break;
 
             case "push":
-                return Shell.ShowDialogAsync(PushDialog.Request(image.Tags[0].Display));
+                await PushDialog.ShowAsync(Shell, image.Tags[0].Display);
+                break;
 
             case "save":
-                return SaveAsync(image);
+                await SaveAsync(image);
+                break;
 
             case "copy-id":
-                return Shell.WriteClipboardAsync(image.Id);
+                await Shell.WriteClipboardAsync(image.Id);
+                break;
 
             case "remove":
-                return RemoveAsync(image);
+                await RemoveAsync(image);
+                break;
         }
-
-        return Task.CompletedTask;
-    }
-
-    async Task TagAsync(ImageSummary image)
-    {
-        if (await Shell.ShowDialogAsync(TagDialog.Request(image)) == "tag") await LoadAsync();
     }
 
     protected override Task OnInitializedAsync() => LoadAsync();
@@ -360,15 +366,12 @@
                 await LoadAsync();
                 break;
 
-            // Refreshed however these close: a pull or build that finished and one that was walked
-            // away from mid-stream can both have left something new on the engine.
             case "pull":
                 await PullAsync();
                 break;
 
             case "build":
-                await Shell.ShowDialogAsync(BuildDialog.Request());
-                await LoadAsync();
+                await BuildAsync();
                 break;
 
             case "load":

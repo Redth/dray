@@ -15,7 +15,7 @@
 
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -52,7 +52,11 @@ function collect(dir, base = dir) {
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
-    const rel = relative(base, full);
+
+    // Always forward slashes: these are the manifest's keys and the paths matched below, and on
+    // Windows relative() gives backslashes — which kept every dropped worker and made --check
+    // report the whole tree missing.
+    const rel = relative(base, full).split(sep).join('/');
 
     if (entry.isDirectory()) {
       files.push(...collect(full, base));

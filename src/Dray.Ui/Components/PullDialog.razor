@@ -1,124 +1,1196 @@
-@* Pull an image, showing the engine's own per-layer progress.
+@* Pull an image — and find it first.
 
-   Not a single bar. A pull is a dozen layers downloading and extracting at once, and averaging them
-   into one number produces a bar that jumps backwards whenever a new layer starts — which reads as
-   a bug rather than as progress.
+   One field, read the way the CLI will read it (ImageReferenceDraft). While it holds part of a name
+   it suggests repositories; once it has a colon it lists that repository's tags. A host typed into
+   it moves into the registry picker beside it, so the field and the picker never disagree about
+   where the image comes from. The field is the state: backspacing over the colon goes back to
+   repositories, and nothing has to remember which step the user is on.
 
-   A dialog body: the title and buttons are the platform's. Cancel stops Dray reading the stream,
-   whenever it is pressed — the session's Closing token is what the pull listens to. *@
+   Searching is the engine's, as it always was. Tags, and what each tag was built for, are read from
+   the registry by RegistryBrowser, because the Engine API has no endpoint for them — and a pull
+   dialog that cannot list tags sends people to a browser tab to copy one. The pull itself always
+   goes through the engine.
+
+   Per-layer progress rather than one bar, for the reason LayerProgress gives. *@
 @inherits DialogBody
 @implements IAsyncDisposable
 @inject EngineManager Engine
+@inject RegistryReader Registries
+@inject RegistryBrowser Browser
 @inject IShellBridge Shell
+@inject IJSRuntime JS
 
-<div class="field">
-    <label class="field__label" for="pull-ref">Image</label>
-    <input id="pull-ref" class="input" placeholder="nginx:alpine"
-           value="@_reference" @oninput="OnReferenceInput"
-           autocomplete="off" spellcheck="false" disabled="@_pulling" />
-</div>
-
-@if (_error is { } error)
-{
-    <p class="pull__error">@error</p>
-}
-else if (!_pulling && _layers.Count == 0)
-{
-    <p class="pull__hint muted">
-        A bare name pulls <span class="mono">:latest</span> from Docker Hub. Prefix a host to
-        use another registry — <span class="mono">ghcr.io/owner/app:1.2</span>.
-    </p>
+@{
+    var rows = CurrentRows();
+    var view = CurrentView;
 }
 
-@* Search runs as the name is typed, so finding an image and pulling it is one flow rather
-   than a browser tab and a copied string. The engine does the searching — it already holds
-   the registry configuration and the credentials — and what it searches is Docker Hub:
-   there is no search API behind a private registry to offer. *@
-@if (_searching)
-{
-    <p class="pull__hint muted">Searching Docker Hub…</p>
-}
-else if (_searchError is { } problem)
-{
-    <p class="pull__hint muted">@problem</p>
-}
-else if (_results.Count > 0)
-{
-    @* A list of buttons, not a listbox. Each row is an action — "use this name" — rather
-       than a value being selected, and role="option" would take the button semantics away
-       from a control that is exactly a button. *@
-    <ul class="pull__results" aria-label="Images on Docker Hub">
-        @foreach (var result in _results)
+<div class="pull">
+    <div class="pull__query">
+        @* A native select: the platform draws its menu, which is the one popup that belongs over a dialog. *@
+        <select class="input pull__registry" aria-label="Registry" title="Registry"
+                value="@_host" @onchange="OnRegistryChangedAsync" disabled="@_pulling">
+            @foreach (var option in _options)
+            {
+                <option value="@option.Host">@option.Label</option>
+            }
+        </select>
+
+        <div class="pull__field" @onclick="FocusAsync">
+            <Icon Name="IconRef.Search" Size="IconSize.Sm" />
+
+            @if (!IsHub)
+            {
+                @* The picker's host, shown where it will be in the reference. Not part of the field's
+                   text, so it cannot be half-deleted into a different registry by accident. *@
+                <span class="pull__host mono" aria-hidden="true">@(_host)/</span>
+            }
+
+            <input @ref="_input" id="pull-ref" class="pull__input mono" type="text"
+                   role="combobox" autofocus
+                   aria-label="@($"Image on {Registry.Name}")"
+                   aria-autocomplete="list"
+                   aria-expanded="@(rows.Count > 0 ? "true" : "false")"
+                   aria-controls="pull-list"
+                   aria-activedescendant="@(_active >= 0 && _active < rows.Count ? rows[_active].Id : null)"
+                   aria-describedby="pull-status"
+                   data-rows="@(rows.Count > 0 ? "true" : "false")"
+                   placeholder="@Placeholder"
+                   autocomplete="off" spellcheck="false" autocapitalize="off"
+                   disabled="@_pulling"
+                   @bind:get="_field" @bind:set="OnFieldSetAsync" @bind:event="oninput"
+                   @onkeydown="OnKeyDownAsync" />
+        </div>
+    </div>
+
+    <div class="pull__bar">
+        @if (ShowOfficialFilter)
         {
-            var captured = result;
-
-            <li>
-                <button type="button" class="pull__result"
-                        title="@($"Use {captured.Name}")"
-                        @onclick="() => Choose(captured)">
-                    <span class="pull__result-name">
-                        @result.ShortName
-
-                        @if (result.IsOfficial)
-                        {
-                            <span class="pull__badge" title="Published by the project itself">official</span>
-                        }
-                    </span>
-
-                    @if (result.Stars >= 0)
-                    {
-                        <span class="pull__stars num muted" title="@($"{result.Stars} stars")">@Humanize.Count(result.Stars)</span>
-                    }
-
-                    @if (result.Description is { Length: > 0 } description)
-                    {
-                        <span class="pull__result-body muted">@description</span>
-                    }
-                </button>
-            </li>
+            <label class="toggle">
+                <input type="checkbox" checked="@_officialOnly" @onchange="OnOfficialChangedAsync" disabled="@_pulling" />
+                <span>Official images only</span>
+            </label>
         }
-    </ul>
-}
 
-@if (_layers.Count > 0)
-{
-    <LayerProgress Layers="Ordered" />
-}
+        @if (ShowPlatformFilter)
+        {
+            <label class="toggle" title="Hide tags that have no build for the platform this engine runs">
+                <input type="checkbox" checked="@_nativeOnly" @onchange="OnNativeChanged" />
+                <span>Only tags for @_platform</span>
+            </label>
+        }
 
-@if (_done is { } done)
-{
-    <p class="pull__done">@done</p>
-}
+        <span id="pull-status" class="pull__status muted" role="status" aria-live="polite">@Status(view)</span>
+    </div>
+
+    <div class="pull__body">
+        @switch (view)
+        {
+            case View.Progress:
+                <div class="pull__progress">
+                    <p class="pull__section">
+                        @(_pulling ? "Pulling" : _error is null ? "Pulled" : "Could not pull") <span class="mono pull__ink">@_pulled</span>
+                    </p>
+
+                    @if (_layers.Count > 0)
+                    {
+                        <LayerProgress Layers="Ordered" />
+                    }
+                    else if (_pulling)
+                    {
+                        <div class="stack-v pull__waiting">
+                            <Skeleton Width="70%" />
+                            <Skeleton Width="55%" />
+                        </div>
+                    }
+                </div>
+                <div id="pull-list" role="listbox" hidden></div>
+                break;
+
+            case View.Pinned:
+                <p class="pull__note">
+                    Pinned to a digest. Exactly that image is pulled, whatever any tag points at now —
+                    the way to get a build that cannot move underneath you.
+                </p>
+                <div id="pull-list" role="listbox" hidden></div>
+                break;
+
+            case View.Tags:
+                <div class="pull__repo">
+                    <div class="pull__repo-line">
+                        <span class="pull__repo-name mono">@Draft.Path</span>
+
+                        @if (_about?.IsOfficial == true)
+                        {
+                            <span class="pull__badge" title="A Docker Official Image, maintained with Docker">Official</span>
+                        }
+                    </div>
+
+                    @if (Facts(_about) is { Length: > 0 } facts)
+                    {
+                        <div class="pull__facts muted">@facts</div>
+                    }
+
+                    @if (_about?.Description is { Length: > 0 } description)
+                    {
+                        <p class="pull__desc muted">@description</p>
+                    }
+                </div>
+
+                @if (_problem is { } problem)
+                {
+                    <p class="pull__problem" role="alert">@problem</p>
+                }
+                else if (_tags is null && _loading)
+                {
+                    @SkeletonRows
+                }
+                else if (_tags is { } listing && rows.Count == 0)
+                {
+                    <p class="pull__note">
+                        @if (listing.Tags.Count == 0)
+                        {
+                            @(Draft.Tag is { Length: > 0 } filter ? $"No tag matches “{filter}”. Typing it in full still pulls it, if it exists." : "This repository has no tags.")
+                        }
+                        else
+                        {
+                            @($"None of these tags has a {_platform} build. Turn off “Only tags for {_platform}” to see them.")
+                        }
+                    </p>
+                }
+
+                <div id="pull-list" class="pull__list" role="listbox" aria-label="Tags" hidden="@(rows.Count == 0)">
+                    @for (var i = 0; i < rows.Count; i++)
+                    {
+                        var index = i;
+                        var row = rows[i];
+                        var tag = row.Tag!;
+                        var state = _local.StateOf(Draft, tag);
+                        var image = tag.ImageFor(_platform);
+
+                        <div @key="row.Id" id="@row.Id" role="option"
+                             class="pull__row pull__row--tag @(Described ? null : "is-bare") @(index == _active ? "is-active" : null)"
+                             aria-selected="@(tag.Name == Draft.Tag ? "true" : "false")"
+                             @onmousedown:preventDefault="true"
+                             @onmouseenter="() => _active = index"
+                             @onclick="() => ChooseAsync(row)"
+                             @ondblclick="() => ChooseAndPullAsync(row)">
+
+                            <span class="pull__name">
+                                <span class="mono pull__ink">@Marked(tag.Name, Draft.Tag)</span>
+
+                                @if (state == LocalTagState.Moved)
+                                {
+                                    <span class="pill pill--warn" title="This engine has an older build of this tag. Pulling updates it.">
+                                        <span class="pill__glyph" aria-hidden="true">↻</span>Tag has moved
+                                    </span>
+                                }
+                                else if (state == LocalTagState.Present)
+                                {
+                                    <span class="pill pill--neutral" title="Already on this engine. Pulling again checks for a newer build.">
+                                        <span class="pill__glyph" aria-hidden="true">●</span>On this engine
+                                    </span>
+                                }
+
+                                @if (tag.Name == Draft.Tag)
+                                {
+                                    <span class="pull__chosen"><Icon Name="IconRef.Check" Size="IconSize.Sm" /></span>
+                                }
+                            </span>
+
+                            @if (Described)
+                            {
+                                <span class="pull__archs">
+                                    @foreach (var platform in Arches(tag).Take(3))
+                                    {
+                                        var native = _platform is not null && platform.RunsOn(_platform);
+                                        <span class="pull__arch @(native ? "is-native" : null)"
+                                              title="@(native ? $"{platform} — runs on this engine" : platform.ToString())">@platform.Label</span>
+                                    }
+
+                                    @if (tag.Platforms.Count > 3)
+                                    {
+                                        <span class="pull__arch" title="@string.Join(", ", Arches(tag).Skip(3))">+@(tag.Platforms.Count - 3)</span>
+                                    }
+                                </span>
+
+                                <span class="pull__meta num" title="@(image is { SizeBytes: > 0 } ? $"{Humanize.Bytes(image.SizeBytes)} to download for {_platform}" : null)">
+                                    @(image is { SizeBytes: > 0 } ? Humanize.Bytes(image.SizeBytes) : "—")
+                                </span>
+
+                                <span class="pull__meta num" title="@(tag.Pushed is { } pushed ? $"Pushed {When(pushed)}" : null)">
+                                    @(tag.Pushed is null ? "—" : Humanize.Since(tag.Pushed))
+                                </span>
+                            }
+                        </div>
+                    }
+                </div>
+
+                @if (_tags is { Truncated: true } truncated && rows.Count > 0)
+                {
+                    <p class="pull__more muted">
+                        @(truncated.ByRecency
+                            ? $"The {truncated.Tags.Count} most recently pushed of {truncated.Total:N0}. Type part of a tag to reach older ones."
+                            : $"Dray stopped after the first {truncated.Tags.Count:N0} tags. A tag past them is not listed here, but typing it in full still pulls it.")
+                    </p>
+                }
+                break;
+
+            default:
+                @if (_problem is { } failure)
+                {
+                    <p class="pull__problem" role="alert">@failure</p>
+                }
+                else if (view == View.Repositories && _repos is null && _loading)
+                {
+                    @SkeletonRows
+                }
+                else if (rows.Count == 0)
+                {
+                    <div class="pull__note">@Guidance()</div>
+                }
+
+                <div id="pull-list" class="pull__list" role="listbox" aria-label="Suggestions" hidden="@(rows.Count == 0)">
+                    @foreach (var group in rows.Select((row, index) => (row, index)).GroupBy(r => r.row.Kind))
+                    {
+                        <div role="group" aria-labelledby="@($"pull-group-{group.Key}")">
+                            <div id="@($"pull-group-{group.Key}")" class="pull__group" role="presentation">@GroupTitle(group.Key)</div>
+
+                            @foreach (var (row, index) in group)
+                            {
+                                <div @key="row.Id" id="@row.Id" role="option"
+                                     class="pull__row @(index == _active ? "is-active" : null)"
+                                     aria-selected="false"
+                                     @onmousedown:preventDefault="true"
+                                     @onmouseenter="() => _active = index"
+                                     @onclick="() => ChooseAsync(row)">
+
+                                    @if (row.Kind == RowKind.Local)
+                                    {
+                                        var local = row.Image!;
+
+                                        <span class="pull__name">
+                                            <span class="mono pull__ink">@Marked(row.Text, Draft.Path)</span>
+                                        </span>
+                                        <span class="pull__meta num">
+                                            @(local.SizeReported ? Humanize.Bytes(local.SizeBytes) : "—") · @(local.Created is null ? "—" : Humanize.Since(local.Created))
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        var repository = row.Repository!;
+
+                                        <span class="pull__name">
+                                            <span class="pull__ink">@Marked(repository.ShortName, Term)</span>
+
+                                            @if (repository.IsOfficial)
+                                            {
+                                                <span class="pull__badge" title="A Docker Official Image, maintained with Docker">Official</span>
+                                            }
+                                        </span>
+
+                                        @if (repository.Stars >= 0)
+                                        {
+                                            <span class="pull__meta num" title="@($"{repository.Stars:N0} stars on {Registry.Name}")">★ @Humanize.Count(repository.Stars)</span>
+                                        }
+
+                                        @if (repository.Description is { Length: > 0 } about)
+                                        {
+                                            <span class="pull__desc muted">@about</span>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                @if (view == View.Repositories && _repos is { Source: RepositorySource.Catalog } catalog && catalog.Items.Count >= ImageFinder.CatalogLimit)
+                {
+                    <p class="pull__more muted">The first @ImageFinder.CatalogLimit matches of @catalog.Total.ToString("N0") repositories. Type more of the name to narrow them down.</p>
+                }
+                break;
+        }
+    </div>
+
+    <div class="pull__foot">
+        @if (view == View.Progress)
+        {
+            @if (_error is { } error)
+            {
+                <p class="pull__problem" role="alert">@error</p>
+            }
+            else if (_done is { } done)
+            {
+                <p class="pull__done" role="status">@done</p>
+            }
+        }
+        else if (Draft.Problem is { } problem)
+        {
+            <p class="pull__problem">@problem</p>
+        }
+        else if (Draft.Stage == DraftStage.Tag && Draft.Tag is "")
+        {
+            <p class="pull__hint muted">Choose a tag with <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>Return</kbd>, or keep typing to narrow them down. Double-click one to pull it.</p>
+        }
+        else if (Draft.Stage == DraftStage.Empty)
+        {
+            <p class="pull__hint muted">A name with no tag pulls <span class="mono">latest</span>. Type a colon after it to choose a tag instead.</p>
+        }
+        else if (Draft.IsPullable)
+        {
+            <div class="pull__target">
+                <span class="muted">Pulls</span>
+                <span class="mono pull__canonical" title="@Draft.Canonical">@Draft.Canonical</span>
+                <Button Label="Copy the full reference" Icon="IconRef.Copy" IconOnly="true" Variant="ButtonVariant.Ghost"
+                        OnClick="() => Shell.WriteClipboardAsync(Draft.Canonical)" />
+            </div>
+
+            <div class="pull__verdict">
+                @switch (LocalState)
+                {
+                    case LocalTagState.Moved:
+                        <span class="pill pill--warn"><span class="pill__glyph" aria-hidden="true">↻</span>Tag has moved</span>
+                        <span class="muted">This engine's copy is older than the registry's. Pulling updates it.</span>
+                        break;
+
+                    case LocalTagState.Present:
+                        <span class="pill pill--neutral"><span class="pill__glyph" aria-hidden="true">●</span>On this engine</span>
+                        break;
+                }
+
+                @if (Chosen?.RunsOn(_platform) is { } runs)
+                {
+                    var image = Chosen.ImageFor(_platform);
+
+                    @if (runs)
+                    {
+                        <span class="pill pill--ok"><span class="pill__glyph" aria-hidden="true">✓</span>Runs on @_platform</span>
+
+                        @if (image is { SizeBytes: > 0 })
+                        {
+                            <span class="muted">@Humanize.Bytes(image.SizeBytes) to download</span>
+                        }
+                    }
+                    else
+                    {
+                        <span class="pill pill--warn"><span class="pill__glyph" aria-hidden="true">▲</span>No @_platform build</span>
+                        <span class="muted">Built for @string.Join(", ", Chosen.Platforms) — it would run under emulation here, if at all.</span>
+                    }
+                }
+                else if (_inspecting)
+                {
+                    <span class="muted">Reading what this tag was built for…</span>
+                }
+                else if (_inspectProblem is { } unread)
+                {
+                    <span class="muted">@unread</span>
+                }
+            </div>
+        }
+    </div>
+</div>
 
 @code {
     /// <summary>
-    /// The page refreshes its list once this closes, however it closes: a pull that finished and
-    /// one that was walked away from both leave something new on the engine.
+    /// Open it. Completes when it closes; the page refreshes then, and the pull — which may have
+    /// finished long before — needs no callback across into the dialog's own WebView to say so.
     /// </summary>
-    public static DialogRequest Request() => new(
-        "Pull an image",
-        typeof(PullDialog),
-        Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("pull", "Pull")]);
+    public static async Task ShowAsync(IShellBridge shell)
+    {
+        var session = new DialogSession(new DialogRequest(
+            "Pull an image",
+            typeof(PullDialog),
+            Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("pull", "Pull")],
+
+            // Large: a list being read, with a row of facts per tag, is not a two-field form.
+            Size: DialogSize.Large));
+        await shell.ShowDialogAsync(session);
+    }
 
     protected override IReadOnlyList<DialogButton> Buttons =>
     [
         DialogButton.Cancel(_pulling ? "Cancel" : "Close"),
-        DialogButton.Confirm("pull", _pulling ? "Pulling…" : "Pull") with
-        {
-            Enabled = !string.IsNullOrWhiteSpace(_reference),
-            Busy = _pulling,
-        },
+        DialogButton.Confirm("pull", _pulling ? "Pulling…" : "Pull") with { Enabled = !_pulling && Draft.IsPullable, Busy = _pulling },
     ];
 
-    protected override async Task<bool> OnPressedAsync(string id)
+    protected override Task<bool> OnPressedAsync(string buttonId)
     {
-        await StartAsync();
-        return false;
+        // Started and left running: the dialog stays open to show it. Cancel never reaches here —
+        // the session closes the dialog, and closing cancels the token the stream is linked to, so
+        // Dray stops reading it. The engine finishes the pull it started; saying otherwise would be a lie, and
+        // a half-pulled image is not a state Dray can create.
+        if (buttonId == "pull") _ = StartAsync();
+
+        return Task.FromResult(false);
     }
 
-    string _reference = "";
+    // ---------------------------------------------------------------- what the user has said
+
+    /// <summary>Docker Hub's rows are capped here: the list is for choosing, and typing narrows it.</summary>
+    const int MaxRows = 200;
+
+    /// <summary>A keystroke's grace before asking anyone. Every registry answer is a network call.</summary>
+    const int Debounce = 250;
+
+    string _host = RegistryHosts.DockerHub;
+    string _field = "";
+    bool _officialOnly;
+    bool _nativeOnly = true;
+
+    ImageReferenceDraft Draft => ImageReferenceDraft.Compose(_host, _field);
+
+    bool IsHub => RegistryHosts.IsDockerHub(_host);
+
+    RegistryOption Registry
+        => _options.FirstOrDefault(o => string.Equals(o.Host, _host, StringComparison.OrdinalIgnoreCase))
+            ?? new RegistryOption(_host, RegistryHosts.NameOf(_host));
+
+    /// <summary>The name part, as a search term — what follows the host, before any colon.</summary>
+    string Term => Draft.Path.Trim('/');
+
+    // ---------------------------------------------------------------- what is known
+
+    IReadOnlyList<RegistryOption> _options = RegistryHosts.WellKnown;
+    LocalImageIndex _local = LocalImageIndex.Empty;
+
+    /// <summary>The platform the engine runs, measured from <c>/info</c>. Null when it cannot be known.</summary>
+    ImagePlatform? _platform;
+
+    ImageFinder _finder = default!;
+
+    // ---------------------------------------------------------------- what is shown
+
+    RepositoryResults? _repos;
+    string? _reposFor;
+
+    TagListing? _tags;
+    string? _tagsFor;
+
+    /// <summary>The repository the tags belong to, from the search row it was chosen from or from Docker Hub.</summary>
+    ImageSearchResult? _about;
+    string? _aboutFor;
+
+    /// <summary>The repository Docker Hub was last asked to describe, so a missing one is asked once rather than per keystroke.</summary>
+    string? _describedFor;
+
+    RemoteTag? _inspected;
+    string? _inspectedFor;
+    bool _inspecting;
+    string? _inspectProblem;
+
+    bool _loading;
+    string? _problem;
+
+    /// <summary>The highlighted row, or -1. Nothing is highlighted until the keyboard or the pointer asks.</summary>
+    int _active = -1;
+    bool _reveal;
+
+    CancellationTokenSource? _fetch;
+
+    ElementReference _input;
+    IJSObjectReference? _module;
+    IJSObjectReference? _keys;
+
+    enum View { Local, Repositories, Tags, Pinned, Progress }
+
+    View CurrentView => _pulling || _layers.Count > 0 || _done is not null || _error is not null
+        ? View.Progress
+        : Draft.Stage switch
+        {
+            DraftStage.Tag => View.Tags,
+            DraftStage.Digest => View.Pinned,
+            DraftStage.Empty when IsHub => View.Local,
+            _ when IsHub && Term.Length < 2 => View.Local,
+            _ => View.Repositories,
+        };
+
+    enum RowKind { Local, Repository, Tag }
+
+    /// <summary>One suggestion. Every view's rows go through this, so the keyboard moves through one list.</summary>
+    sealed record Row(string Id, RowKind Kind, string Text, ImageSearchResult? Repository = null, RemoteTag? Tag = null, ImageSummary? Image = null);
+
+    /// <summary>
+    /// The rows on screen now. Computed from state rather than stored, so the keyboard handler and
+    /// the render can never disagree about which row index three is.
+    /// </summary>
+    IReadOnlyList<Row> CurrentRows()
+    {
+        var rows = new List<Row>();
+
+        switch (CurrentView)
+        {
+            case View.Local:
+            case View.Repositories when IsHub:
+                // What is already here, above what would have to be downloaded — and in the local
+                // view, a way to pull one again for a newer build in one click.
+                var limit = CurrentView == View.Local ? 30 : 5;
+                foreach (var (reference, image) in _local.Tagged
+                    .Where(t => Term.Length == 0 || t.Reference.Contains(Term, StringComparison.OrdinalIgnoreCase))
+                    .Take(limit))
+                {
+                    rows.Add(new Row($"pull-row-{rows.Count}", RowKind.Local, reference, Image: image));
+                }
+
+                break;
+        }
+
+        if (CurrentView == View.Repositories && _repos is { } repos)
+        {
+            foreach (var repository in repos.Items)
+                rows.Add(new Row($"pull-row-{rows.Count}", RowKind.Repository, repository.Name, Repository: repository));
+        }
+
+        if (CurrentView == View.Tags)
+        {
+            foreach (var tag in VisibleTags)
+                rows.Add(new Row($"pull-row-{rows.Count}", RowKind.Tag, tag.Name, Tag: tag));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// The listing's tags, narrowed by what has been typed since it arrived and by the platform filter.
+    /// <para>
+    /// Narrowed here as well as by the registry so the list keeps up with typing rather than with the
+    /// network. A Docker Hub listing keeps its newest-first order; a standard one is reordered so
+    /// tags that start with the filter come first.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<RemoteTag> VisibleTags
+    {
+        get
+        {
+            if (_tags is null) return [];
+
+            // Docker Hub's newest-first order is kept, except that the tag typed in full leads: with
+            // "alpine" typed, alpine itself belongs above stable-alpine3.24-perl however recently
+            // that one moved.
+            var filter = Draft.Tag;
+            IEnumerable<RemoteTag> tags = _tags.ByRecency
+                ? _tags.Tags
+                    .Where(t => string.IsNullOrEmpty(filter) || t.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(t => string.Equals(t.Name, filter, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                : TagOrder.Filter(_tags.Tags, filter);
+
+            if (ShowPlatformFilter && _nativeOnly) tags = tags.Where(t => t.RunsOn(_platform) != false);
+
+            return [.. tags.Take(MaxRows)];
+        }
+    }
+
+    /// <summary>The listing says what each tag holds — Docker Hub's does; the standard API's is names only.</summary>
+    bool Described => _tags?.Tags.Any(t => t.Images is not null) ?? false;
+
+    bool ShowOfficialFilter => IsHub && CurrentView is View.Local or View.Repositories && !_finder.CannotFind(_host);
+
+    /// <summary>
+    /// Only where it can be applied honestly: a platform to filter for, and a listing that says
+    /// which platforms each tag has. A list of bare names would be filtered to nothing, which reads
+    /// as "nothing here runs on this machine".
+    /// </summary>
+    bool ShowPlatformFilter => CurrentView == View.Tags && _platform is not null && Described;
+
+    /// <summary>The tag the field names, with whatever is known about it.</summary>
+    RemoteTag? Chosen
+    {
+        get
+        {
+            if (Draft.Tag is not { Length: > 0 } name) return null;
+
+            if (_tags?.Tags.FirstOrDefault(t => t.Name == name) is { Images: not null } listed) return listed;
+
+            return _inspectedFor == InspectKey ? _inspected : null;
+        }
+    }
+
+    LocalTagState LocalState
+        => Chosen is { } tag ? _local.StateOf(Draft, tag)
+            : _local.Find(Draft) is not null ? LocalTagState.Present
+            : LocalTagState.Absent;
+
+    string InspectKey => $"{_host}|{Draft.Path}|{Draft.Tag}";
+
+    string Placeholder
+    {
+        get
+        {
+            if (_pulling) return "";
+
+            var searches = !_finder.CannotFind(_host);
+
+            return IsHub
+                ? searches ? "Search Docker Hub, or type nginx:alpine" : "Type a name — nginx:alpine"
+                : searches ? $"Search {Registry.Name}, or type owner/name:tag" : "owner/name, then : for its tags";
+        }
+    }
+
+    string? Status(View view)
+    {
+        switch (view)
+        {
+            case View.Repositories when _loading:
+                return _finder.CannotFind(_host) ? null : $"Searching {Registry.Name}…";
+
+            case View.Repositories when _repos is { Source: RepositorySource.Search, Items.Count: > 0 } found:
+                return found.Items.Count >= ImageFinder.SearchLimit ? $"Top {found.Items.Count} on {Registry.Name}" : Plural(found.Items.Count, "result");
+
+            case View.Repositories when _repos is { Source: RepositorySource.Catalog } catalog:
+                return $"{catalog.Items.Count:N0} of {catalog.Total:N0} repositories";
+
+            case View.Tags when _loading:
+                return "Reading tags…";
+
+            case View.Tags when _tags is { } listing:
+                var count = listing.Total >= 0 ? listing.Total : listing.Tags.Count;
+                var all = listing.Truncated && !listing.ByRecency ? $"{listing.Tags.Count:N0}+ tags" : Plural(count, "tag");
+
+                // Docker Hub filtered on the server, so its count is already the matches. The
+                // standard API's is the whole repository, and the matches are counted here.
+                var text = listing.ByRecency
+                    ? $"{all}{(string.IsNullOrEmpty(Draft.Tag) ? "" : " matching")} · newest first"
+                    : string.IsNullOrEmpty(Draft.Tag)
+                        ? $"{all} · highest version first"
+                        : $"{TagOrder.Filter(listing.Tags, Draft.Tag).Count:N0} of {all} · highest version first";
+
+                var hidden = ShowPlatformFilter && _nativeOnly ? listing.Tags.Count(t => t.RunsOn(_platform) == false) : 0;
+                return hidden > 0 ? $"{text} · {hidden:N0} hidden" : text;
+
+            case View.Progress when _pulling:
+                return "Pulling…";
+
+            default:
+                return null;
+        }
+    }
+
+    RenderFragment Guidance() => CurrentView switch
+    {
+        View.Local => @<p>
+            Search Docker Hub by name, or type a whole reference —
+            <span class="mono">nginx:alpine</span>, <span class="mono">ghcr.io/owner/app:1.2</span>.
+            A name with no tag pulls <span class="mono">latest</span>; a colon lists the tags to choose from.
+        </p>,
+
+        _ when _finder.CannotFind(_host) && IsHub => @<p>
+            This engine cannot search registries. Type the repository's name, then a colon to list its
+            tags — <span class="mono">postgres:</span>.
+        </p>,
+
+        _ when _finder.CannotFind(_host) => @<p>
+            @Registry.Name has no search Dray can use. Type the repository —
+            <span class="mono">owner/name</span> — then a colon to list its tags.
+        </p>,
+
+        _ when _repos is { Items.Count: 0 } && Term.Length >= 2 && !_loading => @<p>
+            Nothing on @Registry.Name matches “@Term”@(_officialOnly ? " among official images" : "").
+            If you know its name, type it in full and add a colon to see its tags.
+        </p>,
+
+        _ => @<p>Keep typing to search @Registry.Name.</p>,
+    };
+
+    string GroupTitle(RowKind kind) => kind switch
+    {
+        RowKind.Local when CurrentView == View.Local => "On this engine — pull one again to pick up a newer build",
+        RowKind.Local => "On this engine",
+        _ => $"On {Registry.Name}",
+    };
+
+    /// <summary>The engine's own platform first, then the registry's order.</summary>
+    IEnumerable<ImagePlatform> Arches(RemoteTag tag)
+        => _platform is null ? tag.Platforms : tag.Platforms.OrderBy(p => p.RunsOn(_platform) ? 0 : 1);
+
+    static string Facts(ImageSearchResult? about)
+    {
+        if (about is null) return "";
+
+        var facts = new List<string>();
+        if (about.Stars >= 0) facts.Add($"★ {Humanize.Count(about.Stars)}");
+        if (about.Pulls >= 0) facts.Add($"{Humanize.Count(about.Pulls)} pulls");
+        if (about.Updated is { } updated) facts.Add($"updated {Humanize.Since(updated)} ago");
+
+        return string.Join(" · ", facts);
+    }
+
+    static string Plural(int count, string noun) => $"{count:N0} {noun}{(count == 1 ? "" : "s")}";
+
+    static string When(DateTimeOffset at)
+        => at.ToLocalTime().ToString("d MMM yyyy, HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The first place the term appears, in bold. Weight, not colour — DESIGN.md section 2.4 in spirit.</summary>
+    static RenderFragment Marked(string value, string? term)
+    {
+        var at = string.IsNullOrEmpty(term) ? -1 : value.IndexOf(term, StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return @<text>@value</text>;
+
+        var before = value[..at];
+        var match = value.Substring(at, term!.Length);
+        var after = value[(at + term.Length)..];
+
+        return @<text>@before<mark class="pull__mark">@match</mark>@after</text>;
+    }
+
+    /// <summary>The shape of a list that is on its way. A spinner here would be a decision nobody made (DESIGN.md section 6).</summary>
+    static RenderFragment SkeletonRows => @<div class="pull__skeleton" aria-hidden="true">
+        @for (var i = 0; i < 5; i++)
+        {
+            <div class="pull__row">
+                <Skeleton Width="@($"{30 + (i * 17 % 40)}%")" />
+                <Skeleton Width="3rem" />
+            </div>
+        }
+    </div>;
+
+    // ---------------------------------------------------------------- setup
+
+    protected override async Task OnInitializedAsync()
+    {
+        var capabilities = Engine.Selected?.Capabilities ?? RuntimeCapabilities.None;
+
+        _platform = ImagePlatform.OfEngine(capabilities.ContainerOs, capabilities.Architecture);
+        _finder = new ImageFinder(capabilities.SupportsRegistrySearch ? Engine.SearchImagesAsync : null, Browser);
+
+        await Task.WhenAll(LoadLocalAsync(), LoadRegistriesAsync());
+    }
+
+    /// <summary>
+    /// What is on the engine, read once, so a tag can say it is already here and the empty field can
+    /// offer to pull one again. Reread after a pull.
+    /// </summary>
+    async Task LoadLocalAsync()
+    {
+        try
+        {
+            _local = new LocalImageIndex(await Engine.ListImagesAsync(includeDangling: false));
+        }
+        catch (Exception)
+        {
+            // Not being able to say what is here takes nothing away from pulling.
+            _local = LocalImageIndex.Empty;
+        }
+    }
+
+    /// <summary>
+    /// The registries the user has configured, beside the well-known ones. From the helpers' list,
+    /// which names who is signed in and returns no secrets (docs/CREDENTIALS.md).
+    /// </summary>
+    async Task LoadRegistriesAsync()
+    {
+        try
+        {
+            var configured = await Registries.ListAsync();
+            _options = RegistryHosts.Offer(configured.Select(e => (e.Server, e.Username)), _host);
+        }
+        catch (Exception)
+        {
+            _options = RegistryHosts.Offer([], _host);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+                _keys = await _module.InvokeAsync<IJSObjectReference>("suggest.attach", _input);
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+
+            await FocusAsync();
+        }
+
+        if (_reveal && _module is { } module && _active >= 0)
+        {
+            _reveal = false;
+            await module.InvokeVoidAsync("suggest.reveal", $"pull-row-{_active}");
+        }
+    }
+
+    async Task FocusAsync()
+    {
+        try
+        {
+            await _input.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException)
+        {
+            // Disabled while a pull runs, or not rendered yet.
+        }
+    }
+
+    // ---------------------------------------------------------------- input
+
+    /// <summary>
+    /// Through <c>@bind:set</c> rather than <c>value</c> and <c>@oninput</c>: a binding tells the
+    /// renderer what the field held when each keystroke was sent, so a render that lands mid-word —
+    /// a search answering — does not write an older value back over what is being typed. With the
+    /// pair, one fast-typed "hello-world:" in three arrived as "he:".
+    /// </summary>
+    async Task OnFieldSetAsync(string? value)
+    {
+        var text = value ?? "";
+
+        // A host typed or pasted into the field belongs to the picker.
+        if (ImageReferenceDraft.Parse(text).Registry is not null) SetReference(text);
+        else _field = text;
+
+        _active = -1;
+        ClearOutcome();
+
+        await RefreshAsync(Debounce);
+    }
+
+    async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        var rows = CurrentRows();
+
+        switch (e.Key)
+        {
+            case "ArrowDown" when rows.Count > 0:
+                _active = (_active + 1) % rows.Count;
+                _reveal = true;
+                break;
+
+            case "ArrowUp" when rows.Count > 0:
+                _active = _active <= 0 ? rows.Count - 1 : _active - 1;
+                _reveal = true;
+                break;
+
+            case "Enter" when _active >= 0 && _active < rows.Count:
+                await ChooseAsync(rows[_active]);
+                break;
+
+            // The field claims Enter (see suggest.attach in dray.js), so pulling from it is the
+            // field's job on every head — including Windows, where the dialog never sees the key.
+            case "Enter" when Draft.IsPullable && !_pulling:
+                await StartAsync();
+                break;
+
+            case "Escape" when _active >= 0:
+                _active = -1;
+                break;
+
+            // Deleting past the start of the field deletes into the host, as if it were typed text.
+            case "Backspace" when _field.Length == 0 && !IsHub:
+                _field = _host;
+                _host = RegistryHosts.DockerHub;
+                ResetResults();
+                await RefreshAsync(Debounce);
+                break;
+        }
+    }
+
+    async Task OnRegistryChangedAsync(ChangeEventArgs e)
+    {
+        var host = e.Value?.ToString() is { Length: > 0 } chosen ? chosen : RegistryHosts.DockerHub;
+        if (string.Equals(host, _host, StringComparison.OrdinalIgnoreCase)) return;
+
+        // The name typed so far stays — the same search, somewhere else. A tag does not: it was a
+        // tag of a repository on the other registry.
+        var name = Draft.Path;
+
+        _host = host;
+        _field = name;
+        _active = -1;
+
+        ResetResults();
+        ClearOutcome();
+
+        await FocusAsync();
+        await RefreshAsync(0);
+    }
+
+    async Task OnOfficialChangedAsync(ChangeEventArgs e)
+    {
+        _officialOnly = e.Value is true;
+        _active = -1;
+
+        await FocusAsync();
+        await RefreshAsync(0);
+    }
+
+    void OnNativeChanged(ChangeEventArgs e)
+    {
+        _nativeOnly = e.Value is true;
+        _active = -1;
+    }
+
+    /// <summary>
+    /// Put a whole reference in: its host into the picker, the rest into the field.
+    /// <para>
+    /// No host means Docker Hub, as for the CLI — a local image called <c>nginx:alpine</c> chosen
+    /// while GitHub was picked is still nginx from Docker Hub. Podman's long spelling of a Hub
+    /// image is shortened to the one people type.
+    /// </para>
+    /// </summary>
+    void SetReference(string text)
+    {
+        var draft = ImageReferenceDraft.Parse(text);
+        var host = draft.Registry is { } named && !RegistryHosts.IsDockerHub(named) ? named : RegistryHosts.DockerHub;
+
+        var field = draft.Field;
+        if (RegistryHosts.IsDockerHub(host) && field.StartsWith("library/", StringComparison.Ordinal) && field.IndexOf('/', 8) < 0)
+            field = field[8..];
+
+        if (!string.Equals(host, _host, StringComparison.OrdinalIgnoreCase))
+        {
+            _host = host;
+            ResetResults();
+
+            if (!_options.Any(o => string.Equals(o.Host, host, StringComparison.OrdinalIgnoreCase)))
+                _options = [.. _options, new RegistryOption(host, RegistryHosts.NameOf(host))];
+        }
+
+        _field = field;
+    }
+
+    async Task ChooseAsync(Row row)
+    {
+        switch (row.Kind)
+        {
+            case RowKind.Local:
+                SetReference(row.Text);
+                break;
+
+            case RowKind.Repository:
+                SetReference(row.Repository!.Name + ":");
+
+                // What the search said about it heads its tag list until the registry says more.
+                _about = row.Repository;
+                _aboutFor = $"{_host}|{Draft.Path}";
+                break;
+
+            case RowKind.Tag:
+                SetReference($"{Draft.Repository}:{row.Tag!.Name}");
+                break;
+        }
+
+        _active = -1;
+        ClearOutcome();
+
+        await FocusAsync();
+        await RefreshAsync(0);
+    }
+
+    async Task ChooseAndPullAsync(Row row)
+    {
+        await ChooseAsync(row);
+        if (Draft.IsPullable) await StartAsync();
+    }
+
+    // ---------------------------------------------------------------- asking
+
+    void ResetResults()
+    {
+        _repos = null;
+        _reposFor = null;
+        _tags = null;
+        _tagsFor = null;
+        _problem = null;
+    }
+
+    /// <summary>
+    /// Fetch whatever the field now needs, after <paramref name="delay"/>, abandoning anything still
+    /// in flight for what it said before. The answer to a term the user has typed past is worse than
+    /// none: it arrives looking current.
+    /// </summary>
+    async Task RefreshAsync(int delay)
+    {
+        if (_fetch is { } previous)
+        {
+            await previous.CancelAsync();
+            previous.Dispose();
+        }
+
+        var cts = new CancellationTokenSource();
+        _fetch = cts;
+        var token = cts.Token;
+
+        try
+        {
+            if (delay > 0) await Task.Delay(delay, token);
+
+            switch (CurrentView)
+            {
+                case View.Repositories:
+                    await LoadRepositoriesAsync(token);
+                    break;
+
+                case View.Tags:
+                    await LoadTagsAsync(token);
+                    break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Typed past it.
+        }
+    }
+
+    async Task LoadRepositoriesAsync(CancellationToken token)
+    {
+        var key = $"{_host}|{Term}|{_officialOnly}";
+        if (key == _reposFor) return;
+
+        _loading = true;
+        _problem = null;
+        StateHasChanged();
+
+        try
+        {
+            var found = await _finder.FindAsync(Registry, Draft, new ImageSearchFilters(_officialOnly), token);
+            token.ThrowIfCancellationRequested();
+
+            _repos = found;
+            _reposFor = key;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _repos = null;
+            _problem = Describe(ex);
+        }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+            {
+                _loading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    async Task LoadTagsAsync(CancellationToken token)
+    {
+        var draft = Draft;
+        var repository = $"{_host}|{draft.Path}";
+
+        if (_aboutFor != repository)
+        {
+            _about = null;
+            _aboutFor = repository;
+        }
+
+        // Docker Hub's description, stars and pulls, beside the tags rather than before them.
+        if (draft.IsDockerHub && _describedFor != repository)
+        {
+            _describedFor = repository;
+            _ = DescribeAsync(draft, repository, token);
+        }
+
+        var key = $"{repository}|{draft.Tag}";
+
+        if (key != _tagsFor)
+        {
+            if (_tags is not null && _tagsFor?.StartsWith(repository + "|", StringComparison.Ordinal) != true) _tags = null;
+
+            _loading = true;
+            _problem = null;
+            StateHasChanged();
+
+            try
+            {
+                var listing = await Browser.ListTagsAsync(draft, token);
+                token.ThrowIfCancellationRequested();
+
+                _tags = listing;
+                _tagsFor = key;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _tags = null;
+                _problem = Describe(ex);
+            }
+            finally
+            {
+                if (!token.IsCancellationRequested)
+                {
+                    _loading = false;
+                    StateHasChanged();
+                }
+            }
+        }
+
+        await InspectAsync(token);
+    }
+
+    async Task DescribeAsync(ImageReferenceDraft draft, string repository, CancellationToken token)
+    {
+        try
+        {
+            if (await Browser.DescribeAsync(draft, token) is { } described && _aboutFor == repository && !token.IsCancellationRequested)
+            {
+                _about = described;
+                StateHasChanged();
+            }
+        }
+        catch (Exception)
+        {
+            // The header is a courtesy. The tag list says what went wrong, if anything did.
+        }
+    }
+
+    /// <summary>
+    /// Read what the chosen tag holds, when the listing did not say — every registry but Docker Hub.
+    /// One tag, once the user has settled on it: it is up to three requests.
+    /// </summary>
+    async Task InspectAsync(CancellationToken token)
+    {
+        var draft = Draft;
+        var key = InspectKey;
+
+        if (!draft.IsPullable || draft.Tag is not { Length: > 0 } || Chosen is not null || _inspectedFor == key) return;
+
+        _inspecting = true;
+        _inspectProblem = null;
+        StateHasChanged();
+
+        try
+        {
+            _inspected = await Browser.InspectAsync(draft, _platform, token);
+            _inspectedFor = key;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _inspected = null;
+            _inspectedFor = key;
+            _inspectProblem = ex is RegistryException { Failure: RegistryFailure.NotFound } ? $"▲ {ex.Message}" : Describe(ex);
+        }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+            {
+                _inspecting = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// A failure as a sentence. A registry this machine cannot reach is not necessarily one the
+    /// engine cannot: on a remote host the pull goes from there, and saying so keeps the user from
+    /// giving up on a reference that would have worked.
+    /// </summary>
+    string Describe(Exception ex)
+    {
+        var text = ex.Message;
+
+        if (ex is RegistryException { Failure: RegistryFailure.Unreachable } && Engine.Selected is { Endpoint.IsRemote: true } host)
+            text += $" The engine on {host.Name} may still reach it — pulling goes through the engine, so a reference typed in full still works.";
+
+        return text;
+    }
+
+    // ---------------------------------------------------------------- pulling
+
     string? _error;
     string? _done;
+    string _pulled = "";
     bool _pulling;
     CancellationTokenSource? _cts;
 
@@ -131,124 +1203,48 @@ else if (_results.Count > 0)
 
     IReadOnlyList<PullProgress> Ordered => [.. _order.Select(id => _layers[id])];
 
-    // ---------------------------------------------------------------- search
-
-    IReadOnlyList<ImageSearchResult> _results = [];
-    bool _searching;
-    string? _searchError;
-
-    /// <summary>The term the last search ran for, so typing the same thing twice does not.</summary>
-    string _searched = "";
-
-    CancellationTokenSource? _searchCts;
-
-    bool CanSearch => Engine.Selected?.Capabilities.SupportsRegistrySearch ?? false;
-
-    /// <summary>
-    /// Search as the name is typed, after a pause.
-    /// <para>
-    /// Debounced because this is a network call to Docker Hub on every keystroke otherwise, and
-    /// abandoned when the term changes — the answer to a term the user has already typed past is
-    /// worse than no answer, because it arrives looking current.
-    /// </para>
-    /// </summary>
-    async Task SearchLaterAsync()
+    /// <summary>A finished pull's report gives way as soon as the field is edited: the next image is the subject now.</summary>
+    void ClearOutcome()
     {
-        var term = _reference.Trim();
+        if (_pulling) return;
 
-        // Nothing to search for, or the name is already specific enough that the user knows what
-        // they want: a tag or a registry host means they are typing a reference, not looking.
-        if (!CanSearch || term.Length < 2 || term.Contains(':') || _pulling)
-        {
-            _results = [];
-            _searchError = null;
-            return;
-        }
-
-        if (term == _searched) return;
-
-        _searchCts?.Cancel();
-        _searchCts?.Dispose();
-        _searchCts = new CancellationTokenSource();
-
-        var token = _searchCts.Token;
-
-        try
-        {
-            await Task.Delay(350, token);
-
-            _searching = true;
-            _searchError = null;
-            StateHasChanged();
-
-            var found = await Engine.SearchImagesAsync(term, 8, token);
-
-            if (token.IsCancellationRequested) return;
-
-            _searched = term;
-            _results = found;
-
-            // "Nothing matched" and "the engine broke" are different sentences, and only one of
-            // them is worth retyping the search for.
-            _searchError = found.Count == 0 ? $"Nothing on Docker Hub matches “{term}”." : null;
-        }
-        catch (OperationCanceledException)
-        {
-            // Typed past it.
-        }
-        catch (Exception ex)
-        {
-            _results = [];
-            _searchError = ex.Message;
-        }
-        finally
-        {
-            if (!token.IsCancellationRequested)
-            {
-                _searching = false;
-                StateHasChanged();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Take a result's name as the reference, exactly as the engine gave it.
-    /// <para>
-    /// Not pulled straight away. The name has no tag, and a click that started downloading
-    /// <c>:latest</c> would take the choice of version away from the person making it.
-    /// </para>
-    /// </summary>
-    void Choose(ImageSearchResult result)
-    {
-        _reference = result.Name;
-        _searched = result.Name;
-        _results = [];
-        _searchError = null;
-    }
-
-    async Task OnReferenceInput(ChangeEventArgs e)
-    {
-        _reference = e.Value?.ToString() ?? "";
-        await SearchLaterAsync();
+        _layers.Clear();
+        _order.Clear();
+        _done = null;
+        _error = null;
     }
 
     async Task StartAsync()
     {
-        var reference = _reference.Trim();
-        if (reference.Length == 0 || _pulling) return;
+        var draft = Draft;
+        if (!draft.IsPullable || _pulling) return;
+
+        var reference = draft.Reference;
 
         _pulling = true;
+        _pulled = draft.Canonical;
         _error = null;
         _done = null;
+        _active = -1;
         _layers.Clear();
         _order.Clear();
 
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(Session.Closing);
+        if (_fetch is { } fetch) await fetch.CancelAsync();
+        _loading = false;
+
+        // Linked to the dialog's own closing, so Cancel, Escape or the window going away all stop
+        // Dray reading the stream — the body is not asked first when the way out is pressed.
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(Closing);
+
+        // Started from the head's button as well as from Enter, and only an event handler re-renders
+        // by itself — so the buttons learn they are busy from here.
         StateHasChanged();
 
         try
         {
-            await foreach (var step in Engine.PullImageAsync(reference, _cts.Token))
+            // The credential store goes with it: a registry that refuses an anonymous pull is asked
+            // again with the stored credential, which is the only way a private image arrives.
+            await foreach (var step in Engine.PullImageAsync(reference, Registries, _cts.Token))
             {
                 if (step.IsError)
                 {
@@ -274,6 +1270,8 @@ else if (_results.Count > 0)
                 // Only lands if the window is not in front — see WebShellBridge.NotifyAsync. A pull
                 // is the archetypal "started it and went to do something else" operation.
                 await Shell.NotifyAsync("Pull finished", $"{reference} is on {Engine.Selected?.Name}.", NoticeKind.Success);
+
+                await LoadLocalAsync();
             }
             else
             {
@@ -282,8 +1280,6 @@ else if (_results.Count > 0)
         }
         catch (OperationCanceledException)
         {
-            // Cancelling the stream stops Dray reading it; the engine finishes the pull it started.
-            // Saying otherwise would be a lie, and a half-pulled image is not a state Dray can create.
             _done = "Pull cancelled.";
         }
         catch (Exception ex)
@@ -295,6 +1291,9 @@ else if (_results.Count > 0)
             _pulling = false;
             _cts?.Dispose();
             _cts = null;
+            StateHasChanged();
+
+            await FocusAsync();
         }
     }
 
@@ -306,7 +1305,22 @@ else if (_results.Count > 0)
             cts.Dispose();
         }
 
-        _searchCts?.Cancel();
-        _searchCts?.Dispose();
+        _fetch?.Cancel();
+        _fetch?.Dispose();
+
+        try
+        {
+            if (_keys is { } keys)
+            {
+                await keys.InvokeVoidAsync("detach");
+                await keys.DisposeAsync();
+            }
+
+            if (_module is { } module) await module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The dialog's WebView went first — on a native head it is the dialog.
+        }
     }
 }

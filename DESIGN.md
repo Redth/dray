@@ -477,8 +477,12 @@ The Blazor content sits inside a native window. At the boundary, these must matc
   This does not take the choice away from the user, because of how macOS resolves it: an app accent
   applies only while the system Appearance accent is **Multicolor** (the default). A user who has
   picked a specific accent still gets theirs everywhere, Dray included — which is the right
-  precedence. Windows behaves the same way through its own accent, and GTK has no equivalent
-  mechanism at all, so on Linux this reduces to styling selection with `--brand` directly.
+  precedence. Windows has no Multicolor: every user has an accent, blue unless they changed it, and
+  nothing tells a chosen one from the default. So the Windows head replaces WinUI's accent ramp with
+  `--brand` outright (`WinPalette`), and gives its buttons and sidebar selection the page's own
+  treatments, from the same resolved tokens the page uses. High contrast stays the system's. GTK
+  has no equivalent mechanism at all, so on Linux this reduces to styling selection with `--brand`
+  directly.
 
   The colorset is generated, never hand-edited: AppKit reads it at launch with no runtime API, so a
   hand-written copy would be the one place the brand could silently drift from the token file.
@@ -572,10 +576,30 @@ entirely. Both were tried. The heading stays in the content.
 
 **Name.** Dray — the flatbed dray cart that hauls the load. Equipment, not a platform.
 
-**Mark.** A flatbed cart silhouette in profile, reduced to a horizontal deck line, two wheels, and a
-single stacked crate, drawn on a 24px grid with a 2px stroke so it survives being a 16px menu-bar
-template image. Monochrome (a template image on macOS); the terracotta appears only in the full app
-icon, never in chrome.
+**Mark.** The D-cart: a dray in profile — tow bar, deck, two wheels — whose load is the letter D.
+The bar gives it direction (a dray is pulled), and the D makes it Dray's rather than any cart. One
+stroke drawing on the 24px grid at a 2px stroke, so the same geometry is the 16pt menu-bar template
+image, the Windows notification-area icon, the mark in the web sidebar and the artwork on the app
+tile. It lives once, in
+`design/icons.json` under `marks`; it has no `IconRef`, because no platform icon set has a name for
+it. In native chrome it is monochrome — a template image on macOS — and the terracotta fill
+belongs to the app tile, where the D is tinted for volume. The web sidebar, standing in for a native
+one, sets it in `--brand` beside the name.
+
+**App icon.** `node build/gen-app-icon.mjs` draws the tile from the mark and the palette — `--brand`
+into `--brand-hi` on Apple's 824-on-1024 grid — and renders every macOS size with whichever Chrome
+or Edge is installed. Renders of 32px and under use a heavier stroke, because at 16px the 2-unit
+stroke falls under a pixel and the mark dissolves. The PNGs are committed and stamped with a hash of
+what drew them; `--check` fails when the mark or the palette moves on without them. A dark master
+(`design/brand/app-icon-dark.svg`) is drawn for the first head that takes an appearance variant.
+
+Windows gets the same tile in its own frame: no shadow and no margin, because Windows icons fill
+their square. It is packed into `Dray.ico`, the exe's icon, which the taskbar, Alt+Tab and toasts
+all read, and MAUI sets the window's icon from it. The title bar shows the tile at 16 effective
+pixels before the name, where Windows draws an app's icon until the app takes its title bar over.
+That copy is an SVG, so it stays sharp at any scale, and the DevHost uses the same file as its
+favicon. The tile is in full colour in both themes, as it is on the taskbar. Only the
+notification-area icon is drawn as a monochrome mark.
 
 **Anti-brief, stated plainly:** no whale, no shipping container, no cargo ship, no hexagon-and-node
 network diagram, no blue. The category reflex is Docker-blue-and-whale; the reflex one tier down is

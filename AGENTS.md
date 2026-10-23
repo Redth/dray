@@ -75,15 +75,21 @@ and should stay that small.
 
 ```bash
 node build/gen-tokens.mjs              # regenerate tokens.css, Tokens.g.cs, DESIGN.md tables
-node build/gen-icons.mjs               # regenerate sprite.svg + Icons.g.cs
+node build/gen-icons.mjs               # regenerate sprite.svg, Icons.g.cs + the macOS menu-bar mark
 node build/gen-tokens.mjs --check      # fail if any generated file is stale
 node build/gen-icons.mjs --check
+node build/gen-app-icon.mjs            # app tile, macOS PNGs, Windows .ico, favicon (needs Chrome or Edge)
+node build/gen-app-icon.mjs --check    # fail if the committed icons predate the mark or palette
 node build/verify-contrast.mjs         # contrast + gamut + stale-exception report
 node build/lint-tokens.mjs             # raw colour / type / z-index literals
 
 npm install                            # build-time tooling only; nothing here ships except Monaco
 npm run vendor:monaco                  # refresh wwwroot/lib/monaco from node_modules
 npm run check:monaco                   # fail if the vendored copy is stale or hand-edited
+npm run vendor:monaco-yaml             # rebundle the YAML language server + pinned Compose schema
+npm run check:monaco-yaml
+npm run vendor:composerize             # rebundle docker run → compose conversion
+npm run check:composerize
 npm run vendor:xterm                   # refresh wwwroot/lib/xterm from node_modules
 npm run check:xterm
 
@@ -96,6 +102,11 @@ dotnet run --project src/Dray.DevHost --launch-profile dray   # http://localhost
 # stdout/stderr are visible.
 dotnet build src/Dray.MacOS
 src/Dray.MacOS/bin/Debug/net10.0-macos26.0/osx-arm64/Dray.app/Contents/MacOS/Dray.MacOS
+
+# Windows head (on Windows; it builds as a no-op elsewhere). Unpackaged, so the exe runs as
+# built. It is a GUI app, so stderr is lost: failures also go to %LOCALAPPDATA%\Dray\logs\last-run.log.
+dotnet build src/Dray.Windows
+src/Dray.Windows/bin/Debug/net10.0-windows10.0.19041.0/win-x64/Dray.Windows.exe   # win-arm64 on ARM
 
 # Drive and inspect the running app (Debug builds only). The CLI defaults to port 9223;
 # Dray's agent is on MauiDevFlowPort from Directory.Build.props.
@@ -117,7 +128,11 @@ message if either is absent.
 ## Conventions
 
 - No XAML. UI is Blazor (`.razor`) in `Dray.Ui`, a Razor Class Library shared by all three heads —
-  never MSBuild globs across projects (`docs/ARCHITECTURE.md` §1.1 explains why).
+  never MSBuild globs across projects (`docs/ARCHITECTURE.md` §1.1 explains why). The one
+  exception is the Windows head's `App.xaml`, which contains no UI and exists so WinUI's XAML
+  compiler generates `Main` (`docs/NATIVE-SHELL.md` §5.5). Native chrome is built in C#.
+- Each app head builds only on its own OS and is a no-op everywhere else
+  (`build/SkipHeadOnOtherOS.targets`), so `dotnet build` of the solution works on all three.
 - `Dray.Core` references neither Docker nor a UI framework. `Dray.Docker` and `Dray.Apple` are two
   implementations of `IContainerRuntime`; a composite factory in the composition root dispatches on
   the endpoint's scheme. Adding an engine must not change a page — if it does, the seam is in the
@@ -145,7 +160,10 @@ message if either is absent.
 - Anything that reads `EngineManager.Store` must sit **inside** `<EngineScope>`, including
   `<PageChromeScope>` when the chrome shows a count. A value computed above the tag is captured by
   the child-content closure and never recomputed, so the screen silently goes stale.
-- Each app head links its own scoped-CSS bundle: `Dray.MacOS.styles.css`, `Dray.DevHost.styles.css`.
+- Each app head links its own scoped-CSS bundle: `Dray.MacOS.styles.css`, `Dray.Windows.styles.css`,
+  `Dray.DevHost.styles.css`.
+- The Windows head's namespace is `Dray.WinUI`, not `Dray.Windows`: inside a namespace with that
+  name, every `Windows.*` WinRT reference binds to it first and fails to resolve.
 - The page `<h1>` is emitted by `PageChromeScope` into the content area, visually hidden. It cannot
   live in the toolbar: on native heads the toolbar has no DOM.
 

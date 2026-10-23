@@ -47,7 +47,7 @@ public static class HostFacts
     };
 
     /// <summary>Where Dray learned about the host, as the user would say it.</summary>
-    public static string Source(DockerHost host) => host.Origin switch
+    public static string Source(DockerHost host) => host.DesktopMode is not null ? "Docker Desktop" : host.Origin switch
     {
         HostOrigin.DockerContext => $"Docker context “{host.Id}”",
         HostOrigin.Environment => "DOCKER_HOST in the environment",

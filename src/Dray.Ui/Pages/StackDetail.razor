@@ -2,6 +2,9 @@
 @inject EngineManager Engine
 @inject NavigationManager Nav
 @inject ShellCapabilities Caps
+@inject StackActionService Actions
+@inject StackOperations Operations
+@implements IDisposable
 
 <PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
 
@@ -20,13 +23,27 @@
                 {
                     <StatePill Status="header.Status" />
                 }
+
+                @if (!Caps.HasNativeToolbar && Stack is { } acting)
+                {
+                    @* On a head with a native toolbar these are toolbar items (Chrome, below); here
+                       they are the page's own, the way the container page does it. *@
+                    <div class="detail__actions">
+                        <RowActions Actions="Actions.ActionsFor(acting)" Visible="3"
+                                    MenuLabel="@($"More commands for {acting.Name}")"
+                                    OnAction="id => RunAsync(acting, id)" />
+                    </div>
+                }
             </div>
 
             <div class="detail__meta mono muted">
                 @if (Stack is { } stack)
                 {
                     <span>@stack.Services.Count service@(stack.Services.Count == 1 ? "" : "s")</span>
-                    <span>@stack.RunningCount/@stack.ContainerCount running</span>
+                    @if (!stack.IsDown)
+                    {
+                        <span>@stack.RunningCount/@stack.ContainerCount running</span>
+                    }
 
                     @if (stack.ConfigFiles.FirstOrDefault() is { } file)
                     {
@@ -46,12 +63,36 @@
                 }
             </div>
 
+            @if (_notice is { } topNotice && _tab is not "Services")
+            {
+                <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+                    <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+                    <span>@topNotice</span>
+                    <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true"
+                            Variant="ButtonVariant.Ghost" OnClick="() => _notice = null" />
+                </div>
+            }
+
+            <OperationLog Stack="@StackName" />
+
             <div class="detail__body">
                 @if (Stack is not { } current)
                 {
                     <div class="page">
                         <EmptyState Icon="IconRef.Stack" Title="That stack is not here"
-                                    Body="It may have been brought down, or it belongs to a different host than the one selected." />
+                                    Body="It belongs to a different host than the one selected, or Dray was told to forget it and nothing of it is running." />
+                    </div>
+                }
+                else if (_tab == "Overview")
+                {
+                    <div class="page page--flush">
+                        <StackOverview Stack="current" />
+                    </div>
+                }
+                else if (_tab == "History")
+                {
+                    <div class="page page--flush">
+                        <StackHistoryView Stack="current" />
                     </div>
                 }
                 else if (_tab == "Services")
@@ -67,11 +108,41 @@
                             </div>
                         }
 
+                        @if (current.Profiles.Count > 0 && current.Provenance != StackProvenance.Observed)
+                        {
+                            @* Profiles are the stack's, in its .env, so a terminal sees the same
+                               ones. Each chip is a toggle with its state in the word and the check,
+                               not only its tint. *@
+                            <div class="stack__profiles" role="group" aria-label="Profiles">
+                                <span class="field__label">Profiles</span>
+                                @foreach (var profile in current.Profiles)
+                                {
+                                    var captured = profile;
+                                    var on = _activeProfiles.Contains(profile);
+
+                                    <button type="button" class="stack__profile @(on ? "is-on" : null)" aria-pressed="@(on.ToString().ToLowerInvariant())"
+                                            title="@(on ? $"Turn {profile} off" : $"Turn {profile} on")" @onclick="() => ToggleProfileAsync(captured)">
+                                        <Icon Name="@(on ? IconRef.Check : IconRef.Plus)" Size="IconSize.Sm" />
+                                        @profile
+                                    </button>
+                                }
+                                <span class="muted stack__profiles-note">Saved as COMPOSE_PROFILES in .env</span>
+                            </div>
+                        }
+
+                        @if (DriftSummary is { } drifted)
+                        {
+                            <div class="note stack__drift" role="status">
+                                <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                                <span>@drifted</span>
+                            </div>
+                        }
+
                         <table class="table">
                             <thead>
                                 <tr>
                                     <th>Service</th><th>State</th><th>Container</th><th>Image</th>
-                                    <th class="num">Uptime</th><th class="num">Replicas</th>
+                                    <th class="num">Uptime</th><th class="num">Replicas</th><th></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -79,14 +150,52 @@
                                 {
                                     var captured = service;
 
+                                    @if (service.Replicas.Count == 0)
+                                    {
+                                        @* Declared in the file, no container on this host: never
+                                           started, behind a profile, or scaled to zero. Listed so
+                                           the stack on screen is the stack in the file. *@
+                                        <tr @key="service.Name">
+                                            <td>
+                                                @service.Name
+                                                @if (DriftPill(service.Name) is { } drift)
+                                                {
+                                                    <StatePill Status="drift" />
+                                                }
+
+                                                @if (current.Declared.GetValueOrDefault(service.Name)?.Profiles is { Count: > 0 } profiles)
+                                                {
+                                                    <span class="muted stack__inprofile">in @string.Join(", ", profiles)</span>
+                                                }
+                                            </td>
+                                            <td><StatePill Status="service.Status" /></td>
+                                            <td class="muted">No container</td>
+                                            <td class="muted">—</td>
+                                            <td class="num muted">—</td>
+                                            <td class="num"></td>
+                                            <td class="cell-actions">
+                                                <RowActions Actions="Actions.ServiceActionsFor(current, captured)" Visible="2"
+                                                            MenuLabel="@($"More for {service.Name}")"
+                                                            OnAction="id => RunService(current, captured, id, null)" />
+                                            </td>
+                                        </tr>
+                                    }
+
                                     @foreach (var (replica, index) in service.Replicas.Select((r, i) => (r, i)))
                                     {
+                                        var container = replica;
+
                                         <tr @key="replica.Id">
                                             <td>
                                                 @service.Name
                                                 @if (service.IsScaled)
                                                 {
                                                     <span class="muted"> · @replica.Compose?.Replica</span>
+                                                }
+
+                                                @if (index == 0 && DriftPill(service.Name) is { } drift)
+                                                {
+                                                    <StatePill Status="drift" />
                                                 }
                                             </td>
                                             <td><StatePill Status="replica.Status" /></td>
@@ -104,10 +213,26 @@
                                                     <ScaleControl Service="captured" Busy="@(_scaling == captured.Name)"
                                                                   OnScale="n => ScaleAsync(captured, n)" />
                                                 </td>
+                                                <td class="cell-actions">
+                                                    @* The service's actions, with Shell aimed at this
+                                                       replica; later rows get a Shell of their own —
+                                                       the replica picker is the table itself. *@
+                                                    <RowActions Actions="Actions.ServiceActionsFor(current, captured)" Visible="2"
+                                                                MenuLabel="@($"More for {service.Name}")"
+                                                                OnAction="id => RunService(current, captured, id, container)" />
+                                                </td>
                                             }
                                             else
                                             {
                                                 <td></td>
+                                                <td class="cell-actions">
+                                                    @if (container.State == DockerState.Running && Engine.Selected?.Capabilities.SupportsShell != false)
+                                                    {
+                                                        <Button Label="@($"Shell in {container.Name}")" Icon="IconRef.Terminal" IconOnly="true"
+                                                                Variant="ButtonVariant.Ghost"
+                                                                OnClick="@(() => Nav.NavigateTo($"/containers/{container.ShortId}?tab=Terminal"))" />
+                                                    }
+                                                </td>
                                             }
                                         </tr>
                                     }
@@ -122,22 +247,10 @@
                        decide start order and keeps no record of it afterwards. *@
                     <DependencyGraph Services="current.Services" Yaml="@(_file?.Text)" />
                 }
-                else if (_file is { } file)
+                else if (_file is not null)
                 {
-                    @* The compose file and its .env, side by side, because the first is unreadable
-                       without the second: nothing in the YAML refers to the .env, and every
-                       ${VAR} in it resolves from there. *@
-                    <div class="stack__compose">
-                        <CodeEditor File="file" ReadOnly="@(!_writable)" OnSave="SaveAsync"
-                                    OnClose="BackToServices" Annotations="_annotations" />
-
-                        @if (WorkingDirectory is { Length: > 0 } directory)
-                        {
-                            <StackEnvPanel WorkingDirectory="@directory"
-                                           Referenced="_referenced"
-                                           VariablesChanged="OnVariablesChangedAsync" />
-                        }
-                    </div>
+                    <StackCompose Stack="current" WorkingDirectory="@WorkingDirectory"
+                                  OnClose="BackToServices" OnSaved="OnComposeSavedAsync" />
                 }
                 else
                 {
@@ -152,7 +265,7 @@
 </EngineScope>
 
 @code {
-    static readonly string[] Tabs = ["Services", "Dependencies", "Compose file"];
+    static readonly string[] Tabs = ["Overview", "Services", "Dependencies", "Compose file", "History"];
 
     const string ComposeFileExplanation =
         "The engine did not record which file this stack came from, or the file is on the machine "
@@ -161,30 +274,113 @@
 
     [Parameter] public string Name { get; set; } = "";
 
+    /// <summary><c>?tab=compose</c> opens on the files — where a refused Deploy sends you.</summary>
+    [SupplyParameterFromQuery(Name = "tab")] public string? InitialTab { get; set; }
+
+    /// <summary>What Deploy would change per service, or null when unknown. See <see cref="StackDrift"/>.</summary>
+    IReadOnlyDictionary<string, ServiceDrift>? _drift;
+    IReadOnlyDictionary<string, IReadOnlyList<string>> _changedFiles = new Dictionary<string, IReadOnlyList<string>>();
+    CancellationTokenSource? _driftCts;
+
+    /// <summary>The profiles <c>COMPOSE_PROFILES</c> in the stack's .env turns on.</summary>
+    HashSet<string> _activeProfiles = new(StringComparer.Ordinal);
+
+    string? EnvPath => WorkingDirectory is { } dir
+        ? (Files.IsRemote ? $"{dir.TrimEnd('/')}/{DotEnvFile.FileName}" : System.IO.Path.Combine(dir, DotEnvFile.FileName))
+        : null;
+
+    async Task ReadProfilesAsync()
+    {
+        var active = new HashSet<string>(StringComparer.Ordinal);
+
+        try
+        {
+            if (Stack?.Profiles.Count > 0 && EnvPath is { } path && await Files.ReadAsync(path) is { } bytes
+                && DotEnvFile.Parse(System.Text.Encoding.UTF8.GetString(bytes)).LastOrDefault(v => v.Key == "COMPOSE_PROFILES") is { } profiles)
+            {
+                foreach (var name in profiles.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    active.Add(name);
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        _activeProfiles = active;
+    }
+
+    /// <summary>
+    /// Turn a profile on or off by writing <c>COMPOSE_PROFILES</c> into the stack's .env.
+    /// <para>
+    /// The .env rather than a setting of Dray's: compose reads it for every command, including the
+    /// ones typed in a terminal, so the profiles are the stack's and not Dray's view of it.
+    /// Measured: compose honours it with <c>-f</c> given and from any directory. One line of the
+    /// file changes; its comments and every other variable are left alone.
+    /// </para>
+    /// </summary>
+    async Task ToggleProfileAsync(string profile)
+    {
+        if (EnvPath is not { } path) return;
+
+        var on = !_activeProfiles.Contains(profile);
+        var next = new HashSet<string>(_activeProfiles, StringComparer.Ordinal);
+        if (on) next.Add(profile); else next.Remove(profile);
+
+        try
+        {
+            var text = await Files.ReadAsync(path) is { } bytes ? System.Text.Encoding.UTF8.GetString(bytes) : "";
+            var ordered = Stack?.Profiles.Where(next.Contains).ToList() ?? [.. next];
+            var written = DotEnvFile.Set(text, "COMPOSE_PROFILES", ordered.Count == 0 ? null : string.Join(',', ordered));
+
+            if (await Files.WriteAsync(path, System.Text.Encoding.UTF8.GetBytes(written)) is { } failed) throw new IOException(failed);
+
+            _notice = on
+                ? $"{profile} is on. Deploy brings up its services; compose in a terminal sees it too."
+                : $"{profile} is off. Its running services keep running until the next Deploy removes them.";
+            _noticeOk = true;
+        }
+        catch (Exception ex)
+        {
+            _notice = $"Could not write {DotEnvFile.FileName}: {ex.Message}";
+            _noticeOk = false;
+        }
+
+        await RefreshDriftAsync();
+    }
+
     string StackName => Uri.UnescapeDataString(Name);
 
     StackSummary? Stack => Engine.Stacks.FirstOrDefault(s => s.Name == StackName);
 
-    string _tab = "Services";
+    string _tab = "Overview";
+
+    /// <summary>
+    /// The first compose file, for the dependency graph. The Compose tab reads every file itself;
+    /// this is re-read when it saves, so the graph follows an edit to <c>depends_on</c>.
+    /// </summary>
     FileContent? _file;
     string? _fileError;
-    bool _writable;
     string? _readFor;
-
-    IReadOnlyList<EditorAnnotation> _annotations = [];
-    IReadOnlyCollection<string> _referenced = [];
 
     /// <summary>
     /// Where compose looks for <c>.env</c> — the directory it was run from, which it records on
     /// every container it creates. Falls back to the compose file's own folder, which is the same
     /// place in all but the unusual case of `-f` pointing elsewhere.
     /// </summary>
+    /// <para>
+    /// As compose recorded it. For a stack on the engine's host — over SSH, or in a WSL
+    /// distribution — that is the host's path, and <see cref="Files"/> is what opens it from here
+    /// (<see cref="EnginePaths"/> for WSL).
+    /// </para>
     string? WorkingDirectory
         => Stack?.WorkingDirectory is { Length: > 0 } recorded
             ? recorded
             : Stack?.ConfigFiles.FirstOrDefault() is { } path
-                ? System.IO.Path.GetDirectoryName(path)
+                ? (Stack.Provenance == StackProvenance.Remote ? path[..Math.Max(path.LastIndexOf('/'), 1)] : System.IO.Path.GetDirectoryName(path))
                 : null;
+
+    /// <summary>This machine, or the engine's host over SSH — wherever the stack's files are.</summary>
+    IStackFiles Files => Stack is { } stack ? Engine.FilesFor(stack) : LocalStackFiles.Instance;
 
     void BackToServices() => _tab = "Services";
 
@@ -214,28 +410,34 @@
 
         try
         {
-            var failed = false;
+            int? exitCode = null;
+            string? lastError = null;
 
             await foreach (var line in Engine.RunComposeAsync(
                 stack, ["up", "-d", "--no-recreate", "--scale", $"{service.Name}={replicas}"]))
             {
-                // Compose reports failure in its output rather than by failing the command, so a
-                // scale that could not happen otherwise looks like it worked.
-                if (line.IsError && line.Text.Contains("error", StringComparison.OrdinalIgnoreCase))
-                {
-                    _notice = line.Text.Trim();
-                    _noticeOk = false;
-                    failed = true;
-                }
+                if (line.IsExit) exitCode = line.ExitCode;
+                else if (line.IsError && line.Text.Trim() is { Length: > 0 } text) lastError = text;
             }
 
-            if (!failed)
+            // Success is a reported zero and nothing else. Compose writes its progress to stderr
+            // on a run that worked, so stderr alone says nothing; and a run that never reported how
+            // it ended is not one Dray can call done.
+            if (exitCode == 0)
             {
                 _notice = replicas == 1
                     ? $"{service.Name} is back to a single container."
                     : $"{service.Name} scaled to {replicas} containers.";
 
                 _noticeOk = true;
+            }
+            else
+            {
+                _notice = lastError ?? (exitCode is { } code
+                    ? $"Compose exited with {code} scaling {service.Name}."
+                    : $"Compose did not say whether {service.Name} scaled.");
+
+                _noticeOk = false;
             }
         }
         catch (Exception ex)
@@ -249,93 +451,93 @@
         }
     }
 
-    /// <summary>
-    /// Re-annotate as the variables change — before saving, not after.
-    /// <para>
-    /// Seeing what a value will do is the reason to type it, so making the annotation wait for a
-    /// save would put the feedback after the decision it was meant to inform.
-    /// </para>
-    /// </summary>
-    Task OnVariablesChangedAsync(IReadOnlyList<EnvVar> variables)
-    {
-        Annotate(variables);
-        return Task.CompletedTask;
-    }
-
-    void Annotate(IReadOnlyList<EnvVar> variables)
-    {
-        if (_file is not { } file)
-        {
-            _annotations = [];
-            _referenced = [];
-            return;
-        }
-
-        var values = variables.ToDictionary(v => v.Key, v => v.Value, StringComparer.Ordinal);
-        var found = ComposeInterpolation.Find(file.Text, values);
-
-        _referenced = [.. found.Select(s => s.Name).Distinct(StringComparer.Ordinal)];
-
-        _annotations =
-        [
-            .. found.Select(s => new EditorAnnotation(
-                s.Line,
-                s.Column,
-                s.Length,
-                Hint(s),
-                Kind(s.State),
-                Hover(s))),
-        ];
-    }
-
-    /// <summary>
-    /// What is drawn beside the reference. Short, because it sits inside a line of YAML — the
-    /// explanation goes in the hover.
-    /// </summary>
-    static string Hint(Substitution s) => s.State switch
-    {
-        SubstitutionState.Missing => "→ empty",
-        SubstitutionState.Required => "→ will not run",
-        _ when s.Resolved.Length == 0 => "→ empty",
-        _ => "→ " + (s.Resolved.Length > 40 ? s.Resolved[..40] + "…" : s.Resolved),
-    };
-
-    static string Kind(SubstitutionState state) => state switch
-    {
-        SubstitutionState.Resolved => "ok",
-        SubstitutionState.Defaulted => "default",
-        SubstitutionState.Required => "required",
-        _ => "missing",
-    };
-
-    static string? Hover(Substitution s) => s.State switch
-    {
-        // The quiet failure, stated plainly. Compose does not error on this — it substitutes an
-        // empty string and carries on, so an image tag becomes `myapp:` and fails much later.
-        SubstitutionState.Missing =>
-            $"**{s.Name}** is not set.\n\nCompose substitutes an empty string and carries on, so "
-            + "this line becomes whatever it reads without the variable. Add it on the right.",
-
-        SubstitutionState.Required =>
-            $"**{s.Name}** is not set, and this reference requires it.\n\nCompose refuses to run "
-            + "the stack until it has a value.",
-
-        SubstitutionState.Defaulted =>
-            $"**{s.Name}** is not set, so the default in this reference is used.",
-
-        _ => null,
-    };
+    string? _tabFor;
 
     protected override void OnParametersSet()
     {
+        // Followed separately from the stack: a refused Deploy sends you here from this very page,
+        // and the same component instance gets only the query changed.
+        if (InitialTab != _tabFor)
+        {
+            _tabFor = InitialTab;
+            if (InitialTab is "compose") _tab = "Compose file";
+        }
+
         if (_readFor == StackName) return;
 
         _readFor = StackName;
         _file = null;
         _fileError = null;
 
-        LoadComposeFile();
+        _ = LoadComposeFileAsync();
+        _ = RefreshDriftAsync();
     }
+
+    /// <summary>Saving changed the file: re-read it for the graph, and ask compose what it now differs by.</summary>
+    async Task OnComposeSavedAsync()
+    {
+        await LoadComposeFileAsync();
+        await RefreshDriftAsync();
+    }
+
+    async Task RefreshDriftAsync()
+    {
+        _driftCts?.Cancel();
+        var cts = _driftCts = new CancellationTokenSource();
+
+        if (Stack is not { } stack || stack.Provenance == StackProvenance.Observed)
+        {
+            _drift = null;
+            return;
+        }
+
+        try
+        {
+            var changes = await Actions.ChangesAsync(stack, cts.Token);
+            if (cts.IsCancellationRequested) return;
+
+            _drift = changes?.Drift;
+            _changedFiles = changes?.ChangedFiles ?? new Dictionary<string, IReadOnlyList<string>>();
+            await ReadProfilesAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>The services Deploy would touch, for the banner over the services.</summary>
+    string? DriftSummary
+    {
+        get
+        {
+            if (_drift is not { } drift || Stack is not { IsDown: false }) return null;
+
+            var changed = drift.Where(d => d.Value == ServiceDrift.Changed).Select(d => d.Key).Order().ToList();
+            var created = drift.Where(d => d.Value == ServiceDrift.NotCreated).Select(d => d.Key).Order().ToList();
+            var removed = drift.Where(d => d.Value == ServiceDrift.Removed).Select(d => d.Key).Order().ToList();
+
+            var parts = new List<string>();
+            if (changed.Count > 0) parts.Add($"recreate {string.Join(", ", changed)}");
+
+            foreach (var (service, files) in _changedFiles.OrderBy(c => c.Key, StringComparer.Ordinal))
+                parts.Add($"recreate {service}, whose {string.Join(", ", files)} changed");
+            if (created.Count > 0) parts.Add($"create {string.Join(", ", created)}");
+            if (removed.Count > 0) parts.Add($"remove {string.Join(", ", removed)}");
+
+            return parts.Count == 0 ? null : $"The files have changed since this stack was deployed. Deploy will {string.Join("; ", parts)}.";
+        }
+    }
+
+    /// <summary>A service's drift, as a pill — glyph, word and tint — or null when there is nothing to say.</summary>
+    ContainerStatus? DriftPill(string service) => _drift?.GetValueOrDefault(service) switch
+    {
+        ServiceDrift.Changed => new ContainerStatus(StateTone.Warn, "✎", "Edited", "not deployed"),
+        ServiceDrift.FileChanged => new ContainerStatus(StateTone.Warn, "✎", "File changed", string.Join(", ", _changedFiles.GetValueOrDefault(service) ?? [])),
+        ServiceDrift.NotCreated when Stack is { IsDown: false } => new ContainerStatus(StateTone.Neutral, "+", "Not created"),
+        ServiceDrift.Removed => new ContainerStatus(StateTone.Neutral, "−", "Not in the file"),
+        _ => null,
+    };
 
     /// <summary>
     /// Read the compose file off this machine.
@@ -346,58 +548,109 @@
     /// shown as an error.
     /// </para>
     /// </summary>
-    void LoadComposeFile()
+    async Task LoadComposeFileAsync()
     {
+        _file = null;
+        _fileError = null;
+
         if (Stack?.ConfigFiles.FirstOrDefault() is not { } path) return;
 
         try
         {
-            if (!System.IO.File.Exists(path)) return;
-
-            _file = FileContent.Decode(path, System.IO.File.ReadAllBytes(path));
-
-            // Annotated once on load with no variables, so a file full of ${VAR} shows what it
-            // would do right now rather than nothing until the panel reports in.
-            Annotate([]);
-
-            // Editing is offered only where it would actually take effect. A read-only file, or one
-            // Dray cannot write, opens for reading rather than presenting a Save that fails.
-            var info = new System.IO.FileInfo(path);
-            _writable = !info.IsReadOnly;
+            if (await Files.ReadAsync(path) is { } bytes) _file = FileContent.Decode(path, bytes);
         }
         catch (Exception ex)
         {
             _fileError = ex.Message;
         }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnInitialized() => Operations.Changed += OnOperationChanged;
+
+    void OnOperationChanged(StackOperation operation)
+    {
+        // Start and end change which actions are enabled; the lines are the log's to draw.
+        if (operation.Stack != StackName) return;
+
+        // A finished deploy is the moment the files and the containers agree again.
+        if (!operation.IsRunning) _ = RefreshDriftAsync();
+
+        if (operation.Lines.Count <= 1 || !operation.IsRunning) InvokeAsync(StateHasChanged);
+    }
+
+    async Task RunAsync(StackSummary stack, string action)
+    {
+        var notice = await Actions.RunAsync(stack, action);
+
+        // A deleted or forgotten stack has nothing left to show here.
+        if (action == "delete" && notice is null) Nav.NavigateTo("/stacks");
+
+        if (notice is not null)
+        {
+            _notice = notice;
+            _noticeOk = action == "forget";
+        }
+    }
+
+    void RunService(StackSummary stack, StackService service, string action, ContainerSummary? replica)
+    {
+        switch (action)
+        {
+            case "logs":
+                if (service.Replicas.Count == 1) Nav.NavigateTo($"/containers/{service.Replicas[0].ShortId}");
+                else Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(stack.Name)}/logs");
+                break;
+
+            case "shell":
+                var target = replica is { State: DockerState.Running } ? replica : service.Replicas.FirstOrDefault(r => r.State == DockerState.Running);
+                if (target is not null) Nav.NavigateTo($"/containers/{target.ShortId}?tab=Terminal");
+                break;
+
+            default:
+                if (Actions.RunService(stack, service, action) is { } notice)
+                {
+                    _notice = notice;
+                    _noticeOk = false;
+                }
+
+                break;
+        }
     }
 
     /// <summary>
-    /// Write the file back.
-    /// <para>
-    /// Saving does not apply anything — compose reads the file when it next runs. Saying so is the
-    /// difference between a user thinking their change is live and finding out later.
-    /// </para>
+    /// On a native toolbar the stack's actions are toolbar items, in the order their state invites:
+    /// the first is the page's one primary, a destructive one is never primary, and Logs follows.
     /// </summary>
-    Task<string?> SaveAsync(string path, byte[] content)
+    PageChrome Chrome
     {
-        try
+        get
         {
-            System.IO.File.WriteAllBytes(path, content);
-            return Task.FromResult<string?>(null);
-        }
-        catch (Exception ex)
-        {
-            return Task.FromResult<string?>(ex.Message);
+            var actions = new List<ChromeAction>();
+
+            if (Caps.HasNativeToolbar && Stack is { } stack)
+            {
+                var offered = Actions.ActionsFor(stack).Where(a => !a.Disabled).ToList();
+
+                for (var i = 0; i < offered.Count; i++)
+                {
+                    var a = offered[i];
+                    var label = a.Label.Replace(" " + stack.Name, "", StringComparison.Ordinal);
+
+                    actions.Add(a.Danger
+                        ? ChromeAction.Destructive(a.Id, label, a.Icon)
+                        : i == 0 ? ChromeAction.Primary(a.Id, label, a.Icon) : ChromeAction.Secondary(a.Id, label, a.Icon));
+                }
+            }
+
+            actions.Add(ChromeAction.Secondary("logs", "Logs", IconRef.Logs));
+
+            return new(StackName, Subtitle: Engine.Selected?.Name, Actions: actions, Back: new ChromeBack("back", "All stacks"));
         }
     }
 
-    PageChrome Chrome => new(
-        StackName,
-        Subtitle: Engine.Selected?.Name,
-        Actions: [ChromeAction.Secondary("logs", "Logs", IconRef.Logs)],
-        Back: new ChromeBack("back", "All stacks"));
-
-    void HandleAction(string id)
+    async Task HandleAction(string id)
     {
         switch (id)
         {
@@ -408,6 +661,16 @@
             case "logs":
                 Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(StackName)}/logs");
                 break;
+
+            default:
+                if (Stack is { } stack) await RunAsync(stack, id);
+                break;
         }
+    }
+
+    public void Dispose()
+    {
+        Operations.Changed -= OnOperationChanged;
+        _driftCts?.Cancel();
     }
 }

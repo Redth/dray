@@ -58,6 +58,17 @@ public sealed record RuntimeCapabilities
 {
     public static readonly RuntimeCapabilities None = new();
 
+    /// <summary>
+    /// The engine's own identity, from <c>/info</c>'s <c>ID</c>. Null where it did not report one.
+    /// <para>
+    /// What decides that two hosts are one engine. Comparing endpoints cannot: on Windows
+    /// <c>docker_engine</c> is an alias for whichever of Docker Desktop's engines is current, so the
+    /// pipe Dray connected to says nothing about which engine answered. Measured, not inferred —
+    /// the same rule as <see cref="ContainerOs"/>.
+    /// </para>
+    /// </summary>
+    public string? EngineId { get; init; }
+
     /// <summary>Engine API version, e.g. "1.45".</summary>
     public string? ApiVersion { get; init; }
 
@@ -98,7 +109,14 @@ public sealed record RuntimeCapabilities
     /// </summary>
     public bool IsWindowsContainers => ContainerOs == ContainerOs.Windows;
 
-    /// <summary><c>docker compose</c> is available for this host.</summary>
+    /// <summary>
+    /// A compose on this machine can drive this host.
+    /// <para>
+    /// Not the engine's to answer: compose is a client-side program, so neither runtime sets it.
+    /// <see cref="EngineManager"/> does, from the probe for a compose and from whether
+    /// <see cref="ComposeTarget.For"/> can address the host with it.
+    /// </para>
+    /// </summary>
     public bool SupportsCompose { get; init; }
 
     /// <summary>BuildKit / buildx is available.</summary>
@@ -199,7 +217,7 @@ public enum EngineFlavor
 /// <summary>
 /// One engine Dray can talk to, local or remote, and everything known about it.
 /// <para>
-/// The host picker is the first control in the sidebar, and every screen behind it works the same
+/// The host picker is the first item in the sidebar, and every screen behind it works the same
 /// whichever of these is selected. That is the product's whole positioning, so a remote host is
 /// not a variant of this type — it is the same type with a different endpoint.
 /// </para>
@@ -227,6 +245,22 @@ public sealed record DockerHost
     public string? StateDetail { get; init; }
 
     public RuntimeCapabilities Capabilities { get; init; } = RuntimeCapabilities.None;
+
+    /// <summary>
+    /// Connecting to this host starts something that is not running yet — a stopped WSL
+    /// distribution boots a virtual machine to answer.
+    /// <para>
+    /// Such a host is connected only when the user chooses it, never probed on their behalf: opening
+    /// the Hosts page must not boot every distribution on the machine to fill in a column.
+    /// </para>
+    /// </summary>
+    public bool StartsOnConnect { get; init; }
+
+    /// <summary>
+    /// The Docker Desktop engine this host is, when it is one of them. Read from the pipe's name,
+    /// which Docker Desktop gives each engine — see <see cref="DockerDesktop.ModeOf"/>.
+    /// </summary>
+    public DesktopEngineMode? DesktopMode => DockerDesktop.ModeOf(Endpoint);
 
     /// <summary>Rows sourced from this host are stale rather than wrong, so they dim.</summary>
     public bool IsStale => State is HostConnectionState.Unreachable;

@@ -25,6 +25,12 @@ body {
   height: 100%;
 }
 
+/* A native dialog's body document mounts here, and its surface is what scrolls: without a height
+   the surface grows to its content and the document scrolls instead, past the body's insets. */
+#dialog {
+  height: 100%;
+}
+
 body {
   /* The platform's own UI face. A shared webfont is the single loudest tell that the content
      area is a website embedded in a native window (DESIGN.md section 3). Nothing is downloaded. */
@@ -701,6 +707,13 @@ textarea,
   color: var(--ok-ink);
 }
 
+/* Something in progress — Docker Desktop switching engines. Neither failure nor success, so it is
+   neither tone: a switch drawn in danger pink reads as one that has already gone wrong. */
+.banner--info {
+  background: var(--neutral-tint);
+  color: var(--neutral-ink);
+}
+
 /* The shell every detail page shares: a header of facts, then a body that scrolls on its own.
    Container detail and volume detail are the same shape, and were the same stylesheet copied
    twice until the second one arrived without it. */
@@ -1154,9 +1167,10 @@ textarea,
   background: var(--scrim);
 }
 
-/* The gap between the title and the body is split across the two: half of it is inside the
-   body's scroll container, so a focus ring on the first control — drawn four pixels outside it —
-   has room rather than being clipped by the scroller's top edge. */
+/* The gap under the title is split across the two: half here, half as the body's top padding. The
+   body scrolls and so clips what it holds at its own edge, and a field at the top of it lost the
+   top of its focus ring until there was a focus ring's room inside that edge. Same distance on
+   screen as before. */
 .dialog__head {
   padding: var(--s4) var(--s5) var(--s1);
 }
@@ -1198,28 +1212,32 @@ textarea,
   gap: 6px;
 }
 
-/* One rhythm for a form's fields, wherever the form is. Dialog bodies are forms, and before this
-   each one either spaced its fields its own way or not at all. */
+/* A form is a column of fields, and nothing else spaced them: a label sat directly under the box
+   above it, so every label read as belonging to the field before. The gap between fields is wider
+   than the one inside a field, which is what groups each label with its own box. */
 .field + .field,
 .field + .toggle,
 .toggle + .field {
-  margin-top: var(--s3);
+  margin-top: var(--s4);
 }
 
-/* A checkbox and the sentence that says what it does. The sentence is the label, so clicking it
-   toggles the box. */
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.toggle input {
-  flex: 0 0 auto;
-  margin: 0;
+/* Native checkboxes and radios in the brand rather than the engine's own blue. On macOS the system
+   accent already is the brand (DESIGN.md section 9.1); WebView2 and browsers draw Chromium's. */
+:root {
   accent-color: var(--brand);
+}
+
+/* A checkbox that filters what is on screen — the log view's Wrap, the pull dialog's Official
+   images only. Shared rather than scoped, because two copies of one small control is how they
+   start to look like two controls. */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .field__label {
@@ -1238,6 +1256,12 @@ textarea,
      the surrounding prose is — a dialog body's text is muted, and a field must not inherit that. */
   color: var(--ink);
   font-size: var(--text-base);
+}
+
+/* WebView2 and Edge put an eye in every password field that shows what was typed. A token field
+   is one: docs/CREDENTIALS.md has a secret never rendered, not even on request. */
+.input::-ms-reveal {
+  display: none;
 }
 
 .input::placeholder {

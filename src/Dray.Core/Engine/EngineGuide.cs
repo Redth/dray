@@ -34,9 +34,9 @@ public enum GuideKind
 }
 
 /// <summary>
-/// One step of a guide. A command is shown for the user to run, never run by Dray: off Windows,
-/// PRODUCT.md is plain that Dray does not install or provision an engine, and a command on screen
-/// is something the user can read, copy, and decide about.
+/// One step of a guide. A command is shown for the user to read, copy and run. The installs Dray
+/// runs itself — shown first, run only when asked (PRODUCT.md) — are EngineSetup's routes; a guide
+/// covers the engines and the hosts those routes do not, and says what each one takes.
 /// </summary>
 /// <param name="Title">What this step achieves, in the user's terms.</param>
 /// <param name="Body">Why it is needed, or what to expect. Never omitted.</param>

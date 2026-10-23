@@ -1,18 +1,47 @@
+/* The Compose tab is laid out by StackCompose; this page only hands it the card's body. */
 
-/* The compose file and its .env, side by side. The YAML gets the room because it is what is being
-   read; the variables are a reference column beside it. */
-.stack__compose {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(18rem, 26rem);
-    min-height: 0;
-    height: 100%;
+/* What the files would change, above the services it is about. */
+.stack__drift {
+    margin: 0;
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    font-size: var(--text-sm);
 }
 
-/* Below this the two columns stop being side by side and the .env would be a sliver, so it goes
-   under the editor instead. */
-@media (max-width: 60rem) {
-    .stack__compose {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: minmax(20rem, 1fr) auto;
-    }
+.stack__profiles {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+}
+
+.stack__profile {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 2px var(--s2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    font-size: var(--text-sm);
+}
+
+.stack__profile:hover {
+    background: var(--surface-2);
+}
+
+/* On is a check, the pressed state and the brand edge — never the tint alone. */
+.stack__profile.is-on {
+    border-color: var(--brand);
+}
+
+.stack__profiles-note,
+.stack__inprofile {
+    font-size: var(--text-xs);
+}
+
+.stack__inprofile {
+    margin-left: var(--s2);
 }

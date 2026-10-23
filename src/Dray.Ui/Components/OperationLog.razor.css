@@ -1,0 +1,86 @@
+/* One operation's output. Selectable — this is compose's output, and a range of it is what gets
+   pasted into an issue. */
+.oplog {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-top: 1px solid var(--line);
+}
+
+.oplog__head {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s1) var(--s3);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Glyph, word and tint, as a state pill — the outcome must read in greyscale. */
+.oplog__state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 0 var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    white-space: nowrap;
+}
+
+.oplog--busy .oplog__state {
+    background: var(--neutral-tint);
+    color: var(--neutral-ink);
+}
+
+.oplog--ok .oplog__state {
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+}
+
+.oplog--danger .oplog__state {
+    background: var(--danger-tint);
+    color: var(--danger-ink);
+}
+
+.oplog--neutral .oplog__state {
+    background: var(--neutral-tint);
+    color: var(--neutral-ink);
+}
+
+.oplog__label {
+    font-size: var(--text-sm);
+    font-weight: 500;
+}
+
+.oplog__when {
+    font-size: var(--text-xs);
+}
+
+.oplog__spacer {
+    flex: 1 1 auto;
+}
+
+.oplog__out {
+    margin: 0;
+    max-height: 16rem;
+    overflow: auto;
+    padding: var(--s2) var(--s3);
+    background: var(--surface-2);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.oplog__line {
+    min-height: var(--text-sm-lh);
+}
+
+/* The command each step ran, set apart from what it printed. */
+.oplog__cmd {
+    color: var(--muted);
+    font-weight: 500;
+}

@@ -1,6 +1,7 @@
 @page "/hosts"
 @inject EngineManager Engine
 @inject IShellBridge Shell
+@inject HostSwitcher Switcher
 
 <EngineScope>
     @* Inside the scope: the subtitle counts hosts, and a value computed above the tag is never
@@ -41,7 +42,18 @@
                                         <EngineGlyph Icon="HostFacts.Icon(host)" Active="selected" />
                                         <span class="hostitem__text">
                                             <span class="hostitem__name">@host.Name</span>
-                                            <span class="hostitem__sub">@HostFacts.Summary(host)</span>
+                                            @* Why it is down, under its name rather than only in a
+                                               tooltip: for an engine Docker Desktop has switched
+                                               away from, this is the sentence that says choosing
+                                               it will switch back. *@
+                                            @if (host.State != HostConnectionState.Connected && host.StateDetail is { } detail)
+                                            {
+                                                <span class="hostitem__sub hostitem__why">@detail</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="hostitem__sub">@HostFacts.Summary(host)</span>
+                                            }
                                         </span>
                                         <HostState Host="host" />
                                     </button>
@@ -55,7 +67,25 @@
                         </button>
                     </nav>
 
-                    <div class="hosts__detail">
+                    <div class="hosts__main">
+                        @if (Engine.Transition is { } transition)
+                        {
+                            <div class="banner banner--info" role="status">
+                                <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                                <span>@transition</span>
+                            </div>
+                        }
+
+                        @if (_error is { } problem)
+                        {
+                            <div class="banner" role="alert">
+                                <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                                <span>@problem</span>
+                                <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true"
+                                        Variant="ButtonVariant.Ghost" OnClick="() => _error = null" />
+                            </div>
+                        }
+
                         @* The case discovery cannot cover: a Mac that could run Apple's engine and
                            has not got it. Gated on the machine actually being able to run it —
                            pointing someone at a download that will not start is worse than saying
@@ -81,11 +111,9 @@
 
         @* Outside the branch above, and deliberately: a machine with nothing to connect to is the
            one that most needs this, and it is the branch where Dray otherwise has nothing to say
-           beyond what it looked for. It hides itself once both engines answer. *@
-        @if (OperatingSystem.IsWindows())
-        {
-            <WindowsSetup />
-        }
+           beyond what it looked for. On every platform; it hides itself once an engine answers —
+           on Windows, once both kinds do. *@
+        <EngineSetup @ref="_setup" />
     </div>
 </EngineScope>
 
@@ -112,6 +140,9 @@
             is System.Runtime.InteropServices.Architecture.Arm64,
         macOSMajor: Environment.OSVersion.Version.Major);
 
+    EngineSetup? _setup;
+    string? _error;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -119,6 +150,10 @@
         // Checked when the page opens rather than on a timer: probing a remote host costs a
         // connection, and doing it for hosts nobody is looking at is the polling this design avoids.
         await Engine.ProbeOthersAsync();
+
+        // After the probes rather than alongside them: setup counts the engines that answered, and
+        // before the probes only the selected one has had the chance to.
+        if (_setup is not null) await _setup.RefreshAsync();
     }
 
     /// <summary>
@@ -126,9 +161,14 @@
     /// flow selects the host it adds, and the page follows the engine, so there is nothing to read
     /// back from it.
     /// </summary>
-    Task OpenAdd(string? guide = null) => Shell.ShowDialogAsync(AddHostDialog.Request(guide));
+    Task OpenAdd(string? guide = null) => AddHostDialog.ShowAsync(Shell, guide);
 
-    async Task Select(DockerHost host) => await Engine.SelectAsync(host.Id);
+    /// <summary>
+    /// Through the switcher rather than the engine: choosing one of Docker Desktop's engines may
+    /// mean switching Docker Desktop, which it says before it does. Null when it is now selected or
+    /// the user declined; otherwise why not.
+    /// </summary>
+    async Task Select(DockerHost host) => _error = await Switcher.ChooseAsync(host.Id);
 
     async Task Rediscover() => await Engine.InitializeAsync();
 
@@ -143,6 +183,7 @@
             case "refresh":
                 await Engine.InitializeAsync();
                 await Engine.ProbeOthersAsync();
+                if (_setup is not null) await _setup.RefreshAsync();
                 break;
         }
     }

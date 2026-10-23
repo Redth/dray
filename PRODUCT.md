@@ -36,18 +36,32 @@ because it answers the question faster.
 Dray is a desktop application for managing Docker: containers, images, volumes, networks, registries,
 and compose stacks — locally and on any host reachable through a Docker context.
 
-It manages the engine you already have. Dray does not ship a runtime, does not provision a VM, and
-does not compete with Docker Desktop, Colima, OrbStack, Rancher Desktop, or a bare `dockerd`. It
-connects to whichever of those is running, and to WSL2 distros on Windows, and to remote hosts over
-SSH.
+It manages the engine you have, and helps you get one when you have none. Dray does not ship a
+runtime of its own and does not compete with Docker Desktop, Colima, OrbStack, Rancher Desktop, or a
+bare `dockerd`. It connects to whichever of those is running, and to WSL2 distros on Windows, and to
+remote hosts over SSH.
 
-**One deliberate exception, on Windows only.** Windows is the one platform where a developer can be
-left with no engine and no idea which of two unrelated things to install, because Windows containers
-and Linux containers are separate engines that share nothing. There, Dray names exactly what is
-missing and offers to run the documented command for it — showing the command first, running it only
-when asked, and elevating in the open. It stops short of installing an engine: which engine to run
-is a licensing decision as much as a technical one, and a half-finished engine install is a worse
-place to be left than no engine at all. Helping someone get an engine is not the same as owning one.
+**Dray helps install what it drives, on every platform.** A developer with no engine — or with the
+wrong one for the container they need — should not have to leave the app to find out what to install
+or how. So Dray names what is missing and installs it: WSL and a distribution, an engine inside that
+distribution, the Windows features Windows containers need, Docker Desktop, and on other platforms
+their equivalents. The rules for doing so are the same everywhere:
+
+- **Shown before it runs.** Every step displays the exact command, or the whole script when one runs
+  as root, so the user can read it, copy it, run it themselves, or decide Dray is wrong.
+- **Run only when asked.** Nothing installs on launch, on a timer, or as a side effect of something
+  else. A step is a button the user presses.
+- **Elevated in the open.** A step that needs administrator raises the system's own prompt and runs
+  in its own visible window. Everything else runs inside Dray with its output on screen.
+- **The vendor's own installer.** Dray installs Docker's engine with Docker's script, Docker Desktop
+  with its own package, Ubuntu with `wsl --install`. It never repackages an engine or ships one.
+- **Licences are said, not decided.** Where routes differ in cost — Docker Desktop needs a paid
+  subscription in larger organisations, Docker Engine does not — both are offered and the difference
+  is stated beside them.
+
+**One engine at a time is the engine's rule, not Dray's.** Docker Desktop on Windows runs its Linux
+engine or its Windows engine, never both. Dray shows each as its own host and switching to the other
+switches Docker Desktop — after saying what stops.
 
 Runtime ownership is deliberately behind an interface seam (`IContainerRuntime`) so that Apple's
 `container` framework and, if it ever earns its place, machine lifecycle management can land later
@@ -61,7 +75,9 @@ Every other desktop tool in this space owns an engine and wants you on theirs �
 OrbStack and Rancher each ship a runtime and a GUI welded together, so the GUI is really the shop
 window for the runtime. Dray ships no runtime. It connects to Docker Desktop, OrbStack, Colima,
 Rancher, a bare `dockerd`, a WSL2 distro or podman's compatible socket, probes what that engine
-actually supports, and says plainly what it cannot do rather than failing at it.
+actually supports, and says plainly what it cannot do rather than failing at it. When there is no
+engine yet, it installs whichever the user picks — and says what each costs — rather than steering
+them to one.
 
 That indifference is also why remote hosts cost almost nothing: a host is a host, so an engine
 across the network is the same code path as the socket on this machine. Local is the job Dray is

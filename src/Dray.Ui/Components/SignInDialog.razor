@@ -1,11 +1,21 @@
-@* Sign in to a registry. A dialog body: the title and buttons are the platform's.
+@* Sign in to a registry: one already listed, or one named here.
 
    docs/CREDENTIALS.md §1.4: Dray takes a username and a token, hands both to the helper's `store`,
    and forgets them. The secret lives in a local for the length of one call — never rendered, never
-   logged, never held in a field that survives this dialog. Nothing about it crosses back to the
-   page: the dialog closes with a button id and nothing else. *@
+   logged, never held in a field that survives this dialog. *@
 @inherits DialogBody
 @inject RegistryReader Reader
+
+@if (Registry is null)
+{
+    <div class="field">
+        <label class="field__label" for="signin-server">
+            Registry <span class="muted">— leave empty for Docker Hub</span>
+        </label>
+        <input id="signin-server" class="input mono" @bind="_server" @bind:event="oninput"
+               placeholder="ghcr.io" autocomplete="off" spellcheck="false" disabled="@_saving" />
+    </div>
+}
 
 <div class="field">
     <label class="field__label" for="signin-user">Username</label>
@@ -24,62 +34,120 @@
 
 @if (_problem is { } problem)
 {
-    <p class="signin__problem" role="alert">@problem</p>
+    <p class="signin__problem">@problem</p>
 }
-else
+else if (Ambient is { } ambient)
+{
+    <p class="signin__problem">
+        @ambient.DisplayName signs in through <span class="mono">@("docker-credential-" + ambient.Helper)</span>,
+        which mints its own tokens. There is nothing for Dray to ask.
+    </p>
+}
+else if (Helper is { } helper)
 {
     <p class="signin__hint muted">
-        This goes straight to <span class="mono">@("docker-credential-" + Registry.Helper)</span>,
+        This goes straight to <span class="mono">@("docker-credential-" + helper)</span>,
         the same store the <span class="mono">docker</span> command uses. Dray keeps no copy.
     </p>
 }
+else
+{
+    <p class="signin__problem">@NoHelper</p>
+}
 
 @code {
-    [Parameter, EditorRequired] public RegistryEntry Registry { get; set; } = default!;
+    const string NoHelper = "There is no credential helper configured, and Dray will not write a credential in plaintext.";
 
-    /// <summary>Closes with "signin" once the helper has stored it. Carries no credential back.</summary>
-    public static DialogRequest Request(RegistryEntry registry) => new(
-        $"Sign in to {registry.DisplayName}",
-        typeof(SignInDialog),
-        new Dictionary<string, object?> { [nameof(Registry)] = registry },
-        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("signin", "Sign in")],
-        Size: DialogSize.Small);
+    /// <summary>
+    /// Open it for a listed registry, or with <paramref name="registry"/> null to name one. True
+    /// once the helper has stored the credential. Deliberately carries no credential out: the page
+    /// learns that it worked and nothing else.
+    /// </summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell, RegistryEntry? registry = null)
+    {
+        var session = new DialogSession(new DialogRequest(
+            registry is null ? "Sign in to a registry" : $"Sign in to {registry.DisplayName}",
+            typeof(SignInDialog),
+            Parameters: new Dictionary<string, object?> { [nameof(Registry)] = registry },
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("signin", "Sign in")]));
+        await shell.ShowDialogAsync(session);
 
+        return session.Result == "signin";
+    }
+
+    /// <summary>The registry to sign in to, or null for the user to name one.</summary>
+    [Parameter] public RegistryEntry? Registry { get; set; }
+
+    string _server = "";
     string _username = "";
     string _secret = "";
     string? _problem;
     bool _saving;
 
-    protected override IReadOnlyList<DialogButton> Buttons =>
-    [
-        DialogButton.Cancel(),
-        DialogButton.Confirm("signin", "Sign in") with
-        {
-            Enabled = _username.Trim().Length > 0 && _secret.Length > 0,
-            Busy = _saving,
-        },
-    ];
+    /// <summary>The registry's server as the helper is given it: the listed one's, or the typed one, normalised.</summary>
+    string Server => Registry?.Server ?? RegistryReader.NormalizeServer(_server);
+
+    /// <summary>
+    /// Where the credential goes. For a listed registry, the helper it was listed with; for a named
+    /// one, whichever the config would send <c>docker pull</c> to — read again as the name changes,
+    /// because a <c>credHelpers</c> entry can claim one registry for a different store.
+    /// </summary>
+    string? Helper => Registry is not null ? Registry.Helper : Reader.HelperFor(Server);
+
+    /// <summary>A named registry whose helper mints its own tokens, which a sign-in cannot help.</summary>
+    RegistryEntry? Ambient => Registry is null && Helper is { } helper
+        && new RegistryEntry(Server, null, CredentialStorage.Helper, helper) is { IsAmbient: true } entry
+            ? entry
+            : null;
 
     // Prefilled with the username already stored, because signing in again to refresh a token is
-    // the common case and retyping it is friction for nothing.
-    protected override void OnInitialized() => _username = Registry.Username ?? "";
+    // the common case and retyping it is friction for nothing. Once, when the dialog opens: the
+    // host re-renders the body whenever a button changes, and a cleared field must stay cleared.
+    protected override void OnInitialized() => _username = Registry?.Username ?? "";
 
-    protected override async Task<bool> OnPressedAsync(string id)
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel("Cancel"),
+        DialogButton.Confirm("signin", "Sign in") with { Enabled = !_saving && Ambient is null && _username.Length > 0 && _secret.Length > 0, Busy = _saving },
+    ];
+
+    protected override async Task<bool> OnPressedAsync(string buttonId)
     {
-        if (Registry.Helper is not { } helper)
+        if (buttonId == "signin")
         {
-            _problem = "There is no credential helper configured, and Dray will not write a credential in plaintext.";
+            await SubmitAsync();
+
+            // No helper to store into is refused before anything is asked, and sets the problem
+            // without passing the re-render in SubmitAsync's finally.
+            StateHasChanged();
+
+            // A sign-in closes the dialog itself, and only once the helper has stored it.
             return false;
+        }
+
+        return true;
+    }
+
+    async Task SubmitAsync()
+    {
+        if (Helper is not { } helper)
+        {
+            _problem = NoHelper;
+            return;
         }
 
         _saving = true;
         _problem = null;
+
+        // Submitted from the head's button, and only an event handler re-renders by itself — so
+        // the buttons learn they are busy from here.
         StateHasChanged();
 
         try
         {
-            _problem = await Reader.StoreAsync(helper, Registry.Server, _username.Trim(), _secret);
-            return _problem is null;
+            _problem = await Reader.StoreAsync(helper, Server, _username.Trim(), _secret);
+
+            if (_problem is null) Close("signin");
         }
         finally
         {
@@ -87,6 +155,7 @@ else
             // component field for the rest of the session.
             _secret = "";
             _saving = false;
+            StateHasChanged();
         }
     }
 }

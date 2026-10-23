@@ -28,11 +28,12 @@
 }
 
 @code {
-    /// <summary>Closes with "create" once the engine has made it, so the list behind can refresh.</summary>
-    public static DialogRequest Request() => new(
-        "Create a network",
-        typeof(NetworkDialog),
-        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")]);
+    /// <summary>Open it. True when a network was created, so the page knows to refresh.</summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell)
+        => await shell.ShowDialogAsync(new DialogRequest(
+            "Create a network",
+            typeof(NetworkDialog),
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")])) == "create";
 
     string _name = "";
     string _subnet = "";

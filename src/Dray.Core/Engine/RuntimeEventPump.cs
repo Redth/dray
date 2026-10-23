@@ -220,6 +220,10 @@ public sealed class RuntimeEventPump : IAsyncDisposable
     {
         RuntimeConnectionException r => r.Message,
 
+        // A relay's explanation can arrive wrapped by the HTTP layer, which turns any failure
+        // reading a response into its own exception. The sentence inside is the one worth showing.
+        _ when Inner<RuntimeConnectionException>(ex) is { } relayed => relayed.Message,
+
         // The engine is installed but not running — by far the most common case.
         //
         // AddressNotAvailable is what a missing unix socket actually produces, verified against a
@@ -255,6 +259,16 @@ public sealed class RuntimeEventPump : IAsyncDisposable
 
         _ => "Could not reach the engine.",
     };
+
+    static T? Inner<T>(Exception ex) where T : Exception
+    {
+        for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+        {
+            if (inner is T found) return found;
+        }
+
+        return null;
+    }
 
     public async ValueTask DisposeAsync()
     {

@@ -189,6 +189,12 @@
 
     [Parameter] public string Id { get; set; } = "";
 
+    /// <summary>
+    /// A tab to open on, from the link that came here — a stack's "Shell in web" lands on Terminal
+    /// rather than on the logs with the user left to find the tab.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "tab")] public string? InitialTab { get; set; }
+
     string _tab = "Logs";
     string? _actionError;
     ContainerInspect? _inspect;
@@ -199,7 +205,13 @@
         // The URL carries a short id when it came from a row, so fall back to a prefix match.
         ?? Engine.Store.Containers.FirstOrDefault(c => c.Id.StartsWith(Id, StringComparison.Ordinal));
 
-    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
+    protected override void OnInitialized()
+    {
+        Engine.Changed += OnEngineChanged;
+
+        if (InitialTab is { } tab && AllTabs.Contains(tab, StringComparer.OrdinalIgnoreCase))
+            _tab = AllTabs.First(t => string.Equals(t, tab, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// Re-read the container when the engine reports it changed.

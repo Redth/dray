@@ -17,7 +17,7 @@
     }
 }
 
-.hosts__detail {
+.hosts__main {
     display: flex;
     flex-direction: column;
     gap: var(--s4);
@@ -121,6 +121,13 @@
     line-height: var(--text-xs-lh);
 }
 
+/* Why a host is down, in place of its summary. Wrapped rather than truncated: it is the one sentence
+   on the row that says what to do, and an ellipsis would cut off the half that does. */
+.hostitem__sub.hostitem__why {
+    overflow: visible;
+    white-space: normal;
+}
+
 .hostlist__add {
     display: flex;
     align-items: center;
@@ -166,3 +173,4 @@
     color: var(--muted);
     font-size: var(--text-sm);
 }
+

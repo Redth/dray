@@ -247,6 +247,57 @@ public class EngineManagerTests
 
         Assert.Equal(HostConnectionState.Connected, manager.Hosts.Single().State);
     }
+
+    [Fact]
+    public async Task ComposeIsSupportedOnceItIsFoundAndCanReachTheHost()
+    {
+        // Measured from both halves rather than set by the runtime: a compose on this machine, and
+        // a way for it to address this host. It was hard-coded false on every engine before.
+        var (reader, factory) = Setup(("alpha", "unix:///a.sock"));
+        var compose = new ComposeCli(new RecordingProcessRunner().Returns("compose version --short", "5.4.0\n"));
+
+        await using var manager = new EngineManager(reader, factory, compose: compose);
+        await manager.InitializeAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(await WaitFor(() => manager.Selected is { Capabilities.SupportsCompose: true }));
+        Assert.True(manager.Hosts.Single().Capabilities.SupportsCompose);
+    }
+
+    [Fact]
+    public async Task NoComposeOnThisMachineMeansNoComposeAnywhere()
+    {
+        var (reader, factory) = Setup(("alpha", "unix:///a.sock"));
+        var compose = new ComposeCli(new RecordingProcessRunner());
+
+        await using var manager = new EngineManager(reader, factory, compose: compose);
+        await manager.InitializeAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(await WaitFor(() => manager.Selected is { State: HostConnectionState.Connected }));
+        Assert.True(await WaitFor(() => compose.IsProbed));
+        Assert.False(manager.Selected!.Capabilities.SupportsCompose);
+    }
+
+    [Fact]
+    public async Task ComposeRunsAgainstTheSelectedHostAndNotTheCliContext()
+    {
+        var (reader, factory) = Setup(("alpha", "unix:///a.sock"), ("beta", "unix:///b.sock"));
+        var runner = new RecordingProcessRunner().Returns("compose version --short", "5.4.0\n");
+
+        await using var manager = new EngineManager(reader, factory, compose: new ComposeCli(runner));
+        await manager.InitializeAsync(TestContext.Current.CancellationToken);
+        await manager.SelectAsync("beta", TestContext.Current.CancellationToken);
+
+        var stack = new StackSummary { Name = "web", Services = [], ConfigFiles = [], WorkingDirectory = null };
+
+        int? exit = null;
+        await foreach (var line in manager.RunComposeAsync(stack, ["up", "-d"], TestContext.Current.CancellationToken))
+        {
+            if (line.IsExit) exit = line.ExitCode;
+        }
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["--context", "beta", "compose", "-p", "web", "up", "-d"], Assert.Single(runner.Streams).Arguments);
+    }
 }
 
 sealed class FakeRuntimeFactory : IContainerRuntimeFactory
@@ -254,6 +305,9 @@ sealed class FakeRuntimeFactory : IContainerRuntimeFactory
     public Dictionary<string, IReadOnlyList<ContainerSummary>> Containers { get; } = [];
 
     public Dictionary<string, Exception> Failures { get; } = [];
+
+    /// <summary>The engine id each endpoint answers with, for the tests about two hosts being one engine.</summary>
+    public Dictionary<string, string> EngineIds { get; } = [];
 
     public List<TrackedRuntime> Created { get; } = [];
 
@@ -265,6 +319,7 @@ sealed class FakeRuntimeFactory : IContainerRuntimeFactory
         {
             Containers = Containers.GetValueOrDefault(endpoint.Raw, []),
             ConnectFailure = Failures.GetValueOrDefault(endpoint.Raw),
+            EngineId = EngineIds.GetValueOrDefault(endpoint.Raw),
         };
 
         Created.Add(runtime);
@@ -286,11 +341,13 @@ sealed class TrackedRuntime(string endpoint) : StubRuntime
 
     public Exception? ConnectFailure { get; init; }
 
+    public string? EngineId { get; init; }
+
     public override Task<RuntimeCapabilities> ConnectAsync(CancellationToken ct = default)
     {
         if (ConnectFailure is not null) throw ConnectFailure;
 
-        Capabilities = new RuntimeCapabilities { ApiVersion = "1.45", Flavor = EngineFlavor.Docker };
+        Capabilities = new RuntimeCapabilities { ApiVersion = "1.45", Flavor = EngineFlavor.Docker, EngineId = EngineId };
         return Task.FromResult(Capabilities);
     }
 

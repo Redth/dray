@@ -16,13 +16,12 @@ public sealed class WebDialogService
 
     public event Action? Changed;
 
-    public Task<string?> ShowAsync(DialogRequest request, CancellationToken ct = default)
+    public Task<string?> ShowAsync(DialogSession session, CancellationToken ct = default)
     {
         // A second dialog while one is open would orphan the first task forever. Dismissing the
         // first is the honest answer — it is no longer on screen.
         Session?.Dismiss();
 
-        var session = new DialogSession(request);
         session.Closed += _ => OnClosed(session);
 
         if (ct.CanBeCanceled) ct.Register(session.Dismiss);

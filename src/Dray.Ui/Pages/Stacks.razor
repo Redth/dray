@@ -3,6 +3,8 @@
 @inject EngineManager Engine
 @inject IShellBridge Shell
 @inject NavigationManager Nav
+@inject StackActionService Actions
+@inject StackOperations Operations
 
 <EngineScope>
     @* Declared inside EngineScope, not above it: this page's chrome reports a count that comes
@@ -21,11 +23,36 @@
             </div>
         }
 
+        @if (NeedsFolder)
+        {
+            @* Asked, not assumed. Where someone keeps compose projects is theirs to say — Dray
+               scans it for stacks and creates new ones there — so it is a question with a
+               suggestion rather than a folder that appears in their home directory unasked. *@
+            <section class="stacks__setup card" aria-labelledby="stacks-folder">
+                <Icon Name="IconRef.Folder" Size="IconSize.Md" Class="stacks__setup-icon" />
+
+                <div class="stacks__setup-text">
+                    <h3 id="stacks-folder" class="panel__title">Where do your stacks live?</h3>
+                    <p class="muted">
+                        Choose a folder for compose projects. Dray lists every stack in it — including ones
+                        you have never deployed — and keeps a stack on this list after it is brought down.
+                        Your files stay plain files; <span class="mono">docker compose</span> works on them as before.
+                    </p>
+                </div>
+
+                <div class="stacks__setup-actions">
+                    <Button Label="@($"Use {Display(DrayPaths.SuggestedStacksFolder)}")" Variant="ButtonVariant.Primary"
+                            OnClick="UseSuggestedFolderAsync" />
+                    <Button Label="Choose a folder…" Variant="ButtonVariant.Secondary" OnClick="ChooseFolderAsync" />
+                </div>
+            </section>
+        }
+
         @if (Engine.HasNoHosts)
         {
             <NoEngine />
         }
-        else if (Visible.Count == 0 && _search.Length == 0 && Engine.Selected is { Capabilities.SupportsCompose: false })
+        else if (Visible.Count == 0 && _search.Length == 0 && Engine.Selected is { Capabilities.SupportsCompose: false } && !_composeMissing)
         {
             @* Only when the list is also empty: a Docker host without the compose CLI still has
                stacks worth reading, because Dray discovers them from container labels rather than
@@ -39,7 +66,7 @@
                         Title="@(_search.Length > 0 ? "No stacks match" : "No stacks")"
                         Body="@(_search.Length > 0
                             ? "Nothing here matches the current search."
-                            : "A stack appears here as soon as one is running — including one brought up from a terminal. Dray reads the labels compose puts on containers, so nothing has to be registered first.")" />
+                            : "A stack appears here as soon as one is running — including one brought up from a terminal — and every compose project in your stacks folder is listed whether or not it has run. Add a folder from elsewhere with Add folder.")" />
         }
         else
         {
@@ -48,13 +75,14 @@
                 {
                     var open = IsOpen(stack);
                     var services = $"services-{stack.Name}";
+                    var captured = stack;
 
-                    <section class="stacks__card card" @key="stack.Name">
+                    <section class="stacks__card card @(stack.IsDown ? "is-down" : null)" @key="stack.Name">
                         <div class="panel__head stacks__head">
                             <button type="button" class="stacks__toggle" aria-expanded="@open"
                                     aria-controls="@services"
                                     aria-label="@($"{(open ? "Hide" : "Show")} the services in {stack.Name}")"
-                                    @onclick="() => Toggle(stack)">
+                                    @onclick="() => Toggle(captured)">
                                 <Icon Name="IconRef.ChevronRight" Size="IconSize.Sm" />
                             </button>
 
@@ -65,10 +93,20 @@
                             </h3>
                             <StatePill Status="stack.Status" />
 
+                            @if (HealthPill(stack) is { } health)
+                            {
+                                <StatePill Status="health" />
+                            }
+
                             <span class="muted stacks__count">
-                                @stack.Services.Count service@(stack.Services.Count == 1 ? "" : "s") ·
-                                @stack.RunningCount/@stack.ContainerCount running
+                                @stack.Services.Count service@(stack.Services.Count == 1 ? "" : "s")
+                                @if (!stack.IsDown)
+                                {
+                                    <text> · @stack.RunningCount/@stack.ContainerCount running</text>
+                                }
                             </span>
+
+                            <span class="muted mono stacks__where" title="@Where(stack).Title">@Where(stack).Text</span>
 
                             @if (_composeMissing)
                             {
@@ -81,16 +119,17 @@
                             }
                             else
                             {
-                                @* Up on the card, the rest behind a ⋯. Up is what a stack card is
-                                   for; restarting, pulling and bringing one down are deliberate.
-                                   The stack's name goes in each accessible label rather than on
-                                   screen: with a card per stack, four controls reading "Up" are
+                                @* The action the stack's state invites on the card, the rest behind
+                                   a ⋯. The stack's name is in each accessible label rather than on
+                                   screen: with a card per stack, four controls reading "Stop" are
                                    only distinguishable by which card they are in. *@
                                 <RowActions Actions="CommandsFor(stack)" Visible="1"
                                             MenuLabel="@($"More commands for {stack.Name}")"
-                                            OnAction="id => RunAsync(stack, id, LabelFor(id))" />
+                                            OnAction="id => RunAsync(captured, id)" />
                             }
                         </div>
+
+                        <OperationLog Stack="@stack.Name" />
 
                         @* The wrapper is always here so the disclosure button always has something
                            to point aria-controls at; the table itself is only built when it is
@@ -107,8 +146,8 @@
                                    Rows="stack.Services"
                                    Values="s => StackServiceGrid.Row(s)"
                                    Key="s => s.Name"
-                                   ActionsFor="_ => ServiceActions"
-                                   OnAction="a => OpenLogsByName(stack, a.Row)" />
+                                   ActionsFor="s => Actions.ServiceActionsFor(captured, s)"
+                                   OnAction="a => RunServiceAsync(captured, a.Row, a.Action)" />
                             }
                         </div>
                     </section>
@@ -116,12 +155,20 @@
             </div>
         }
 
-        @if (_output.Count > 0)
+        @if (Engine.Catalog?.Registry.StacksFolder is { } folder)
+        {
+            <p class="stacks__folder muted">
+                Stacks folder <span class="mono" title="@folder">@Display(folder)</span>
+                <Button Label="Change…" Variant="ButtonVariant.Ghost" OnClick="ChooseFolderAsync" />
+            </p>
+        }
+
+        @if (_watching is not null || _output.Count > 0)
         {
             <section class="stacks__output card">
                 <div class="panel__head">
                     <h3 class="panel__title">
-                        @(_watching is { } watched ? $"Watching {watched}" : _running ?? "Finished")
+                        @(_watching is { } watched ? $"Watching {watched}" : "Watch ended")
                     </h3>
                     <span class="stacks__spacer"></span>
 
@@ -133,7 +180,7 @@
                     else
                     {
                         <Button Label="Clear" Icon="IconRef.Close" Variant="ButtonVariant.Ghost"
-                                Disabled="@(_running is not null)" OnClick="() => _output.Clear()" />
+                                OnClick="() => _output.Clear()" />
                     }
                 </div>
 
@@ -144,19 +191,6 @@
 </EngineScope>
 
 @code {
-    /// <summary>
-    /// The compose commands worth a button. Deliberately not every subcommand: <c>up</c> and
-    /// <c>down</c> are what people do, and a wall of eight buttons makes the two that matter harder
-    /// to find.
-    /// </summary>
-    static readonly (string Id, string Label, IconRef Icon, bool Danger, string Hint)[] StackCommands =
-    [
-        ("up", "Up", IconRef.Play, false, "Up — start the stack, creating anything that is missing"),
-        ("restart", "Restart", IconRef.Restart, false, "Restart every container in the stack"),
-        ("pull", "Pull", IconRef.Pull, false, "Pull newer images for the stack"),
-        ("down", "Down", IconRef.Stop, true, "Down — stop and remove the stack's containers"),
-    ];
-
     string _search = "";
     string? _notice;
 
@@ -182,15 +216,15 @@
     bool _noticeOk;
     bool _composeMissing;
 
-    /// <summary>The command in flight, as a label. Null when nothing is running.</summary>
-    string? _running;
-
+    /// <summary>What <c>compose watch</c> has printed. Every other command's output is its operation's.</summary>
     readonly List<string> _output = [];
-    CancellationTokenSource? _cts;
 
     protected override async Task OnInitializedAsync()
     {
         Engine.Changed += OnEngineChanged;
+
+        // An operation starting or ending changes which actions are enabled on its card.
+        Operations.Changed += OnOperationChanged;
 
         // Probed once. A machine either has compose or it does not, and asking again per render
         // would shell out on every keystroke in the filter.
@@ -199,6 +233,132 @@
     }
 
     void OnEngineChanged() => InvokeAsync(StateHasChanged);
+
+    void OnOperationChanged(StackOperation operation)
+    {
+        // Lines are the log's to render; the page only cares about the start and the end.
+        if (operation.Lines.Count <= 1 || !operation.IsRunning) InvokeAsync(StateHasChanged);
+    }
+
+    bool NeedsFolder => Engine.Catalog is { Registry.StacksFolder: null };
+
+    /// <summary>A home-relative path, the way a shell would show it.</summary>
+    static string Display(string path)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return path.StartsWith(home, StringComparison.Ordinal) ? "~" + path[home.Length..] : path;
+    }
+
+    async Task UseSuggestedFolderAsync()
+    {
+        try
+        {
+            Directory.CreateDirectory(DrayPaths.SuggestedStacksFolder);
+            Engine.Catalog?.Registry.SetStacksFolder(DrayPaths.SuggestedStacksFolder);
+        }
+        catch (Exception ex)
+        {
+            Notify($"Could not create {Display(DrayPaths.SuggestedStacksFolder)}: {ex.Message}", ok: false);
+        }
+
+        await Task.CompletedTask;
+    }
+
+    async Task ChooseFolderAsync()
+    {
+        if (await Shell.PickFolderAsync("Choose the folder your stacks live in") is { } folder)
+            Engine.Catalog?.Registry.SetStacksFolder(folder);
+    }
+
+    /// <summary>
+    /// Write a new stack into the stacks folder and open it in the editor.
+    /// <para>
+    /// The stacks folder is where it goes, so it has to have been chosen first — the card at the
+    /// top of the page is how, and it is what this says rather than picking a folder silently.
+    /// </para>
+    /// </summary>
+    async Task NewStackAsync()
+    {
+        if (Engine.Catalog is not { } catalog) return;
+
+        if (catalog.Registry.StacksFolder is not { } folder)
+        {
+            Notify("Choose where stacks live first — a new stack is written into that folder.", ok: false);
+            return;
+        }
+
+        var request = new NewStackRequest { StacksFolder = folder, Existing = [.. Engine.Stacks.Select(s => s.Name)] };
+
+        var choice = await Shell.ShowDialogAsync(new DialogRequest(
+            "New stack",
+            typeof(NewStackDialog),
+            new Dictionary<string, object?> { [nameof(NewStackDialog.Request)] = request },
+            [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
+            Subtitle: $"In {Display(folder)}",
+            Size: DialogSize.Large));
+
+        if (choice != "create") return;
+
+        if (!request.IsComplete || request.Result is not { } result)
+        {
+            Notify(request.NameProblem ?? request.SourceProblem ?? "Nothing was created: the stack needs a name and a compose file.", ok: false);
+            return;
+        }
+
+        var (_, problem) = StackCreation.Create(folder, request.Name, result);
+
+        if (problem is not null)
+        {
+            Notify(problem, ok: false);
+            return;
+        }
+
+        // Now, not when the watcher next fires: the page about to open has to find it.
+        catalog.Refresh();
+        Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(request.Name)}?tab=compose");
+    }
+
+    /// <summary>
+    /// Add one existing compose project from outside the stacks folder. Its files stay where they
+    /// are, and Dray will never delete them — that is what makes it adopted rather than managed.
+    /// </summary>
+    async Task AdoptAsync()
+    {
+        if (Engine.Catalog is not { } catalog) return;
+        if (await Shell.PickFolderAsync("Add a folder that holds a compose project") is not { } folder) return;
+
+        if (StackFolder.Read(folder) is not { } definition)
+        {
+            Notify($"{Display(folder)} has no compose.yaml or docker-compose.yml, so there is no stack in it to add.", ok: false);
+            return;
+        }
+
+        if (StackCatalog.IsUnder(folder, catalog.Registry.StacksFolder))
+        {
+            Notify($"{definition.Project} is already in the stacks folder, so it is already listed.", ok: true);
+            return;
+        }
+
+        catalog.Registry.Adopt(folder);
+        Notify($"Added {definition.Project}. Its files stay in {Display(folder)}, and Dray will never delete them.", ok: true);
+    }
+
+    /// <summary>Health, as a second pill — only when there is something to say.</summary>
+    static ContainerStatus? HealthPill(StackSummary stack) => stack.Health switch
+    {
+        DockerHealth.Unhealthy => new ContainerStatus(StateTone.Danger, "▲", "Unhealthy"),
+        DockerHealth.Starting => new ContainerStatus(StateTone.Warn, "◐", "Health starting"),
+        _ => null,
+    };
+
+    /// <summary>Where a stack's files are, said briefly, and why that decides what it offers.</summary>
+    static (string Text, string Title) Where(StackSummary stack) => stack.Provenance switch
+    {
+        StackProvenance.Managed => (Display(stack.WorkingDirectory ?? ""), "In the stacks folder"),
+        StackProvenance.Adopted => (Display(stack.WorkingDirectory ?? ""), "Added from outside the stacks folder — Dray never deletes these files"),
+        StackProvenance.Remote => ($"{stack.WorkingDirectory} on the host", "Its files are on the engine's host. Compose runs there, over SSH, and the editor reads and writes them there"),
+        _ => ("files not on this machine", "Its compose files are on the machine that started it, so it can be started, stopped and brought down but not deployed from here"),
+    };
 
     IReadOnlyList<StackSummary> Visible
     {
@@ -220,18 +380,12 @@
 
     IReadOnlyList<RowAction> CommandsFor(StackSummary stack)
     {
-        var commands = StackCommands.Select(c => new RowAction(
-            c.Id,
-            $"{c.Label} {stack.Name}",
-            c.Icon,
-            c.Hint,
-            c.Danger,
-            Disabled: _running is not null || _watching is not null)).ToList();
+        var commands = Actions.ActionsFor(stack).ToList();
 
         // Watch is offered only where it would do something: compose has to be new enough to have
         // the subcommand, and the file has to say what to watch. Without both, `compose watch`
         // exits with a message, which is a worse answer than not offering it.
-        if (WatchedServices(stack) is { Count: > 0 } services)
+        if (!stack.IsDown && WatchedServices(stack) is { Count: > 0 } services)
         {
             var on = _watching == stack.Name;
 
@@ -242,7 +396,7 @@
                 on
                     ? "Stop rebuilding and syncing on file changes"
                     : $"Rebuild and sync {string.Join(", ", services)} as their files change",
-                Disabled: _running is not null && !on));
+                Disabled: (_watching is not null && !on) || Operations.IsBusy(stack.Name)));
         }
 
         return commands;
@@ -272,15 +426,16 @@
         }
     }
 
-    static string LabelFor(string id)
-        => StackCommands.FirstOrDefault(c => c.Id == id).Label ?? "Watch";
-
+    /// <summary>
+    /// Closed to begin with, and open when something is wrong: then the services are the reason the
+    /// page was opened. A stack that is merely down or never deployed is not wrong.
+    /// </summary>
     bool IsOpen(StackSummary stack)
-        => _open.TryGetValue(stack.Name, out var open) ? open : stack.Status.Tone is not StateTone.Ok;
+        => _open.TryGetValue(stack.Name, out var open) ? open : stack.Status.Tone is StateTone.Warn or StateTone.Danger;
 
     void Toggle(StackSummary stack) => _open[stack.Name] = !IsOpen(stack);
 
-    async Task RunAsync(StackSummary stack, string command, string label)
+    async Task RunAsync(StackSummary stack, string command)
     {
         if (command == "watch")
         {
@@ -288,59 +443,30 @@
             return;
         }
 
-        if (_running is not null || _watching is not null) return;
+        // The output opens with the card, so starting something always shows it working.
+        _open[stack.Name] = _open.GetValueOrDefault(stack.Name) || command is not ("forget" or "delete");
 
-        if (command == "down")
+        if (await Actions.RunAsync(stack, command) is { } notice)
+            Notify(notice, ok: !notice.Contains("busy", StringComparison.Ordinal) && !notice.StartsWith("Could not", StringComparison.Ordinal));
+    }
+
+    void RunServiceAsync(StackSummary stack, string service, string action)
+    {
+        if (stack.Services.FirstOrDefault(s => s.Name == service) is not { } found) return;
+
+        switch (action)
         {
-            var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
-                $"Bring {stack.Name} down?",
-                "Every container in the stack is stopped and removed. Named volumes are kept — "
-                + "anything written outside one is lost.",
-                "Bring down"));
+            case "logs":
+                OpenLogs(stack, found);
+                break;
 
-            if (answer != ConfirmResult.Confirm) return;
-        }
+            case "shell" when found.Replicas.FirstOrDefault(r => r.State == DockerState.Running) is { } running:
+                Nav.NavigateTo($"/containers/{running.ShortId}?tab=Terminal");
+                break;
 
-        _running = $"{label} {stack.Name}";
-        _output.Clear();
-        _cts = new CancellationTokenSource();
-
-        // `up` without -d would attach and never return; Dray is not a terminal and the containers
-        // must outlive the button that started them.
-        var arguments = command == "up" ? new[] { "up", "-d" } : [command];
-
-        try
-        {
-            await foreach (var line in Engine.RunComposeAsync(stack, arguments, _cts.Token))
-            {
-                _output.Add(line.Text);
-
-                // Bounded: a pull of a large stack produces thousands of lines and the panel only
-                // shows the tail anyway.
-                if (_output.Count > 500) _output.RemoveRange(0, _output.Count - 500);
-
-                StateHasChanged();
-            }
-
-            Notify($"{label} finished for {stack.Name}.", ok: true);
-
-            // A compose up that pulls images runs for minutes. Only lands when the window is not
-            // in front, so watching it work is not reported twice.
-            await Shell.NotifyAsync($"{label} finished", $"{stack.Name} on {Engine.Selected?.Name}.", NoticeKind.Success);
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            Notify(ex.Message, ok: false);
-            await Shell.NotifyAsync($"{label} failed", $"{stack.Name}: {ex.Message}", NoticeKind.Error);
-        }
-        finally
-        {
-            _running = null;
-            _cts?.Dispose();
-            _cts = null;
+            default:
+                if (Actions.RunService(stack, found, action) is { } notice) Notify(notice, ok: false);
+                break;
         }
     }
 
@@ -360,7 +486,7 @@
             return;
         }
 
-        if (_running is not null || _watching is not null) return;
+        if (_watching is not null || Operations.IsBusy(stack.Name)) return;
 
         _watching = stack.Name;
         _output.Clear();
@@ -372,6 +498,8 @@
         {
             await foreach (var line in Engine.RunComposeAsync(stack, ["watch"], _watchCts.Token))
             {
+                if (line.IsExit) continue;
+
                 _output.Add(line.Text);
 
                 if (_output.Count > 500) _output.RemoveRange(0, _output.Count - 500);
@@ -398,18 +526,6 @@
             _watchCts?.Dispose();
             _watchCts = null;
         }
-    }
-
-    /// <summary>
-    /// What a service row offers. Logs is the reason anyone looks at a service from this page;
-    /// everything else about it is on the stack's own page.
-    /// </summary>
-    static readonly IReadOnlyList<RowAction> ServiceActions =
-        [new("logs", "Logs", IconRef.Logs, "Read this service's output")];
-
-    void OpenLogsByName(StackSummary stack, string service)
-    {
-        if (stack.Services.FirstOrDefault(s => s.Name == service) is { } found) OpenLogs(stack, found);
     }
 
     void OpenLogs(StackSummary stack, StackService service)
@@ -443,21 +559,28 @@
                     ? null
                     : $"{stacks.Count} on {Engine.Selected.Name}",
                 Search: new ChromeSearch("Filter stacks", _search),
-                Actions: [ChromeAction.Secondary("logs", "Aggregated logs", IconRef.Logs)]);
+                Actions:
+                [
+                    ChromeAction.Primary("new", "New stack", IconRef.Plus),
+                    ChromeAction.Secondary("adopt", "Add folder", IconRef.Folder),
+                    ChromeAction.Secondary("logs", "Aggregated logs", IconRef.Logs),
+                ]);
         }
     }
 
-    void HandleAction(string id)
+    async Task HandleAction(string id)
     {
-        if (id == "logs" && Engine.Stacks.FirstOrDefault() is { } first)
+        if (id == "new") await NewStackAsync();
+        if (id == "adopt") await AdoptAsync();
+
+        if (id == "logs" && Engine.Stacks.FirstOrDefault(s => !s.IsDown) is { } first)
             Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(first.Name)}/logs");
     }
 
     public void Dispose()
     {
         Engine.Changed -= OnEngineChanged;
-        _cts?.Cancel();
-        _cts?.Dispose();
+        Operations.Changed -= OnOperationChanged;
 
         // Leaving the page stops the watch. A compose process that outlived the window it was
         // started from would keep rebuilding with nothing on screen to say so.

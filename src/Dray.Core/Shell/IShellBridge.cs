@@ -66,7 +66,15 @@ public interface IShellBridge
     /// The id of the button pressed, or null if the dialog was dismissed without one — Escape,
     /// the close box, or the sheet being cancelled by the window going away.
     /// </returns>
-    Task<string?> ShowDialogAsync(DialogRequest request, CancellationToken ct = default);
+    Task<string?> ShowDialogAsync(DialogRequest request, CancellationToken ct = default)
+        => ShowDialogAsync(new DialogSession(request), ct);
+
+    /// <summary>
+    /// Present a dialog whose session the caller holds — so it can read what the body produced
+    /// (<see cref="DialogSession.Value"/>) once it closes. The one every head implements; the
+    /// request overload is this with a session made for it.
+    /// </summary>
+    Task<string?> ShowDialogAsync(DialogSession session, CancellationToken ct = default);
 
     Task<string?> PickFileAsync(FilePickerOptions options, CancellationToken ct = default);
 

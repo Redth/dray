@@ -5,9 +5,7 @@
    engine would follow the reference regardless.
 
    The credential is fetched from the system helper at the moment of the push and never held; see
-   docs/CREDENTIALS.md. Dray does not ask for a password here, because it has nowhere to put one.
-
-   A dialog body: the title and buttons are the platform's. *@
+   docs/CREDENTIALS.md. Dray does not ask for a password here, because it has nowhere to put one. *@
 @inherits DialogBody
 @implements IAsyncDisposable
 @inject EngineManager Engine
@@ -17,7 +15,7 @@
 <div class="field">
     <label class="field__label" for="push-ref">Image</label>
     <input id="push-ref" class="input mono" placeholder="ghcr.io/owner/app:1.2"
-           @bind="_reference" @bind:event="oninput" @bind:after="RefreshSignInAsync"
+           @bind="_reference" @bind:event="oninput"
            autocomplete="off" spellcheck="false" disabled="@_pushing" />
 </div>
 
@@ -48,29 +46,38 @@ else if (!_pushing && _layers.Count == 0)
 }
 
 @code {
+    /// <summary>
+    /// Open it, pre-filled with <paramref name="reference"/>. Completes when it closes; a push
+    /// changes nothing in the image list, so there is nothing to hand back.
+    /// </summary>
+    public static async Task ShowAsync(IShellBridge shell, string? reference)
+    {
+        var session = new DialogSession(new DialogRequest(
+            "Push an image",
+            typeof(PushDialog),
+            Parameters: new Dictionary<string, object?> { [nameof(Reference)] = reference },
+            Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("push", "Push")]));
+        await shell.ShowDialogAsync(session);
+    }
+
     /// <summary>The image to push, pre-filled from the row this was opened on.</summary>
     [Parameter] public string? Reference { get; set; }
-
-    public static DialogRequest Request(string? reference = null) => new(
-        "Push an image",
-        typeof(PushDialog),
-        reference is null ? null : new Dictionary<string, object?> { [nameof(Reference)] = reference },
-        Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("push", "Push")]);
 
     protected override IReadOnlyList<DialogButton> Buttons =>
     [
         DialogButton.Cancel(_pushing ? "Cancel" : "Close"),
-        DialogButton.Confirm("push", _pushing ? "Pushing…" : "Push") with
-        {
-            Enabled = !string.IsNullOrWhiteSpace(_reference),
-            Busy = _pushing,
-        },
+        DialogButton.Confirm("push", _pushing ? "Pushing…" : "Push") with { Enabled = !_pushing && !string.IsNullOrWhiteSpace(_reference), Busy = _pushing },
     ];
 
-    protected override async Task<bool> OnPressedAsync(string id)
+    protected override Task<bool> OnPressedAsync(string buttonId)
     {
-        await StartAsync();
-        return false;
+        // Started and left running: the dialog stays open to show it. Cancel never reaches here —
+        // the session closes the dialog, and closing cancels the token the stream is linked to, so
+        // Dray stops reading it. The engine finishes what it started; saying otherwise would be a lie, and
+        // a half-pushed image is not a state Dray can create.
+        if (buttonId == "push") _ = StartAsync();
+
+        return Task.FromResult(false);
     }
 
     string _reference = "";
@@ -89,6 +96,9 @@ else if (!_pushing && _layers.Count == 0)
     string Destination => ImageTag.Parse(_reference.Trim()).Registry is { } r
         && r == ImageTag.RegistryEntryDockerHub ? "Docker Hub" : ImageTag.Parse(_reference.Trim()).Registry;
 
+    // Once, when the dialog opens. Not in OnParametersSetAsync: the host re-renders the body
+    // whenever a button changes, which would refill a field the user had cleared and ask the
+    // helper again each time.
     protected override async Task OnInitializedAsync()
     {
         if (Reference is { Length: > 0 } reference) _reference = reference;
@@ -121,6 +131,7 @@ else if (!_pushing && _layers.Count == 0)
         => string.Equals(a.TrimEnd('/'), b.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
            || a.Contains(b, StringComparison.OrdinalIgnoreCase);
 
+
     async Task StartAsync()
     {
         var reference = _reference.Trim();
@@ -132,7 +143,12 @@ else if (!_pushing && _layers.Count == 0)
         _layers.Clear();
         _order.Clear();
 
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(Session.Closing);
+        // Linked to the dialog's own closing, so Cancel, Escape or the window going away all stop
+        // Dray reading the stream — the body is not asked first when the way out is pressed.
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(Closing);
+
+        // Started from the head's button as well as from Enter, and only an event handler re-renders
+        // by itself — so the buttons learn they are busy from here.
         StateHasChanged();
 
         try
@@ -168,8 +184,6 @@ else if (!_pushing && _layers.Count == 0)
         }
         catch (OperationCanceledException)
         {
-            // Cancelling stops Dray reading the stream; the engine finishes what it started. Saying
-            // otherwise would be a lie, and a half-pushed image is not a state Dray can create.
             _done = "Push cancelled.";
         }
         catch (Exception ex)
@@ -181,6 +195,7 @@ else if (!_pushing && _layers.Count == 0)
             _pushing = false;
             _cts?.Dispose();
             _cts = null;
+            StateHasChanged();
         }
     }
 

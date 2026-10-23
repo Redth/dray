@@ -1,0 +1,141 @@
+/* The form on the left, the file it makes on the right: what is being written is never a guess. */
+.ns {
+    display: grid;
+    grid-template-columns: minmax(18rem, 1fr) minmax(0, 1.2fr);
+    gap: var(--s4);
+    min-height: min(60vh, 34rem);
+}
+
+@media (max-width: 52rem) {
+    .ns {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.ns__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    min-width: 0;
+}
+
+.ns__sources {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s1);
+}
+
+.ns__source {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    text-align: left;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.ns__source:hover {
+    background: var(--surface-2);
+}
+
+/* A border, a check and the radio's own state — never colour alone. */
+.ns__source.is-selected {
+    border-color: var(--brand);
+}
+
+.ns__title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    font-size: var(--text-sm);
+    font-weight: 500;
+}
+
+.ns__body {
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+}
+
+.ns__area {
+    height: auto;
+    padding: var(--s2);
+    resize: vertical;
+    line-height: var(--text-sm-lh);
+}
+
+.ns__containers {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 14rem;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    padding: var(--s1);
+}
+
+.ns__container {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s1) var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-sm);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.ns__container:hover {
+    background: var(--surface-2);
+}
+
+.ns__cname {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ns__image {
+    font-size: var(--text-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ns__notes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+}
+
+.ns__notes .note {
+    margin: 0;
+}
+
+.ns__hint {
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+}
+
+.ns__problem {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--danger-ink);
+}
+
+.ns__preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    min-width: 0;
+    min-height: 0;
+}
+
+.ns__preview ::deep .preview {
+    flex: 1 1 auto;
+}

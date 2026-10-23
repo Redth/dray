@@ -123,7 +123,6 @@
             </div>
         }
     </div>
-
 </EngineScope>
 
 @code {
@@ -428,7 +427,7 @@
         switch (id)
         {
             case "rename":
-                return Shell.ShowDialogAsync(RenameDialog.Request(c));
+                return RenameDialog.ShowAsync(Shell, c);
 
             case "copy-id":
                 return CopyIdAsync(c);
@@ -512,12 +511,12 @@
     {
         switch (id)
         {
-            // No success banner: the new container appearing in the list *is* the confirmation, and
-            // it arrives the same way every other change does — through the event stream, or the
-            // poll. A banner saying "created" before the row was there would be Dray claiming
-            // something the engine had not confirmed.
             case "run":
-                await Shell.ShowDialogAsync(RunDialog.Request());
+                // No success banner: the new container appearing in the list *is* the
+                // confirmation, and it arrives the same way every other change does — through the
+                // event stream, or the poll. A banner saying "created" while the row was not yet
+                // there would be Dray claiming something the engine had not confirmed.
+                await RunDialog.ShowAsync(Shell);
                 break;
 
             case "refresh" when Engine.Selected is { } host:

@@ -60,6 +60,15 @@ public sealed class DialogSession
     /// <summary>The button that closed the dialog, or null for a dismissal.</summary>
     public Task<string?> Completion => _done.Task;
 
+    /// <summary>The button the dialog closed with, or null while it is open or after a dismissal.</summary>
+    public string? Result { get; private set; }
+
+    /// <summary>
+    /// What the body produced, for the caller to read once the dialog has closed — the name of the
+    /// account it created. Never a secret: it outlives the body.
+    /// </summary>
+    public object? Value { get; private set; }
+
     public bool IsClosed => _done.Task.IsCompleted;
 
     /// <summary>
@@ -150,9 +159,17 @@ public sealed class DialogSession
     /// <summary>Escape, the close box, or the window going away. Always closes.</summary>
     public void Dismiss() => Close(null);
 
-    /// <summary>Close with this button's id — from the body, once it has done what the press asked.</summary>
-    public void Close(string? id)
+    /// <summary>
+    /// Close with this button's id — from the body, once it has done what the press asked — and
+    /// optionally with what it produced.
+    /// </summary>
+    public void Close(string? id, object? value = null)
     {
+        if (IsClosed) return;
+
+        Result = id;
+        Value = value;
+
         if (!_done.TrySetResult(id)) return;
 
         _closing.Cancel();
