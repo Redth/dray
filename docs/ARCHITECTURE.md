@@ -285,16 +285,38 @@ The inactive engine's row says why it is down in words that say what choosing it
 showing the 500. And a remembered selection that Docker Desktop has since switched away from — from
 its own tray menu — opens on the engine that is running instead, rather than on an empty app.
 
-**The picker is the first item in the sidebar** (DESIGN.md §5). On Windows it is a navigation item
-showing the selected engine and what kind of container it runs, and invoking it opens a menu of every
-engine. It is an item that opens a menu rather than a combo box because it survives the pane
-collapsing to icons. The choice is remembered (`IHostSelectionStore`), so the app opens where it was
-left rather than wherever the CLI's current context points.
+**The picker is the window's top-left control** (DESIGN.md §5), in the same corner on every
+head: on macOS a menu toolbar item in the toolbar's sidebar section, beside the window buttons; on
+Windows a `DropDownButton` in the title bar after the app's icon; on the web the sidebar's top
+corner, after the mark. It used to be the first item in the sidebar, where it scrolled with the
+navigation, collapsed with it, and sat in a list of places to go when it is not one. In the chrome
+it is on screen whatever the sidebar is doing. The choice is remembered (`IHostSelectionStore`), so
+the app opens where it was left rather than wherever the CLI's current context points.
 
-Every head has one, all saying the same sentence per engine (`HostSwitcher.Describe`). On Windows
-it is a `NavigationViewItem` with a `MenuFlyout`. On the web it is `HostPicker` on the shared
-`OverflowMenu`. On macOS it is the first `MacOSSidebarItem`, popping up an `NSMenu`; that version
-has not been built yet, because the macOS head only compiles on a Mac.
+**One model, three drawings.** `EnginePicker` builds a `ChromePicker` — title, tooltip, glyph,
+and one item per engine in the sentence `HostSwitcher.Describe` gives it — and each head draws that
+and builds nothing itself. Before, each head assembled the engine menu on its own from
+`EngineManager`, three copies of one list that had to stay identical. It is not part of
+`PageChrome`, because no page declares it: a page that could omit it could hide which engine the
+user is looking at. The cluster picker joins it in Phase 6.5 (docs/KUBERNETES.md §1).
+
+**The title is the name alone; the state is the glyph.** The corner is narrow on every head, and
+on macOS a toolbar item that does not fit is not shortened — AppKit moves it into the overflow menu
+at the far end of the toolbar. Measured: "Apple container · unreachable" did exactly that at the
+sidebar's default width. So the state is the glyph (a warning for unreachable or degraded, the
+refresh arrows while connecting or switching) and the words are in the tooltip and the menu, and
+the macOS head fits the title to the room above the sidebar as it is resized (`MacPickerFit`) —
+an ellipsis, then no words at all, leaving the glyph and the chevron. Every page already leads with
+the engine's state in words when it is anything but connected.
+
+**Hosts can be given a name of Dray's own** (`IHostNameStore`, `host-names.json` in the
+configuration folder). `DockerHost.Label` is that name where there is one and the host's own name
+otherwise, and everything that names an engine on screen uses it. The Docker context is never
+renamed — its name is what `docker --context` takes and what every other tool shows — so the Hosts
+page shows it under the display name, and the terminal panel keeps using it. The name is applied
+by `EngineManager` as hosts are handed out, not wherever a host is discovered or replaced: there
+are a dozen of those, and a name missed at one would vanish the next time that host's state
+changed.
 
 **What the user still needs is for their terminal to agree with the screen**, and that is a Docker
 context rather than a mode. `DockerCliContext` creates one if there is not one already, and points

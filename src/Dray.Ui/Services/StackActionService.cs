@@ -304,7 +304,7 @@ public sealed class StackActionService(
             typeof(DeployDialog),
             new Dictionary<string, object?> { [nameof(DeployDialog.Request)] = request },
             [DialogButton.Cancel(), DialogButton.Confirm("deploy", "Deploy")],
-            Subtitle: engine.Selected is { } host ? $"To {host.Name}" : null));
+            Subtitle: engine.Selected is { } host ? $"To {host.Label}" : null));
 
         if (choice != "deploy") return null;
 
@@ -405,7 +405,7 @@ public sealed class StackActionService(
         IReadOnlyList<IReadOnlyList<string>> steps,
         Func<StackOperation, Task>? then = null)
     {
-        var host = engine.Selected?.Name;
+        var host = engine.Selected?.Label;
 
         var operation = operations.Start(stack, label, steps, async finished =>
         {

@@ -303,15 +303,24 @@ Two rules make this hold up:
 
 ```
 ┌──────────────┬──────────────────────────────────────────────┐
-│              │  native toolbar — title, actions, search      │  ← platform chrome
-│   native     ├──────────────────────────────────────────────┤
-│   sidebar    │                                              │
-│              │           Blazor content                     │  ← one codebase
-│  host picker │           (list  ·  split  ·  full)          │
+│ ● ● ● host ▾ │  native toolbar — back, filters, search, acts │  ← platform chrome
+├──────────────┼──────────────────────────────────────────────┤
+│   native     │                                              │
+│   sidebar    │           Blazor content                     │  ← one codebase
+│              │           (list  ·  split  ·  full)          │
 │  nav tree    │                                              │
 │              │                                              │
 └──────────────┴──────────────────────────────────────────────┘
 ```
+
+**The engine picker is the top-left control on every head** — the toolbar above the sidebar on
+macOS, the title bar after the icon on Windows, the sidebar's top corner on the web. It says which
+engine every page below is about, so it is in the corner the eye reaches first and is never inside
+something that scrolls or collapses. Glyph, name, chevron. The name is the user's name for the
+host where they gave one (`DockerHost.Label`); the state is the glyph — host, refresh arrows while
+connecting, warning when unreachable — never a tint, with the words in the tooltip and the menu.
+Where the corner is too narrow for the name it shortens, then drops to the glyph and chevron; it
+never moves into an overflow menu. Phase 6.5's cluster picker sits beside it.
 
 Three content archetypes, and only three:
 

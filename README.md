@@ -19,7 +19,7 @@ are separate engines sharing no images, containers, volumes or networks — and,
 named pipe — so Dray asks the engine which it is rather than guessing from the endpoint.
 
 Every competitor is a front end for *this machine's* daemon, with remote hosts bolted on or absent.
-Dray's host switcher is the first control in the sidebar, and every screen behind it works the same
+Dray's host switcher is the window's top-left control, and every screen behind it works the same
 whether the engine is a Unix socket, a WSL2 distro, or an SSH tunnel to a box in a closet.
 
 - **macOS** — AppKit shell, native sidebar and toolbar

@@ -47,7 +47,7 @@
         else if (Engine.Selected is { State: HostConnectionState.Unreachable } host && Engine.Store.Count == 0)
         {
             <EmptyState Icon="IconRef.Warning"
-                        Title="@($"Cannot reach {host.Name}")"
+                        Title="@($"Cannot reach {host.Label}")"
                         Body="@(host.StateDetail ?? "The engine did not respond.")">
                 <Actions>
                     <Button Label="Choose another host" Icon="IconRef.Host" OnClick="@(() => Nav("/hosts"))" />
@@ -452,7 +452,7 @@
 
             return new PageChrome(
                 "Containers",
-                Subtitle: host is null ? null : $"{running} running · {host.Name}",
+                Subtitle: host is null ? null : $"{running} running · {host.Label}",
                 Search: new ChromeSearch("Filter containers", _search),
                 Actions:
                 [

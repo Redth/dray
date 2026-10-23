@@ -137,9 +137,6 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
             nav,
             shell,
             theme,
-            services.GetRequiredService<EngineManager>(),
-            services.GetRequiredService<HostSwitcher>(),
-            services.GetRequiredService<IShellBridge>(),
             debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
         _toolbar = new WinToolbarProjector(services.GetRequiredService<WinTitleBarToolbar>(), titleBar, _webView, shell, theme);
 

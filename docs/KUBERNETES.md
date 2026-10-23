@@ -21,8 +21,9 @@ These are settled. Changing one is a product decision, not an implementation det
 1. **Kubernetes is in v1.** It lands as Phase 6.5 in `docs/ROADMAP.md`, before Ship.
 2. **Two pickers.** A Docker engine and a cluster are independent: someone can be looking at
    containers on `desktop-linux` while their pods run in a kind cluster, or in no cluster at all.
-   The engine picker and the cluster picker are separate controls. They are *paired* only when the
-   pairing is measured (§4), and pairing sets a default — it never couples the two.
+   The engine picker and the cluster picker are separate controls, side by side in the window's
+   top-left corner (DESIGN.md §5), each a `ChromePicker` drawn by every head. They are *paired*
+   only when the pairing is measured (§4), and pairing sets a default — it never couples the two.
 3. **Local clusters first.** v1 connects only to clusters measured as local (§3). Remote contexts
    are listed with a plain reason and are not connectable. Remote support is Phase 9 material.
 4. **Dray can create a kind cluster** on the engine it is connected to (§7). A kind cluster is a

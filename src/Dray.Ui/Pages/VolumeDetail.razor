@@ -148,7 +148,7 @@
 
     PageChrome Chrome => new(
         Volume?.DisplayName ?? Uri.UnescapeDataString(Name),
-        Subtitle: Engine.Selected?.Name,
+        Subtitle: Engine.Selected?.Label,
         Back: new ChromeBack("back", "All volumes"));
 
     void HandleAction(string id)

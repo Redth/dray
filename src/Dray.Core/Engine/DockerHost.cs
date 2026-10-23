@@ -217,7 +217,7 @@ public enum EngineFlavor
 /// <summary>
 /// One engine Dray can talk to, local or remote, and everything known about it.
 /// <para>
-/// The host picker is the first item in the sidebar, and every screen behind it works the same
+/// The host picker is the window's top-left control, and every screen behind it works the same
 /// whichever of these is selected. That is the product's whole positioning, so a remote host is
 /// not a variant of this type — it is the same type with a different endpoint.
 /// </para>
@@ -227,7 +227,25 @@ public sealed record DockerHost
     /// <summary>Stable identity. The context name where there is one.</summary>
     public required string Id { get; init; }
 
+    /// <summary>
+    /// What the host calls itself: the context name, the distro, <c>DOCKER_HOST</c>. Never changed by
+    /// Dray, because it is also what the Docker CLI calls it.
+    /// </summary>
     public required string Name { get; init; }
+
+    /// <summary>
+    /// The name the user gave this host in Dray, or null when they have not. Kept by
+    /// <see cref="IHostNameStore"/> and applied by <see cref="EngineManager"/> as hosts are handed
+    /// out, so nothing that discovers or probes a host has to know about it.
+    /// </summary>
+    public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// What to call the host on screen: the user's name for it where they gave one, its own name
+    /// otherwise. Every picker, menu and heading uses this; <see cref="Name"/> stays visible where
+    /// the CLI's name is the useful one — the Hosts page, and the command to run in a terminal.
+    /// </summary>
+    public string Label => DisplayName ?? Name;
 
     public required DockerEndpoint Endpoint { get; init; }
 

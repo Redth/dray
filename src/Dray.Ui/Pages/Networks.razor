@@ -219,9 +219,9 @@
 
     PageChrome Chrome => new(
         "Networks",
-        Subtitle: !HasNetworks ? Engine.Selected?.Name
-            : _networks is null ? Engine.Selected?.Name
-            : $"{_networks.Count} on {Engine.Selected?.Name}",
+        Subtitle: !HasNetworks ? Engine.Selected?.Label
+            : _networks is null ? Engine.Selected?.Label
+            : $"{_networks.Count} on {Engine.Selected?.Label}",
         Search: HasNetworks ? new ChromeSearch("Filter networks", _search) : null,
         Actions: HasNetworks
             ?

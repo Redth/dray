@@ -737,7 +737,7 @@
                 "Stacks",
                 Subtitle: Engine.Selected is null
                     ? null
-                    : $"{stacks.Count} on {Engine.Selected.Name}",
+                    : $"{stacks.Count} on {Engine.Selected.Label}",
                 Search: new ChromeSearch("Filter stacks", _search),
                 // Add folder is a folder picker and nothing else, so it is offered only where the
                 // host has one. In a browser it was a button that did nothing.

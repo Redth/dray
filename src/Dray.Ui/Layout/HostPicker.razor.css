@@ -1,16 +1,18 @@
-/* Shaped like a nav item, because it sits above them and does the same kind of thing — chooses what
-   the rest of the window is about — but with two lines, because which engine is not enough without
-   what kind of container it runs. */
+/* One line, like a toolbar's pop-up: the engine and a chevron that says it opens. What kind of
+   container the engine runs is in the tooltip and the menu — the corner is too narrow for a second
+   line, and the native heads' toolbars have none. */
 .picker {
     display: flex;
     align-items: center;
     gap: var(--s2);
-    width: 100%;
-    padding: var(--s2);
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 6px var(--s2);
     border: 0;
     border-radius: var(--r-sm);
     background: transparent;
     color: var(--ink);
+    font-weight: 600;
     text-align: left;
     cursor: pointer;
     transition: background var(--motion-fast) var(--motion-ease);
@@ -25,25 +27,22 @@
     outline-offset: -2px;
 }
 
-.picker__text {
-    display: flex;
-    flex-direction: column;
+.picker__name {
+    flex: 1 1 auto;
     min-width: 0;
-}
-
-.picker__name,
-.picker__detail {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.picker__detail {
-    font-size: var(--text-xs);
+::deep .picker__chevron {
+    flex: none;
     color: var(--muted);
 }
 
+/* Below the corner's row rather than squeezed into it. */
 .picker__problem {
+    flex-basis: 100%;
     margin: var(--s1) var(--s2) 0;
     font-size: var(--text-xs);
     color: var(--danger-ink);

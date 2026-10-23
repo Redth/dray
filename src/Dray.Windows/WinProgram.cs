@@ -42,6 +42,8 @@ public static class WinProgram
         // The request a native dialog is presenting, read by the body in its own WebView.
         builder.Services.AddSingleton<NativeDialogState>();
         builder.Services.AddSingleton<IPlatformTheme, WinTheme>();
+        builder.Services.AddSingleton<WinEnginePicker>();
+        builder.Services.AddSingleton<IChromePickerSource>(sp => sp.GetRequiredService<EnginePicker>());
         builder.Services.AddSingleton<WinTitleBar>();
         builder.Services.AddSingleton<WinTitleBarToolbar>();
 
@@ -51,6 +53,7 @@ public static class WinProgram
         builder.Services.AddSingleton<DockerContextReader>();
         builder.Services.AddSingleton<DockerDesktop>();
         builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
+        builder.Services.AddSingleton<IHostNameStore, FileHostNameStore>();
         builder.Services.AddSingleton<WindowsSetupReader>();
         builder.Services.AddSingleton<MacSetupReader>();
         builder.Services.AddSingleton<LinuxSetupReader>();
@@ -71,6 +74,7 @@ public static class WinProgram
         // Singleton like the bridge it confirms through: the native sidebar's picker uses it, and
         // the sidebar outlives any page.
         builder.Services.AddSingleton<HostSwitcher>();
+        builder.Services.AddSingleton<EnginePicker>();
         // Scoped: it holds one live stream per watched container and must go away with the view
         // that asked for them.
         builder.Services.AddScoped<StatsHub>();

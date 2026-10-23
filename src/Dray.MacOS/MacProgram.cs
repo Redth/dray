@@ -65,6 +65,7 @@ public static class MacProgram
         builder.Services.AddSingleton<DockerCliContext>();
         builder.Services.AddSingleton<DockerDesktop>();
         builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
+        builder.Services.AddSingleton<IHostNameStore, FileHostNameStore>();
         builder.Services.AddSingleton<IContainerRuntimeFactory>(
             new CompositeRuntimeFactory(new AppleRuntimeFactory(), new DockerRuntimeFactory()));
         // Stacks beyond what is running: remembered ones and the stacks folder. Paths only — see
@@ -75,6 +76,7 @@ public static class MacProgram
         builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
         builder.Services.AddSingleton<StackOperations>();
         builder.Services.AddSingleton<HostSwitcher>();
+        builder.Services.AddSingleton<EnginePicker>();
         // Scoped: it holds one live stream per watched container and must go away with the view
         // that asked for them.
         builder.Services.AddScoped<StatsHub>();

@@ -3,14 +3,14 @@
 @inject ShellCapabilities Caps
 
 <nav class="sidebar chrome" aria-label="Main">
-    <div class="sidebar__brand">
-        <BrandMark />
-        <span>Dray</span>
-    </div>
-
-    @* First in the sidebar, above the navigation: which engine is selected decides what every page
-       below it shows (DESIGN.md section 5). *@
-    <div class="sidebar__picker">
+    @* The window's top-left corner: the mark, then which engine every page below is about. The
+       native heads put the picker in the same place — the macOS toolbar above the sidebar, the
+       Windows title bar after its icon — so it is where the eye already goes on every head
+       (DESIGN.md section 5). The mark replaces the word "Dray" here, as it does in the Windows
+       title bar: the tab already says which app this is, and the corner is worth more as the
+       control. *@
+    <div class="sidebar__corner">
+        <span class="sidebar__mark" aria-hidden="true"><BrandMark /></span>
         <HostPicker />
     </div>
 

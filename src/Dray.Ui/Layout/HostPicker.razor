@@ -1,20 +1,18 @@
-@* The host picker for the web head, which has no native sidebar to put one in.
+@* The engine picker for the web head, in the sidebar's top corner — where the macOS toolbar puts
+   its leading menu and the Windows title bar its drop-down, so the control is in the same place on
+   every head.
 
-   The same control as the Windows sidebar's: the selected engine and what it is, and a menu of every
-   engine. The menu is the shared OverflowMenu — a menu stays in the page on every head (AGENTS.md),
-   and one menu component means one look for every menu. Choosing goes through HostSwitcher, so
-   switching Docker Desktop asks first here exactly as it does natively. *@
+   It draws EnginePicker's model and builds nothing itself: the same title, tooltip and items the
+   native heads show. The menu is the shared OverflowMenu — a menu stays in the page on every head
+   (AGENTS.md), and one menu component means one look for every menu. *@
 @implements IDisposable
-@inject EngineManager Engine
-@inject HostSwitcher Switcher
-@inject NavigationManager Nav
+@inject EnginePicker Picker
 
-<button type="button" class="picker" title="@Tooltip" aria-label="@($"Engine: {Tooltip}")" @onclick="OpenAsync">
-    <Icon Name="IconRef.Host" Size="IconSize.Md" />
-    <span class="picker__text">
-        <span class="picker__name">@(Engine.Selected?.Name ?? "No engine")</span>
-        <span class="picker__detail">@Detail</span>
-    </span>
+<button type="button" class="picker" title="@Model.Tooltip" aria-label="@($"Engine: {Model.Tooltip}")"
+        aria-haspopup="menu" @onclick="OpenAsync">
+    <Icon Name="Model.Icon" Size="IconSize.Md" />
+    <span class="picker__name">@Model.Title</span>
+    <Icon Name="IconRef.ChevronDown" Size="IconSize.Sm" Class="picker__chevron" />
 </button>
 
 <OverflowMenu @ref="_menu" Trigger="false" Label="Engines" Actions="Actions" OnAction="ChooseAsync" />
@@ -25,33 +23,27 @@
 }
 
 @code {
-    const string ManageId = "manage";
-
     OverflowMenu? _menu;
     string? _problem;
 
-    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
+    ChromePicker Model => Picker.Current;
 
-    void OnEngineChanged() => _ = InvokeAsync(StateHasChanged);
+    protected override void OnInitialized() => Picker.Changed += OnPickerChanged;
 
-    string Detail => Engine.Transition
-        ?? (Engine.Selected is { } selected ? Switcher.Describe(selected) : "Choose or set one up");
-
-    string Tooltip => Engine.Selected is { } selected ? $"{selected.Name} — {Detail}" : Detail;
+    void OnPickerChanged(ChromePicker picker) => _ = InvokeAsync(StateHasChanged);
 
     /// <summary>
-    /// One item per engine, the selected one marked with a check rather than a colour, then the way
-    /// to the Hosts page. Disabled while Docker Desktop is switching, so a second switch cannot be
-    /// started on top of the first.
+    /// The model's items as menu rows, the chosen one marked with a check rather than a colour. The
+    /// separator before "Hosts and setup…" is not drawn — OverflowMenu has none, and its rows read
+    /// as one list either way — so the item keeps its own icon to set it apart.
     /// </summary>
     IReadOnlyList<RowAction> Actions =>
     [
-        .. Engine.Hosts.Select(h => new RowAction(
-            h.Id,
-            $"{h.Name} · {Switcher.Describe(h)}",
-            Engine.Selected?.Id == h.Id ? IconRef.Check : IconRef.Host,
-            Disabled: Engine.Transition is not null)),
-        new RowAction(ManageId, "Hosts and setup…", IconRef.Host),
+        .. Model.Items.Select(i => new RowAction(
+            i.Id,
+            i.Label,
+            i.IsChecked ? IconRef.Check : IconRef.Host,
+            Disabled: !i.IsEnabled)),
     ];
 
     async Task OpenAsync(MouseEventArgs e)
@@ -60,16 +52,7 @@
         if (_menu is not null) await _menu.OpenAtAsync(e.ClientX, e.ClientY);
     }
 
-    async Task ChooseAsync(string id)
-    {
-        if (id == ManageId)
-        {
-            Nav.NavigateTo("/hosts");
-            return;
-        }
+    async Task ChooseAsync(string id) => _problem = await Picker.ChooseAsync(id);
 
-        _problem = await Switcher.ChooseAsync(id);
-    }
-
-    public void Dispose() => Engine.Changed -= OnEngineChanged;
+    public void Dispose() => Picker.Changed -= OnPickerChanged;
 }

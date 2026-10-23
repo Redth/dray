@@ -1296,7 +1296,7 @@
 
                 // Only lands if the window is not in front — see WebShellBridge.NotifyAsync. A pull
                 // is the archetypal "started it and went to do something else" operation.
-                await Shell.NotifyAsync("Pull finished", $"{reference} is on {Engine.Selected?.Name}.", NoticeKind.Success);
+                await Shell.NotifyAsync("Pull finished", $"{reference} is on {Engine.Selected?.Label}.", NoticeKind.Success);
 
                 await LoadLocalAsync();
             }

@@ -1,0 +1,6 @@
+.hostname__hint {
+    margin-top: var(--s2);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+    max-width: 48ch;
+}

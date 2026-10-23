@@ -148,7 +148,11 @@
 
     async Task LoadUsageAsync()
     {
-        var host = Engine.Selected?.Id ?? "";
+        // Keyed on the engine once it is connected, not on the selection. The selection changes the
+        // moment a switch begins, before the engine answers — so asking then got "unknown" from the
+        // engine being left, and nothing asked again once the new one was up. The disk panel went on
+        // describing the previous engine until something else re-rendered the page.
+        var host = Engine.Selected is { State: HostConnectionState.Connected } connected ? connected.Id : "";
         if (host == _usageFor) return;
 
         _usageFor = host;
@@ -191,7 +195,7 @@
         return $"{Math.Max(1.5, bytes * 100.0 / largest):0.#}%";
     }
 
-    PageChrome Chrome => new("Dashboard", Subtitle: Engine.Selected?.Name);
+    PageChrome Chrome => new("Dashboard", Subtitle: Engine.Selected?.Label);
 
     async Task Rediscover() => await Engine.InitializeAsync();
 
