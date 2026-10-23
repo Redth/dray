@@ -235,6 +235,7 @@ public static class DockerImages
     public static async IAsyncEnumerable<PullProgress> PullAsync(
         DockerClient client,
         string reference,
+        RegistryCredential? credential = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var channel = Channel.CreateUnbounded<PullProgress>(new UnboundedChannelOptions
@@ -244,18 +245,38 @@ public static class DockerImages
         });
 
         var progress = new Progress<JSONMessage>(m => channel.Writer.TryWrite(Map(m)));
-        var image = ImageTag.Parse(reference);
+        var parameters = PullParameters(reference);
+
+        // Built here and not held: the secret lives in this local for the length of the call and
+        // is never returned, logged or rendered (docs/CREDENTIALS.md).
+        var auth = credential is null
+            ? null
+            : new AuthConfig
+            {
+                ServerAddress = credential.Server,
+                Username = credential.Username,
+                Password = credential.Secret,
+            };
 
         var monitor = Task.Run(async () =>
         {
             try
             {
                 await client.Images.CreateImageAsync(
-                    new ImagesCreateParameters { FromImage = image.Repository, Tag = image.Tag },
-                    authConfig: null,
+                    parameters,
+                    auth,
                     progress,
                     ct).ConfigureAwait(false);
 
+                channel.Writer.TryComplete();
+            }
+            catch (DockerApiException ex) when (!ct.IsCancellationRequested)
+            {
+                // Refused before the stream began. Docker does this for a Docker Hub repository it
+                // cannot see — missing or private, which the registry will not distinguish — and
+                // reports everything else inside the stream. Passed on in the same shape, so the
+                // caller has one place to read a failure and can retry this one with a credential.
+                channel.Writer.TryWrite(new PullProgress(null, "error", Error: EngineMessage(ex)));
                 channel.Writer.TryComplete();
             }
             catch (Exception ex)
@@ -273,6 +294,45 @@ public static class DockerImages
         {
             await monitor.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
+    }
+
+    /// <summary>The engine's sentence from an error body — <c>{"message": …}</c> — rather than the client's wrapper around it.</summary>
+    internal static string EngineMessage(DockerApiException ex)
+    {
+        var body = ex.ResponseBody ?? string.Empty;
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("message", out var message) && message.GetString() is { Length: > 0 } text)
+                return text.Trim();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+
+        return string.IsNullOrWhiteSpace(body) ? $"The engine refused the pull ({(int)ex.StatusCode})." : body.Trim();
+    }
+
+    /// <summary>
+    /// What <c>/images/create</c> is asked for.
+    /// <para>
+    /// A digest goes in <c>tag</c>, which the engine reads as a digest when it parses as one. Split on
+    /// the last colon instead, <c>nginx@sha256:…</c> became a repository called <c>nginx@sha256</c>
+    /// and a tag that was the hash. A tag is never left empty: an empty tag on a bare name asks the
+    /// engine for every tag the repository has.
+    /// </para>
+    /// </summary>
+    internal static ImagesCreateParameters PullParameters(string reference)
+    {
+        var at = reference.IndexOf('@', StringComparison.Ordinal);
+        if (at > 0)
+        {
+            return new ImagesCreateParameters { FromImage = reference[..at], Tag = reference[(at + 1)..] };
+        }
+
+        var image = ImageTag.Parse(reference);
+        return new ImagesCreateParameters { FromImage = image.Repository, Tag = image.Tag };
     }
 
     /// <summary>

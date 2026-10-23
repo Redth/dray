@@ -49,6 +49,8 @@ builder.Services.AddScoped<StatsHub>();
 builder.Services.AddScoped<PruneService>();
 builder.Services.AddScoped<StackActionService>();
 builder.Services.AddSingleton<RegistryReader>();
+// The registry's own API, for what the engine cannot answer: tags, and what each was built for.
+builder.Services.AddSingleton<RegistryBrowser>();
 
 // No native chrome here, so confirmations are rendered by ConfirmHost.
 builder.Services.AddScoped<WebConfirmService>();

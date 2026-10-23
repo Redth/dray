@@ -491,7 +491,7 @@ condition to explain, not an exception to propagate.
 
 ---
 
-### 2.7 Two clients, on purpose
+### 2.7 Two clients, on purpose — and a third for registries
 
 `Dray.Docker` talks to the engine through a typed client (`Docker.DotNet.Enhanced`) for everything
 the client models, and through a small raw HTTP client (`DockerRawApi`) for two things it does not:
@@ -510,6 +510,28 @@ implementation of the engine API and must not become one.
 podman's own `{"ImageUsage": {"Items": [...]}}`. An unversioned request therefore does not fail —
 it deserialises cleanly into a valid-looking object full of zeroes. This cost an afternoon; the
 version prefix is applied centrally so it cannot be forgotten per-call.
+
+**A third client, for the one question the engine cannot answer.** The Engine API has no
+endpoint that lists a repository's tags, so the pull dialog's tag list comes from the registry
+itself, through `RegistryBrowser` in `Dray.Core`. It is held to a narrow brief:
+
+- **Only what the engine cannot do.** Repository search stays with the engine
+  (`/images/search`, which also searches Quay when the term carries its host), and every pull goes
+  through the engine. The browser lists tags, reads one tag's manifest for its platforms and
+  download size, and reads a catalog for a registry that publishes one and has no search —
+  Microsoft's, which lists all of its several thousand repositories.
+- **GET, and nothing written.**
+- **Measured, not declared.** Which registries can be searched or browsed is found out by asking:
+  GHCR answers the engine's search with a 404 and serves no catalog, MCR answers it with an HTML
+  page and serves a full one. `ImageFinder` remembers each answer for the life of the dialog.
+- **Docker Hub through its own API** (`hub.docker.com/v2/namespaces/…/tags`), because it orders tags
+  by when they moved, filters on the server, and says which platforms each tag holds. Everything
+  else through the standard registry API, which lists names in lexical order; `TagOrder` puts
+  them in version order instead, and the listing says when it stopped reading at ten thousand.
+- **A second network path is a second way to fail**, which is the cost `SearchImagesAsync`'s comment
+  warns about. A registry this machine cannot reach is reported as exactly that — "from this
+  machine" — and, when the engine is remote, with the note that the engine may reach it anyway.
+- **Credentials as docs/CREDENTIALS.md §1.5 sets out.**
 
 ---
 

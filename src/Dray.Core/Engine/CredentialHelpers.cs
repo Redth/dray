@@ -419,9 +419,10 @@ public sealed class RegistryReader(IDockerConfigSource source, IProcessRunner? r
     /// and no secrets at all, precisely so that rendering a table never puts a token in memory.
     /// </para>
     /// <para>
-    /// Pushing an image is the one operation that cannot be done without the secret: the engine
-    /// needs an auth header, and there is no way to delegate that to the helper. Anything that can
-    /// be done without calling this must not call it.
+    /// Called only for what cannot be done without the secret — a push, and a pull, update check or
+    /// tag listing the registry has already refused anonymously; docs/CREDENTIALS.md section 1.5
+    /// lists them. The engine needs an auth header and there is no way to delegate that to the
+    /// helper. Anything that can be done without calling this must not call it.
     /// </para>
     /// </summary>
     /// <returns>The credential, or null when the helper has none for this registry.</returns>

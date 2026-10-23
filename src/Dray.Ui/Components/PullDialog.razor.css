@@ -1,91 +1,389 @@
-.pull__hint,
-.pull__error,
-.pull__done {
-    margin-top: var(--s2);
-    font-size: var(--text-xs);
-    line-height: var(--text-sm-lh);
-    max-width: 52ch;
-}
-
-.pull__error {
-    color: var(--danger-ink);
-    background: var(--danger-tint);
-    padding: var(--s2) var(--s3);
-    border-radius: var(--r-sm);
-}
-
-.pull__done {
-    color: var(--ok-ink);
-    background: var(--ok-tint);
-    padding: var(--s2) var(--s3);
-    border-radius: var(--r-sm);
-}
-
-/* Results, as a list rather than a dropdown: the dialog has the room, and a popup over a dialog is
-   one layer too many for something the user is reading rather than picking blind. */
-.pull__results {
-    list-style: none;
-    margin: var(--s2) 0 0;
-    padding: 0;
-    max-height: 15rem;
-    overflow-y: auto;
-    border: 1px solid var(--line);
-    border-radius: var(--r-md);
-}
-
-.pull__result {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0 var(--s2);
-    width: 100%;
-    padding: var(--s2) var(--s3);
-    border: 0;
-    border-bottom: 1px solid var(--line);
-    background: transparent;
-    color: var(--ink);
-    text-align: left;
-    cursor: pointer;
-}
-
-.pull__results li:last-child .pull__result {
-    border-bottom: 0;
-}
-
-.pull__result:hover {
-    background: var(--surface-2);
-}
-
-.pull__result:focus-visible {
-    outline: 2px solid var(--focus);
-    outline-offset: -2px;
-}
-
-.pull__result-name {
+/* A fixed room on the web head, so the list scrolls inside it rather than the dialog growing and
+   shrinking as each answer arrives — a dialog that resizes under the pointer moves the row about to
+   be clicked. */
+.pull {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: var(--s2);
-    font-size: var(--text-base);
+    height: 30rem;
+    min-height: 0;
+}
+
+/* In a native dialog's own WebView, the head has already sized the sheet (MacDialogSheet, WinDialog);
+   the body fills it. */
+.surface .pull {
+    height: 100%;
+}
+
+/* ---------------------------------------------------------------- the field */
+
+.pull__query {
+    display: flex;
+    gap: var(--s2);
+    flex: 0 0 auto;
+}
+
+.pull__registry {
+    flex: 0 0 11rem;
     min-width: 0;
 }
 
-/* The description wraps under both columns — it is the part that explains the choice, and cutting
-   it to one line makes every result look the same. */
-.pull__result-body {
-    grid-column: 1 / -1;
-    font-size: var(--text-xs);
-    line-height: var(--text-sm-lh);
+/* Drawn as one input with the search glyph and the host inside it: the reference reads as one
+   string, which it is, while the host stays the picker's. */
+.pull__field {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    height: 28px;
+    padding: 0 var(--s2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    background: var(--bg);
+    color: var(--muted);
+    cursor: text;
 }
 
-.pull__stars {
-    font-size: var(--text-xs);
+.pull__field:focus-within {
+    border-color: var(--focus);
+    outline: 2px solid var(--focus);
+    outline-offset: 0;
+}
+
+.pull__field:has(.pull__input:disabled) {
+    opacity: 0.6;
+}
+
+.pull__host {
+    flex: 0 0 auto;
+    color: var(--muted);
     white-space: nowrap;
 }
 
+.pull__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    font-size: var(--text-base);
+}
+
+/* The ring is on the field around it. */
+.pull__input:focus-visible {
+    outline: none;
+}
+
+.pull__input::placeholder {
+    color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- filters and status */
+
+.pull__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    min-height: 20px;
+    flex: 0 0 auto;
+}
+
+.pull__status {
+    margin-left: auto;
+    min-width: 0;
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------- the list */
+
+/* Scrolls on its own, inside a bordered box. Not a card: it sits on a dialog's surface, and a card
+   there would be a card in a card (DESIGN.md section 4.1). */
+.pull__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--bg);
+}
+
+.pull__group {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    padding: var(--s1) var(--s3);
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-weight: var(--text-xs-weight);
+}
+
+.pull__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 2px var(--s3);
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    cursor: default;
+}
+
+.pull__list > :last-child > .pull__row:last-child,
+.pull__list > .pull__row:last-child {
+    border-bottom: 0;
+}
+
+/* One highlighted row, moved by the keyboard and by the pointer alike — two highlights in one list
+   is the classic combobox bug. */
+.pull__row.is-active {
+    background: var(--surface-2);
+}
+
+.pull__row--tag {
+    grid-template-columns: minmax(0, 1fr) auto 4.5rem 2.75rem;
+    align-items: center;
+}
+
+.pull__row--tag.is-bare {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.pull__name {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+    font-size: var(--text-base);
+}
+
+.pull__name > :first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pull__ink {
+    color: var(--ink);
+}
+
+/* The characters that matched. Weight rather than colour, as in the command palette. */
+.pull__mark {
+    background: none;
+    color: inherit;
+    font-weight: 700;
+}
+
+.pull__chosen {
+    display: inline-flex;
+    color: var(--ink);
+}
+
+.pull__meta {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    text-align: right;
+}
+
+/* Two lines: the part of a result that tells one "redis" from another, and cutting it to one makes
+   every result look the same. */
+.pull__desc {
+    grid-column: 1 / -1;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs-lh);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+}
+
 .pull__badge {
+    flex: 0 0 auto;
     padding: 1px 5px;
     border-radius: var(--r-sm);
     background: var(--ok-tint);
     color: var(--ok-ink);
     font-size: var(--text-xs);
     font-weight: var(--text-xs-weight);
+}
+
+.pull__archs {
+    display: flex;
+    gap: var(--s1);
+    justify-content: flex-end;
+}
+
+.pull__arch {
+    padding: 0 5px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    color: var(--muted);
+    font-size: var(--text-xs);
+    line-height: var(--text-xs-lh);
+    white-space: nowrap;
+}
+
+/* The engine's own platform: heavier and darker, so it stands out in greyscale as well as colour. */
+.pull__arch.is-native {
+    border-color: var(--line-strong);
+    color: var(--ink);
+    font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- the repository above its tags */
+
+.pull__repo {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--s3);
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+
+.pull__repo-line {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+}
+
+.pull__repo-name {
+    color: var(--ink);
+    font-size: var(--text-md);
+    font-weight: var(--text-md-weight);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pull__facts {
+    font-size: var(--text-xs);
+}
+
+.pull__repo .pull__desc {
+    margin-top: 2px;
+}
+
+/* ---------------------------------------------------------------- words in the list */
+
+.pull__note,
+.pull__more,
+.pull__section {
+    padding: var(--s3);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+    max-width: 64ch;
+}
+
+.pull__note {
+    color: var(--muted);
+}
+
+.pull__more {
+    font-size: var(--text-xs);
+    border-top: 1px solid var(--line);
+    max-width: none;
+}
+
+.pull__section {
+    color: var(--muted);
+    padding-bottom: 0;
+}
+
+.pull__progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    padding-bottom: var(--s3);
+}
+
+.pull__progress ::deep .layers {
+    padding: 0 var(--s3);
+}
+
+.pull__waiting {
+    padding: 0 var(--s3);
+}
+
+/* ---------------------------------------------------------------- what will be pulled */
+
+.pull__foot {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    min-height: 3.25rem;
+}
+
+.pull__target {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+    font-size: var(--text-sm);
+}
+
+.pull__canonical {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink);
+}
+
+.pull__verdict {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1) var(--s2);
+    font-size: var(--text-xs);
+    line-height: var(--text-xs-lh);
+}
+
+.pull__hint {
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+}
+
+.pull__hint kbd {
+    padding: 0 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    color: var(--ink);
+    font-size: var(--text-xs);
+}
+
+.pull__problem,
+.pull__done {
+    margin: 0;
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+}
+
+.pull__problem {
+    color: var(--danger-ink);
+    background: var(--danger-tint);
+}
+
+.pull__body > .pull__problem {
+    margin: var(--s3);
+}
+
+.pull__done {
+    color: var(--ok-ink);
+    background: var(--ok-tint);
 }
