@@ -51,7 +51,8 @@ public sealed class StackCatalog : IDisposable
     }
 
     /// <summary>The stacks on <paramref name="host"/>, given its containers.</summary>
-    public IReadOnlyList<StackSummary> For(string? host, IEnumerable<ContainerSummary> containers)
+    /// <param name="onHost">Stacks whose files were found on the engine's host over SSH.</param>
+    public IReadOnlyList<StackSummary> For(string? host, IEnumerable<ContainerSummary> containers, IReadOnlySet<string>? onHost = null)
     {
         IReadOnlyList<StackDefinition> definitions;
         lock (_lock) definitions = _definitions;
@@ -62,7 +63,20 @@ public sealed class StackCatalog : IDisposable
             host is null ? [] : Registry.KnownOn(host),
             Registry.StacksFolder,
             DeclaredServices,
-            File.Exists);
+            File.Exists,
+            onHost);
+    }
+
+    readonly Dictionary<string, IReadOnlyList<ComposeServiceEntry>> _remoteDeclared = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// What a file on the engine's host declares, read over SSH by whoever probed it — so a remote
+    /// stack's services not yet created are listed, as a local stack's are.
+    /// </summary>
+    public void SetRemoteDeclared(string path, IReadOnlyList<ComposeServiceEntry> services)
+    {
+        lock (_lock) _remoteDeclared[path] = services;
+        Changed?.Invoke();
     }
 
     /// <summary>
@@ -116,12 +130,14 @@ public sealed class StackCatalog : IDisposable
         IReadOnlyList<StackRecord> known,
         string? stacksFolder,
         Func<IReadOnlyList<string>, IReadOnlyList<ComposeServiceEntry>> declaredServices,
-        Func<string, bool> exists)
+        Func<string, bool> exists,
+        IReadOnlySet<string>? onHost = null)
     {
         var stacks = new Dictionary<string, StackSummary>(StringComparer.Ordinal);
 
-        StackProvenance ProvenanceOf(string? directory, IReadOnlyList<string> files)
+        StackProvenance ProvenanceOf(string? directory, IReadOnlyList<string> files, string project, bool recordedOnHost = false)
         {
+            if (recordedOnHost || onHost?.Contains(project) == true) return StackProvenance.Remote;
             if (files.Count == 0 || !files.All(exists)) return StackProvenance.Observed;
 
             var folder = directory ?? Path.GetDirectoryName(files[0]);
@@ -144,7 +160,7 @@ public sealed class StackCatalog : IDisposable
 
         foreach (var stack in observed)
         {
-            var provenance = ProvenanceOf(stack.WorkingDirectory, stack.ConfigFiles);
+            var provenance = ProvenanceOf(stack.WorkingDirectory, stack.ConfigFiles, stack.Name);
             var declared = Declared(stack.ConfigFiles, provenance);
 
             stacks[stack.Name] = stack with
@@ -159,7 +175,7 @@ public sealed class StackCatalog : IDisposable
         {
             if (stacks.ContainsKey(definition.Project)) continue;
 
-            var provenance = ProvenanceOf(definition.WorkingDirectory, definition.Files);
+            var provenance = ProvenanceOf(definition.WorkingDirectory, definition.Files, definition.Project);
             var declared = Declared(definition.Files, provenance);
 
             stacks[definition.Project] = new StackSummary
@@ -178,7 +194,7 @@ public sealed class StackCatalog : IDisposable
         {
             if (stacks.ContainsKey(record.Project)) continue;
 
-            var provenance = ProvenanceOf(record.WorkingDirectory, record.Files);
+            var provenance = ProvenanceOf(record.WorkingDirectory, record.Files, record.Project, record.OnHost);
             var declared = Declared(record.Files, provenance);
 
             stacks[record.Project] = new StackSummary
@@ -220,6 +236,16 @@ public sealed class StackCatalog : IDisposable
 
         foreach (var file in files)
         {
+            // A file on the engine's host: whatever was last read of it over SSH, or nothing yet.
+            if (!File.Exists(file))
+            {
+                IReadOnlyList<ComposeServiceEntry>? remote;
+                lock (_lock) remote = _remoteDeclared.GetValueOrDefault(file);
+
+                foreach (var entry in remote ?? []) Fold(services, entry);
+                continue;
+            }
+
             try
             {
                 var written = File.GetLastWriteTimeUtc(file);
@@ -238,16 +264,7 @@ public sealed class StackCatalog : IDisposable
                     }
                 }
 
-                foreach (var entry in entries)
-                {
-                    var existing = services.FindIndex(s => s.Name == entry.Name);
-                    if (existing < 0) services.Add(entry);
-                    else services[existing] = services[existing] with
-                    {
-                        Builds = services[existing].Builds || entry.Builds,
-                        Profiles = entry.Profiles.Count > 0 ? entry.Profiles : services[existing].Profiles,
-                    };
-                }
+                foreach (var entry in entries) Fold(services, entry);
             }
             catch (IOException)
             {
@@ -255,6 +272,18 @@ public sealed class StackCatalog : IDisposable
         }
 
         return services;
+    }
+
+    /// <summary>Merge one file's entry for a service into the stack's, as compose merges an override.</summary>
+    static void Fold(List<ComposeServiceEntry> services, ComposeServiceEntry entry)
+    {
+        var existing = services.FindIndex(s => s.Name == entry.Name);
+        if (existing < 0) services.Add(entry);
+        else services[existing] = services[existing] with
+        {
+            Builds = services[existing].Builds || entry.Builds,
+            Profiles = entry.Profiles.Count > 0 ? entry.Profiles : services[existing].Profiles,
+        };
     }
 
     // ---------------------------------------------------------------- folders

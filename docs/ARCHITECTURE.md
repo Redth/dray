@@ -293,6 +293,11 @@ answers that with YamlDotNet, which keeps positions, so a problem compose report
 line it is about, in whichever of the stack's files that line is in. `ComposeProblems` reads
 compose's refusals; every pattern in it was captured from a real run.
 
+**A stack on an SSH host runs there.** Where a stack's files are on the engine's host rather than
+this machine, compose runs on the host over the user's own `ssh` (`RemoteCompose`), and its files
+are read and written there (`IStackFiles`, `SshStackFiles`). Relative bind mounts then mean what
+they say. A TCP host keeps compose and the files here, as Docker's remote contexts do.
+
 **The editor knows the spec.** Compose files open with the YAML language server VS Code uses
 (`monaco-yaml`), fed the Compose Specification's own JSON schema: completion of every key, hover
 documentation, and validation as you type. Both are vendored by `build/vendor-monaco-yaml.mjs` —

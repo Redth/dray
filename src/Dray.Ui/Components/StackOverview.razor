@@ -213,6 +213,8 @@
         Stats.Updated -= OnStats;
         Stats.Updated += OnStats;
 
+        _ = LoadDocumentAsync();
+
         // Again whenever what the stack is made of changes — a deploy creates its networks and
         // volumes and pulls its images, and a page opened on a draft must not keep the draft's view.
         var shape = $"{Stack.Name}|{Stack.ContainerCount}";
@@ -360,26 +362,27 @@
     ComposeDocument? _document;
     string? _documentFor;
 
-    ComposeDocument? Document
+    ComposeDocument? Document => _document;
+
+    /// <summary>Read the first compose file, from wherever it is, once per file.</summary>
+    async Task LoadDocumentAsync()
     {
-        get
+        var path = Stack.ConfigFiles.FirstOrDefault();
+        if (path == _documentFor) return;
+
+        _documentFor = path;
+        _document = null;
+
+        try
         {
-            var path = Stack.ConfigFiles.FirstOrDefault();
-            if (path == _documentFor) return _document;
-
-            _documentFor = path;
-            _document = null;
-
-            try
-            {
-                if (path is not null && System.IO.File.Exists(path)) _document = ComposeDocument.Parse(System.IO.File.ReadAllText(path));
-            }
-            catch (IOException)
-            {
-            }
-
-            return _document;
+            if (path is not null && await Engine.FilesFor(Stack).ReadAsync(path) is { } bytes)
+                _document = ComposeDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes));
         }
+        catch (Exception)
+        {
+        }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -390,7 +393,8 @@
     {
         get
         {
-            if (Document?.DrayIcon is not { } relative || Stack.ConfigFiles.FirstOrDefault() is not { } file) return null;
+            // A local file only: inlining one from a remote host would be a round trip per render.
+            if (Document?.DrayIcon is not { } relative || Stack.ConfigFiles.FirstOrDefault() is not { } file || Stack.Provenance == StackProvenance.Remote) return null;
 
             var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(file)!, relative));
             var type = System.IO.Path.GetExtension(path).ToLowerInvariant() switch

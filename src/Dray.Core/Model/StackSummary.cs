@@ -121,6 +121,12 @@ public enum StackProvenance
 
     /// <summary>A folder in the stacks folder the user chose for Dray. The one kind Dray may delete.</summary>
     Managed,
+
+    /// <summary>
+    /// Files on the engine's own host, reached over SSH, where compose runs too. Driven like an
+    /// adopted stack, and like one never deleted: they are that machine's files.
+    /// </summary>
+    Remote,
 }
 
 /// <summary>The state of a stack as a whole. DESIGN.md section 2.4 covers containers; this is its stack-level row.</summary>

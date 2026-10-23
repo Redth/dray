@@ -85,9 +85,17 @@ public sealed class DockerRawApi : IDisposable
                 if (endpoint.Tls is { } tls) ApplyTls(handler, tls);
                 break;
 
+            // SSH and WSL: the same relay the typed client uses — `ssh host docker system dial-stdio`
+            // — one process per pooled connection. This branch used to throw, claiming SSH was
+            // "tunnelled to a local socket first"; nothing tunnelled it, so every SSH host failed to
+            // connect at the first raw call. Found by driving a real SSH host.
+            case EndpointScheme.Ssh or EndpointScheme.Wsl when Transport.RelayCommands.For(endpoint) is { } relay:
+                baseAddress = new Uri("http://localhost");
+                handler.ConnectCallback = (_, _) => ValueTask.FromResult<Stream>(Transport.ProcessRelayStream.Start(relay));
+                break;
+
             default:
-                throw new RuntimeConnectionException(
-                    $"The raw API cannot reach a {endpoint.Scheme} endpoint. SSH endpoints are tunnelled to a local socket first.");
+                throw new RuntimeConnectionException($"The raw API cannot reach a {endpoint.Scheme} endpoint.");
         }
 
         _http = new HttpClient(handler)

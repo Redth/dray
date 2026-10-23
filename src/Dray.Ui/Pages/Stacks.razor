@@ -356,6 +356,7 @@
     {
         StackProvenance.Managed => (Display(stack.WorkingDirectory ?? ""), "In the stacks folder"),
         StackProvenance.Adopted => (Display(stack.WorkingDirectory ?? ""), "Added from outside the stacks folder — Dray never deletes these files"),
+        StackProvenance.Remote => ($"{stack.WorkingDirectory} on the host", "Its files are on the engine's host. Compose runs there, over SSH, and the editor reads and writes them there"),
         _ => ("files not on this machine", "Its compose files are on the machine that started it, so it can be started, stopped and brought down but not deployed from here"),
     };
 

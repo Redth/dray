@@ -58,6 +58,9 @@ public sealed class ComposeCli(
 {
     readonly IProcessRunner _runner = runner ?? new SystemProcessRunner();
 
+    /// <summary>The process runner, shared with whatever else runs compose's neighbours — ssh to a host.</summary>
+    public IProcessRunner Runner => _runner;
+
     // A function rather than a snapshot so a test can hand it a fixed environment, and the app
     // reads the real one at the moment of each run.
     readonly Func<IReadOnlyDictionary<string, string>> _environment = environment ?? ComposeEnvironment.Current;
@@ -165,19 +168,23 @@ public sealed class ComposeCli(
     /// dependency, a required variable with no value, an override that does not merge.
     /// </para>
     /// </summary>
-    public async Task<Model.ComposeConfig> ConfigAsync(
+    public Task<Model.ComposeConfig> ConfigAsync(
         ComposeCommand command,
         ComposeTarget target,
         string project,
         IReadOnlyList<string> files,
         string? workingDirectory,
         CancellationToken ct = default)
+        => CollectConfigAsync(RunAsync(command, target, project, files, ["config"], workingDirectory, ct));
+
+    /// <summary>Read a <c>compose config</c> run's output: the model on stdout, the problems on stderr.</summary>
+    internal static async Task<Model.ComposeConfig> CollectConfigAsync(IAsyncEnumerable<ComposeOutput> run)
     {
         var yaml = new System.Text.StringBuilder();
         var errors = new System.Text.StringBuilder();
         int? exitCode = null;
 
-        await foreach (var line in RunAsync(command, target, project, files, ["config"], workingDirectory, ct).ConfigureAwait(false))
+        await foreach (var line in run.ConfigureAwait(false))
         {
             if (line.IsExit) exitCode = line.ExitCode;
             else if (line.IsError) errors.AppendLine(line.Text);
@@ -190,23 +197,13 @@ public sealed class ComposeCli(
             exitCode);
     }
 
-    /// <summary>
-    /// Compose's hash of each service's configuration as the files say it now —
-    /// <c>compose config --hash '*'</c>. Null when compose refused the files: a stack it cannot parse
-    /// has no "now" to compare with.
-    /// </summary>
-    public async Task<IReadOnlyDictionary<string, string>?> HashesAsync(
-        ComposeCommand command,
-        ComposeTarget target,
-        string project,
-        IReadOnlyList<string> files,
-        string? workingDirectory,
-        CancellationToken ct = default)
+    /// <summary>Read a <c>compose config --hash</c> run's output, or null when compose refused.</summary>
+    internal static async Task<IReadOnlyDictionary<string, string>?> CollectHashesAsync(IAsyncEnumerable<ComposeOutput> run)
     {
         var output = new System.Text.StringBuilder();
         int? exitCode = null;
 
-        await foreach (var line in RunAsync(command, target, project, files, ["config", "--hash", "*"], workingDirectory, ct).ConfigureAwait(false))
+        await foreach (var line in run.ConfigureAwait(false))
         {
             if (line.IsExit) exitCode = line.ExitCode;
             else if (!line.IsError) output.AppendLine(line.Text);
@@ -214,6 +211,20 @@ public sealed class ComposeCli(
 
         return exitCode == 0 ? Model.StackDrift.ParseHashes(output.ToString()) : null;
     }
+
+    /// <summary>
+    /// Compose's hash of each service's configuration as the files say it now —
+    /// <c>compose config --hash '*'</c>. Null when compose refused the files: a stack it cannot parse
+    /// has no "now" to compare with.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, string>?> HashesAsync(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        string? workingDirectory,
+        CancellationToken ct = default)
+        => CollectHashesAsync(RunAsync(command, target, project, files, ["config", "--hash", "*"], workingDirectory, ct));
 
     /// <summary>
     /// One invocation as a person would type it: the program, then every argument, quoting the ones
@@ -592,4 +603,88 @@ public sealed class SystemProcessRunner : IProcessRunner
             // Already gone, or not ours to kill.
         }
     }
+}
+
+/// <summary>
+/// Compose run on an SSH host, against files on that host.
+/// <para>
+/// For a stack whose files live where its engine does — which is where a stack started on a
+/// server keeps them, and where its containers' <c>working_dir</c> label says they are. Running
+/// compose there means a relative bind mount means what it says: <c>./data</c> is beside the
+/// compose file on that machine, not a path on this one the remote engine would bind as an empty
+/// directory. Docker's own answer is a remote context, which keeps compose here; that is right for
+/// files that live here, and is what a TCP host still does.
+/// </para>
+/// </summary>
+public sealed class RemoteCompose(SshShell shell, Func<IReadOnlyDictionary<string, string>>? environment = null)
+{
+    readonly Func<IReadOnlyDictionary<string, string>> _environment = environment ?? ComposeEnvironment.Current;
+    Task<string?>? _version;
+
+    public SshShell Shell { get; } = shell;
+
+    /// <summary>
+    /// The host's compose version, or null when it has none — probed once per host.
+    /// <para>
+    /// The probe is shared, so it runs under no caller's token: the first caller is often a check
+    /// that gets cancelled when the user saves again, and a probe cancelled with it was cached as
+    /// cancelled for good — every later run on the host then "cancelled" before starting. A caller
+    /// that stops waiting stops waiting; the probe finishes for the next one.
+    /// </para>
+    /// </summary>
+    public Task<string?> DetectAsync(CancellationToken ct = default) => (_version ??= ProbeAsync()).WaitAsync(ct);
+
+    async Task<string?> ProbeAsync()
+    {
+        try
+        {
+            var result = await Shell.RunAsync("docker compose version --short", CancellationToken.None).ConfigureAwait(false);
+            var version = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+
+            if (result.ExitCode == 0 && version is { Length: > 0 }) return version;
+        }
+        catch (Exception)
+        {
+        }
+
+        // Not cached: a host whose ssh failed once — a dropped connection, a sleeping laptop — is
+        // asked again next time rather than written off for the session.
+        _version = null;
+        return null;
+    }
+
+    /// <summary>
+    /// The command the host's shell runs: into the project directory, then compose with the same
+    /// arguments a local run would have — minus the variables a login shell might carry that would
+    /// quietly override <c>-f</c>'s neighbours in <c>.env</c>. <c>DOCKER_HOST</c> is left alone on
+    /// purpose: on the host it is how that user reaches their engine, rootless or not.
+    /// </summary>
+    public static string Command(string project, IReadOnlyList<string> files, IReadOnlyList<string> arguments, string? workingDirectory)
+    {
+        List<string> words = ["docker", "compose", "-p", project];
+
+        foreach (var file in files)
+        {
+            words.Add("-f");
+            words.Add(file);
+        }
+
+        words.AddRange(arguments);
+
+        var compose = "env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_PROFILES " + SshShell.Join(words);
+        return workingDirectory is { Length: > 0 } dir ? $"cd {SshShell.Quote(dir)} && {compose}" : compose;
+    }
+
+    public IAsyncEnumerable<ComposeOutput> RunAsync(
+        string project, IReadOnlyList<string> files, IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct = default)
+        => Shell.StreamAsync(Command(project, files, arguments, workingDirectory), ComposeEnvironment.For(_environment(), new ComposeTarget([], new Dictionary<string, string>())), ct);
+
+    public string Display(string project, IReadOnlyList<string> files, IReadOnlyList<string> arguments, string? workingDirectory)
+        => Shell.Display(Command(project, files, arguments, workingDirectory));
+
+    public Task<Model.ComposeConfig> ConfigAsync(string project, IReadOnlyList<string> files, string? workingDirectory, CancellationToken ct = default)
+        => ComposeCli.CollectConfigAsync(RunAsync(project, files, ["config"], workingDirectory, ct));
+
+    public Task<IReadOnlyDictionary<string, string>?> HashesAsync(string project, IReadOnlyList<string> files, string? workingDirectory, CancellationToken ct = default)
+        => ComposeCli.CollectHashesAsync(RunAsync(project, files, ["config", "--hash", "*"], workingDirectory, ct));
 }

@@ -832,6 +832,30 @@ Not done: the optional daily update check, and moving the aggregated view onto t
 - **TCP keeps local files**, and the lint flags every relative bind mount, because the remote daemon
   silently creates an empty directory for a path it cannot see.
 
+**Progress:** done, and driven end to end against a real SSH host — a container running `sshd`
+and the Docker CLI with its own filesystem, reached through the user's `ssh` with a throwaway
+config, so the files under test existed only on the far side.
+
+- **A stack whose files are on the host is the host's.** When a stack's containers name files that
+  are not on this machine, Dray asks the host — one `test -f` per stack, once — and where they are
+  there, marks it *on the host* and remembers it so it stays listed when down.
+- **Compose runs there**: `ssh host -- 'cd <dir> && env -u COMPOSE_… docker compose …'`, shown before
+  it runs exactly as it will run. Check, drift and deploy all go the same way: verified, a variable
+  added in the editor was written to the host's file over SSH (comment kept), compose there said
+  Valid, the drift said the service would be recreated, and the deployed container carried it.
+- **Files are read and written there** through `IStackFiles` — the editor, the `.env` panel, the
+  graph and the overview no longer know which machine they are on. Writes go through a temporary
+  file and `mv`, so a dropped connection leaves the old file.
+- **Two bugs the real host flushed out.** SSH hosts had never connected: the raw API client threw
+  for any SSH endpoint, claiming it was "tunnelled to a local socket first" when nothing tunnelled
+  it. It now uses the same `docker system dial-stdio` relay as the typed client. And the host's
+  compose probe was cached as cancelled when its first caller was, which made every later run on the
+  host cancel before starting.
+- **TCP** keeps local files; the relative-path lint applies to it and not to a stack on the host.
+
+Not done: scanning a stacks folder *on* the host for stacks that have never run there, and creating
+a new stack on it — a remote stack appears once it has containers.
+
 ### 10.5 — Git, desktop-shaped
 
 A stack folder inside a repository shows its branch, uncommitted changes and ahead/behind, with

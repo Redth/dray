@@ -8,7 +8,8 @@ namespace Dray.Core.Engine;
 /// down: once its containers are gone, so are the labels it was discovered from.
 /// </summary>
 /// <param name="Host">The host's id — a context name where there is one.</param>
-public sealed record StackRecord(string Host, string Project, string WorkingDirectory, IReadOnlyList<string> Files);
+/// <param name="OnHost">The paths are on the engine's host, reached over SSH, rather than on this machine.</param>
+public sealed record StackRecord(string Host, string Project, string WorkingDirectory, IReadOnlyList<string> Files, bool OnHost = false);
 
 /// <summary>
 /// What Dray remembers about stacks, in one small JSON file.
@@ -110,7 +111,7 @@ public sealed class StackRegistry
             : s);
 
     static bool Same(StackRecord a, StackRecord b)
-        => a.WorkingDirectory == b.WorkingDirectory && a.Files.SequenceEqual(b.Files);
+        => a.WorkingDirectory == b.WorkingDirectory && a.Files.SequenceEqual(b.Files) && a.OnHost == b.OnHost;
 
     void Update(Func<State, State> change)
     {

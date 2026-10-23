@@ -104,7 +104,7 @@ public sealed class StackActionService(
 
         if (up) actions.AddRange([down, downVolumes]);
 
-        if (stack.Provenance == StackProvenance.Adopted) actions.Add(forget);
+        if (stack.Provenance is StackProvenance.Adopted or StackProvenance.Remote) actions.Add(forget);
         if (stack.Provenance == StackProvenance.Managed) actions.Add(delete);
 
         return actions;
@@ -192,7 +192,7 @@ public sealed class StackActionService(
             case "forget":
                 if (engine.Selected is not { } host || engine.Catalog is not { } catalog) return null;
 
-                catalog.Registry.Forget(host.Id, stack.Name, stack.WorkingDirectory);
+                catalog.Registry.Forget(host.Id, stack.Name, stack.Provenance == StackProvenance.Remote ? null : stack.WorkingDirectory);
                 return stack.ContainerCount > 0
                     ? $"Dray stopped tracking {stack.Name}. Its containers are still running, so it stays listed until they are gone; its files are untouched."
                     : $"Dray stopped tracking {stack.Name}. Its files were not touched.";
@@ -239,7 +239,9 @@ public sealed class StackActionService(
     {
         if (await engine.DriftAsync(stack, ct) is not { } drift) return null;
 
-        var changed = engine.Selected is { } host && operations.History is { } history
+        // Mounted files are hashed on this machine only; on an SSH host that would mean reading
+        // every one over the connection on every visit.
+        var changed = engine.Selected is { } host && operations.History is { } history && stack.Provenance is StackProvenance.Managed or StackProvenance.Adopted
             ? StackMounts.Changed(StackMounts.Snapshot(stack.ConfigFiles, stack.WorkingDirectory), history.MountsAtDeploy(host.Id, stack.Name))
             : new Dictionary<string, IReadOnlyList<string>>();
 
@@ -252,7 +254,7 @@ public sealed class StackActionService(
     /// </summary>
     Func<StackOperation, Task> RecordMounts(StackSummary stack, string? service = null) => operation =>
     {
-        if (operation.State == OperationState.Succeeded && operations.History is { } history)
+        if (operation.State == OperationState.Succeeded && operations.History is { } history && stack.Provenance is StackProvenance.Managed or StackProvenance.Adopted)
             history.RecordMounts(operation.Host, stack.Name, StackMounts.Snapshot(stack.ConfigFiles, stack.WorkingDirectory), service);
 
         return Task.CompletedTask;

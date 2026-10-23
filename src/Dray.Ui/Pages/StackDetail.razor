@@ -285,24 +285,28 @@
     /// <summary>The profiles <c>COMPOSE_PROFILES</c> in the stack's .env turns on.</summary>
     HashSet<string> _activeProfiles = new(StringComparer.Ordinal);
 
-    string? EnvPath => WorkingDirectory is { } dir ? System.IO.Path.Combine(dir, DotEnvFile.FileName) : null;
+    string? EnvPath => WorkingDirectory is { } dir
+        ? (Files.IsRemote ? $"{dir.TrimEnd('/')}/{DotEnvFile.FileName}" : System.IO.Path.Combine(dir, DotEnvFile.FileName))
+        : null;
 
-    void ReadProfiles()
+    async Task ReadProfilesAsync()
     {
-        _activeProfiles = new(StringComparer.Ordinal);
+        var active = new HashSet<string>(StringComparer.Ordinal);
 
         try
         {
-            if (EnvPath is { } path && System.IO.File.Exists(path)
-                && DotEnvFile.Parse(System.IO.File.ReadAllText(path)).LastOrDefault(v => v.Key == "COMPOSE_PROFILES") is { } profiles)
+            if (Stack?.Profiles.Count > 0 && EnvPath is { } path && await Files.ReadAsync(path) is { } bytes
+                && DotEnvFile.Parse(System.Text.Encoding.UTF8.GetString(bytes)).LastOrDefault(v => v.Key == "COMPOSE_PROFILES") is { } profiles)
             {
                 foreach (var name in profiles.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    _activeProfiles.Add(name);
+                    active.Add(name);
             }
         }
-        catch (IOException)
+        catch (Exception)
         {
         }
+
+        _activeProfiles = active;
     }
 
     /// <summary>
@@ -324,10 +328,11 @@
 
         try
         {
-            var text = System.IO.File.Exists(path) ? await System.IO.File.ReadAllTextAsync(path) : "";
+            var text = await Files.ReadAsync(path) is { } bytes ? System.Text.Encoding.UTF8.GetString(bytes) : "";
             var ordered = Stack?.Profiles.Where(next.Contains).ToList() ?? [.. next];
+            var written = DotEnvFile.Set(text, "COMPOSE_PROFILES", ordered.Count == 0 ? null : string.Join(',', ordered));
 
-            await System.IO.File.WriteAllTextAsync(path, DotEnvFile.Set(text, "COMPOSE_PROFILES", ordered.Count == 0 ? null : string.Join(',', ordered)));
+            if (await Files.WriteAsync(path, System.Text.Encoding.UTF8.GetBytes(written)) is { } failed) throw new IOException(failed);
 
             _notice = on
                 ? $"{profile} is on. Deploy brings up its services; compose in a terminal sees it too."
@@ -366,8 +371,11 @@
         => Stack?.WorkingDirectory is { Length: > 0 } recorded
             ? recorded
             : Stack?.ConfigFiles.FirstOrDefault() is { } path
-                ? System.IO.Path.GetDirectoryName(path)
+                ? (Stack.Provenance == StackProvenance.Remote ? path[..Math.Max(path.LastIndexOf('/'), 1)] : System.IO.Path.GetDirectoryName(path))
                 : null;
+
+    /// <summary>This machine, or the engine's host over SSH — wherever the stack's files are.</summary>
+    IStackFiles Files => Stack is { } stack ? Engine.FilesFor(stack) : LocalStackFiles.Instance;
 
     void BackToServices() => _tab = "Services";
 
@@ -456,14 +464,14 @@
         _file = null;
         _fileError = null;
 
-        LoadComposeFile();
+        _ = LoadComposeFileAsync();
         _ = RefreshDriftAsync();
     }
 
     /// <summary>Saving changed the file: re-read it for the graph, and ask compose what it now differs by.</summary>
     async Task OnComposeSavedAsync()
     {
-        LoadComposeFile();
+        await LoadComposeFileAsync();
         await RefreshDriftAsync();
     }
 
@@ -485,7 +493,7 @@
 
             _drift = changes?.Drift;
             _changedFiles = changes?.ChangedFiles ?? new Dictionary<string, IReadOnlyList<string>>();
-            ReadProfiles();
+            await ReadProfilesAsync();
             await InvokeAsync(StateHasChanged);
         }
         catch (OperationCanceledException)
@@ -535,7 +543,7 @@
     /// shown as an error.
     /// </para>
     /// </summary>
-    void LoadComposeFile()
+    async Task LoadComposeFileAsync()
     {
         _file = null;
         _fileError = null;
@@ -544,14 +552,14 @@
 
         try
         {
-            if (!System.IO.File.Exists(path)) return;
-
-            _file = FileContent.Decode(path, System.IO.File.ReadAllBytes(path));
+            if (await Files.ReadAsync(path) is { } bytes) _file = FileContent.Decode(path, bytes);
         }
         catch (Exception ex)
         {
             _fileError = ex.Message;
         }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     protected override void OnInitialized() => Operations.Changed += OnOperationChanged;

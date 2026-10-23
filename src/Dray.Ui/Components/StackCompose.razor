@@ -134,7 +134,7 @@
 
         @if (WorkingDirectory is { Length: > 0 } directory)
         {
-            <StackEnvPanel WorkingDirectory="@directory" Referenced="_referenced"
+            <StackEnvPanel WorkingDirectory="@directory" Referenced="_referenced" Files="Files"
                            VariablesChanged="OnVariablesChanged" Saved="CheckAsync" />
         }
     </div>
@@ -192,36 +192,41 @@
         if (_loadedFor == key) return;
 
         _loadedFor = key;
-        Load();
+        await LoadAsync();
         await CheckAsync();
     }
 
+    /// <summary>This machine, or the engine's host over SSH — wherever the stack's files are.</summary>
+    IStackFiles Files => Engine.FilesFor(Stack);
+
     /// <summary>
-    /// Read every compose file the stack was brought up with that exists on this machine.
+    /// Read every compose file the stack was brought up with, from wherever they are.
     /// <para>
-    /// The paths come from a label compose wrote on the containers, so for a stack started on a
-    /// remote host they name that host's disk and are simply absent here. The owner says so; this
-    /// component is only shown when at least one file is readable.
+    /// This machine for a local stack, the engine's host for one whose files live there. A file that
+    /// is not where its label says — the stack was started from another machine — is simply absent;
+    /// the owner says so, and this component is only shown when at least one file is readable.
     /// </para>
     /// </summary>
-    void Load()
+    async Task LoadAsync()
     {
         _files.Clear();
         _documents.Clear();
         _writable.Clear();
         _active = 0;
 
+        var files = Files;
+
         foreach (var path in Stack.ConfigFiles)
         {
             try
             {
-                if (!System.IO.File.Exists(path)) continue;
+                if (await files.ReadAsync(path) is not { } bytes) continue;
 
-                var content = FileContent.Decode(path, System.IO.File.ReadAllBytes(path));
+                var content = FileContent.Decode(path, bytes);
 
                 // Editing is offered only where it would take effect. A read-only file opens for
                 // reading rather than presenting a Save that fails.
-                _writable[_files.Count] = !new System.IO.FileInfo(path).IsReadOnly;
+                _writable[_files.Count] = await files.CanWriteAsync(path);
                 _files.Add(content);
                 _documents.Add(ComposeDocument.Parse(content.Text));
             }
@@ -288,7 +293,9 @@
             .SelectMany(c => c.Ports.Select(p => new PublishedPort(p.HostPort, p.Protocol, c.Stack is { } stack ? $"{c.Name} ({stack})" : c.Name)))
             .ToList();
 
-        var context = new LintContext(published, Engine.Selected?.Endpoint.IsRemote == true);
+        // A relative path only misleads when compose runs here and the engine does not. For a stack
+        // whose files are on the engine's host, compose runs there too and the path means what it says.
+        var context = new LintContext(published, Engine.Selected?.Endpoint.IsRemote == true && Stack.Provenance != StackProvenance.Remote);
 
         _lint =
         [
@@ -458,14 +465,7 @@
     /// </summary>
     async Task<string?> SaveAsync(string path, byte[] content)
     {
-        try
-        {
-            await System.IO.File.WriteAllBytesAsync(path, content);
-        }
-        catch (Exception ex)
-        {
-            return ex.Message;
-        }
+        if (await Files.WriteAsync(path, content) is { } failed) return failed;
 
         var index = _files.FindIndex(f => f.Path == path);
 
