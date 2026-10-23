@@ -58,10 +58,11 @@ public sealed class EngineManager : IAsyncDisposable
     IContainerRuntime? _runtime;
     RuntimeEventPump? _pump;
 
-    public EngineManager(DockerContextReader reader, IContainerRuntimeFactory factory)
+    public EngineManager(DockerContextReader reader, IContainerRuntimeFactory factory, ComposeCli? compose = null)
     {
         _reader = reader;
         _factory = factory;
+        _compose = compose ?? new ComposeCli();
     }
 
     /// <summary>How long a health probe of an unselected host may take before it counts as unreachable.</summary>
@@ -109,6 +110,10 @@ public sealed class EngineManager : IAsyncDisposable
             _gate.Release();
         }
 
+        // In the background: the probe shells out up to four times, and the first window should not
+        // wait on a capability only the Stacks page reads. Its answer lands as a Changed event.
+        _ = MeasureComposeAsync(ct);
+
         // A host that no longer exists cannot stay selected.
         var target = Selected is not null && _hosts.ContainsKey(Selected.Id)
             ? Selected.Id
@@ -153,7 +158,7 @@ public sealed class EngineManager : IAsyncDisposable
         {
             State = state,
             StateDetail = detail,
-            Capabilities = _runtime?.Capabilities ?? RuntimeCapabilities.None,
+            Capabilities = WithCompose(Selected, _runtime?.Capabilities ?? RuntimeCapabilities.None),
         };
 
         Selected = updated;
@@ -303,7 +308,7 @@ public sealed class EngineManager : IAsyncDisposable
 
     // ---------------------------------------------------------------- compose
 
-    readonly ComposeCli _compose = new();
+    readonly ComposeCli _compose;
     readonly BuildxCli _buildx = new();
 
     /// <summary>
@@ -317,6 +322,57 @@ public sealed class EngineManager : IAsyncDisposable
         => _compose.DetectAsync(ct);
 
     /// <summary>
+    /// <see cref="RuntimeCapabilities.SupportsCompose"/>, measured: a compose on this machine
+    /// <i>and</i> a way for it to address this host.
+    /// <para>
+    /// Neither half is the engine's to answer, which is why neither runtime sets the flag. Before
+    /// the probe has finished the answer is no — the Stacks page shows nothing it would have to
+    /// take back.
+    /// </para>
+    /// </summary>
+    RuntimeCapabilities WithCompose(DockerHost host, RuntimeCapabilities capabilities)
+        => capabilities with
+        {
+            SupportsCompose = _compose.Found is { } command && ComposeTarget.For(host, command) is not null,
+        };
+
+    async Task MeasureComposeAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (_compose.IsProbed) return;
+
+            await _compose.DetectAsync(ct).ConfigureAwait(false);
+
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                foreach (var (id, host) in _hosts.ToList())
+                {
+                    // Only a host that has answered has capabilities to amend; the rest pick the
+                    // flag up when they connect.
+                    if (host.Capabilities == RuntimeCapabilities.None) continue;
+
+                    _hosts[id] = host with { Capabilities = WithCompose(host, host.Capabilities) };
+                }
+
+                if (Selected is { } selected && _hosts.TryGetValue(selected.Id, out var current))
+                    Selected = current;
+            }
+            finally
+            {
+                _gate.Release();
+            }
+
+            Changed?.Invoke();
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+        {
+            // Nobody is left to tell. The manager went away while the probe was still running.
+        }
+    }
+
+    /// <summary>
     /// The stacks currently on this host, assembled from the labels compose puts on containers.
     /// <para>
     /// Read from the store rather than the engine, so it follows the event stream like everything
@@ -325,7 +381,13 @@ public sealed class EngineManager : IAsyncDisposable
     /// </summary>
     public IReadOnlyList<StackSummary> Stacks => StackDiscovery.From(Store.Containers);
 
-    /// <summary>Run a compose subcommand, streaming its output.</summary>
+    /// <summary>
+    /// Run a compose subcommand against the selected host, streaming its output.
+    /// <para>
+    /// The last item carries the exit code (<see cref="ComposeOutput.IsExit"/>) whenever the
+    /// process reported one.
+    /// </para>
+    /// </summary>
     public async IAsyncEnumerable<ComposeOutput> RunComposeAsync(
         StackSummary stack,
         IReadOnlyList<string> arguments,
@@ -337,8 +399,17 @@ public sealed class EngineManager : IAsyncDisposable
             yield break;
         }
 
+        // Read once: the selection can move mid-run, and the run must stay with the host it
+        // started on rather than finish against whichever one is on screen by then.
+        if (Selected is not { } host || ComposeTarget.For(host, command) is not { } target)
+        {
+            yield return new ComposeOutput(
+                $"{command.Display} has no way to address {Selected?.Endpoint.Display ?? "this host"}.", IsError: true);
+            yield break;
+        }
+
         await foreach (var line in _compose
-            .RunAsync(command, stack.Name, stack.ConfigFiles, arguments, stack.WorkingDirectory, ct)
+            .RunAsync(command, target, stack.Name, stack.ConfigFiles, arguments, stack.WorkingDirectory, ct)
             .ConfigureAwait(false))
         {
             yield return line;
@@ -691,7 +762,7 @@ public sealed class EngineManager : IAsyncDisposable
         try
         {
             var capabilities = await runtime.ConnectAsync(timeout.Token).ConfigureAwait(false);
-            result = host with { State = HostConnectionState.Connected, StateDetail = null, Capabilities = capabilities };
+            result = host with { State = HostConnectionState.Connected, StateDetail = null, Capabilities = WithCompose(host, capabilities) };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

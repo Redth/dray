@@ -273,8 +273,20 @@ an error.
 ### 2.5 Compose
 
 There is no viable .NET Compose library, and reimplementing the Compose spec is a trap. Dray shells
-out to `docker compose` with `--progress json` / `--format json` and parses the stream, while reading
-compose files with YamlDotNet for the editor, validation, and the service graph.
+out to `docker compose` and streams its output, ending with the exit code — which is what failure
+is, since compose writes progress to stderr on runs that succeed.
+
+**Every run names its host.** `ComposeTarget` puts it on the command line — `--context` for a
+context, `-H` plus TLS flags otherwise — and only falls back to the environment for the standalone
+binary, which reads no such flag. Left unnamed, compose follows the CLI's current context, which is
+whatever the terminal was last switched to rather than the host on screen. The process gets a short
+allow-list of the environment and nothing else (`ComposeEnvironment`): compose reads its own
+environment ahead of the stack's `.env`, so an exported `TAG` or `COMPOSE_FILE` would silently
+change what runs. `SupportsCompose` is measured from both halves — a compose on this machine, and a
+target for this host — which is why neither runtime sets it.
+
+Phase 10 moves reading the file onto compose's own parser (`compose config --format json`) and a
+real YAML parser for positions; today the graph and watch detection scan lines.
 
 Running stacks are discovered from the `com.docker.compose.project`, `.service`, and
 `.project.config_files` labels on containers, so a stack started from a terminal appears in Dray

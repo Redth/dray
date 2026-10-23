@@ -311,8 +311,16 @@
 
         try
         {
+            int? exitCode = null;
+
             await foreach (var line in Engine.RunComposeAsync(stack, arguments, _cts.Token))
             {
+                if (line.IsExit)
+                {
+                    exitCode = line.ExitCode;
+                    continue;
+                }
+
                 _output.Add(line.Text);
 
                 // Bounded: a pull of a large stack produces thousands of lines and the panel only
@@ -322,11 +330,25 @@
                 StateHasChanged();
             }
 
-            Notify($"{label} finished for {stack.Name}.", ok: true);
+            if (exitCode == 0)
+            {
+                Notify($"{label} finished for {stack.Name}.", ok: true);
 
-            // A compose up that pulls images runs for minutes. Only lands when the window is not
-            // in front, so watching it work is not reported twice.
-            await Shell.NotifyAsync($"{label} finished", $"{stack.Name} on {Engine.Selected?.Name}.", NoticeKind.Success);
+                // A compose up that pulls images runs for minutes. Only lands when the window is not
+                // in front, so watching it work is not reported twice.
+                await Shell.NotifyAsync($"{label} finished", $"{stack.Name} on {Engine.Selected?.Name}.", NoticeKind.Success);
+            }
+            else
+            {
+                // The output panel above already holds compose's own explanation; this says only
+                // that it is one, so a failed run never reads as a finished one.
+                var outcome = exitCode is { } code
+                    ? $"{label} failed for {stack.Name} — compose exited with {code}. Its output says why."
+                    : $"{label} for {stack.Name} ended without saying whether it worked.";
+
+                Notify(outcome, ok: false);
+                await Shell.NotifyAsync($"{label} failed", outcome, NoticeKind.Error);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -372,6 +394,8 @@
         {
             await foreach (var line in Engine.RunComposeAsync(stack, ["watch"], _watchCts.Token))
             {
+                if (line.IsExit) continue;
+
                 _output.Add(line.Text);
 
                 if (_output.Count > 500) _output.RemoveRange(0, _output.Count - 500);

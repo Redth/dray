@@ -286,7 +286,11 @@ compose refuses to run one, and hiding the services involved would hide the reas
 subcommand, and a `develop.watch` block in the file. It is the one command here that never
 finishes, so it has its own token and stops when the page goes away.
 
-**Phase 5 is complete.**
+~~**Phase 5 is complete.**~~ **It was not.** A re-read against the exit criteria found that a down
+stack vanishes, because nothing tracks user-added files; that compose is never told which host to
+target, so it follows whatever the CLI's context happens to be; that `SupportsCompose` was never
+measured and reads false on every engine; and that build, recreate, per-service restart and exec,
+and schema validation were never built. Phase 10 picks all of it up.
 
 **Demo:** open a project's stack, bring it up, watch one service fail its healthcheck, read that
 service's logs in the aggregated view, fix the compose file, recreate just that service.
@@ -631,6 +635,114 @@ Dray install an engine, which is deliberate rather than pending.
 **Phase 9 — considered, not committed.** Machine lifecycle (creating the VM rather than driving it) ·
 `docker scout` vulnerability surfacing · Swarm · Kubernetes. Kubernetes and pods are explicitly out of
 v1 scope. Each of these is a product decision, not a backlog item.
+
+---
+
+## Phase 10 — Stacks you author, not just observe
+
+Phase 5 made stacks visible. This phase makes them something you create, edit, deploy and keep,
+on this machine and on a remote host, without Dray ever owning the files.
+
+The design borrows from two web UIs that do this well and avoids what their issue trackers say goes
+wrong. **Dockge**: files on disk in a folder per stack so the CLI keeps working, Save separate from
+Deploy, live output that replays to whoever joins late, one operation per stack at a time.
+**Dockhand**: managed / adopted / observed provenance, status and health as separate values,
+a redeploy popover that shows the exact command, `-H` on the command line rather than `DOCKER_HOST`
+in the environment, lint while typing with `compose config` as the authority, a delete that previews
+exactly what goes. **What both get wrong**, and Dray must not: regenerating YAML from an object on
+every form edit (comments, quotes and tags lost — Dockge's largest bug cluster), any exited
+container marking the whole stack exited (Dockge's most-upvoted bug), polling `compose ls` on a
+timer, read-only stacks for anything the tool did not create, one compose file per stack, and
+storing registry or git credentials.
+
+### 10.0 — Foundations
+
+- **One pure function builds every compose command line**, tested exhaustively. The host goes on
+  the command line — `--context <name>` for a context, otherwise `-H` plus the TLS flags — never in
+  the environment, where it would leak into compose's own interpolation and into services that read
+  `DOCKER_HOST`. The process gets a minimal environment for the same reason: a shell variable
+  overrides an `--env-file` value.
+- **Streamed commands report an exit code.** Failure is the exit code, not a search for "error" in
+  stderr.
+- **`SupportsCompose` is measured**: a compose CLI on this machine *and* an engine it can drive.
+  Apple's `container` is not one.
+- **Compose's own parser for meaning.** `docker compose config --format json` answers what the
+  stack *is* — services, ports, includes, overrides, profiles, interpolation — so the graph and every
+  derived view read the model compose will actually run. YAML positions, for editor markers and
+  surgical edits, come from a real parser rather than line scanning.
+
+**Exit:** a stack on a non-current host deploys to that host · scaling a service that fails says so
+from the exit code.
+
+### 10.1 — A registry, and the whole lifecycle
+
+- **Three sources, merged:** a `stacks.json` of known stacks (host, project, working directory,
+  files, env files, profiles — paths, never values), compose labels on containers, and stack folders
+  the user adds, scanned recursively and watched rather than polled. A stack that is down, or
+  written and never deployed, is still listed.
+- **The stacks folder is asked for on first use**, suggesting `~/Stacks`, never assumed.
+- **Provenance.** *Managed* — Dray created the folder. *Adopted* — files edited where they are and
+  never deleted by Dray, prefilled from `config_files` / `working_dir` when every container agrees.
+  *Observed* — labels only, with per-container fallback actions rather than none.
+- **Status:** running · partial · restarting · stopped · down · draft. A container that exited 0 is
+  a completed one-shot, not a failure. Health is a separate value, never folded into status. Tint,
+  glyph and word, as everywhere.
+- **Stack actions:** Deploy through a popover that shows the exact command, with presets (only
+  changed · recreate all · pull and recreate); start, stop, restart; pull and update, which brings up
+  only a stack that was already running; build; down, typed only when it takes volumes with it;
+  **Forget** (drop from Dray, touch nothing) separate from **Delete** (preview of exactly which
+  files and volumes go, typed name, adopted files never deleted).
+- **Per-service actions:** start, stop, restart, recreate (`up -d --no-deps --force-recreate`),
+  pull, scale, logs, and exec with a replica picker.
+- **One operation per stack**, with its output kept so leaving the page and coming back shows it.
+- `COMPOSE_FILE`, `COMPOSE_PROFILES` and `COMPOSE_PROJECT_NAME` in the stack's `.env` are honoured.
+
+**Exit:** a down stack is still listed · deleting an adopted stack cannot remove its files · one
+exited migration container does not turn a stack red.
+
+### 10.2 — Authoring
+
+- **New stack:** blank, from an image, from a `docker run` line, from running containers (their
+  inspect data, not a guessed command line), or by adopting a folder. A native dialog frame.
+- **Every file in the stack is a tab** — base, override, includes, `.env` — plus a read-only
+  *effective config* and a profile picker.
+- **Validation in three layers:** the compose-spec schema, vendored, for completion, hover and
+  errors in Monaco; lint rules that use what Dray already knows (a port another stack already
+  publishes, a relative bind mount on a remote host, a socket mount, `:latest`); and `compose config`
+  on save and before deploy as the authority.
+- **Drift without polling.** `compose config --hash` per service against each container's
+  `com.docker.compose.config-hash` gives "edited, not deployed". A snapshot of the last deployed
+  effective config — compose files only, never `.env` — gives a pending-changes diff, and a hash of
+  bind-mounted config files catches an edited `nginx.conf` the YAML never mentions.
+- **Quick actions, not a form editor.** Add a service, a port, a variable — as splices into the text
+  that leave every other byte alone.
+
+**Exit:** a comment survives every edit Dray makes · an invalid file is caught before Deploy, not by
+it · a deployed stack shows which services the edit will recreate.
+
+### 10.3 — Inspect and operate
+
+- **Overview:** published ports as links, the project's networks, volumes and images, combined
+  stats from the stats stream, and `x-dray: { urls, icon }` read from the file.
+- **Combined logs on the shared `LogView`**, picking up replicas that start after the page opens.
+- **Image updates:** registry digest against local, per platform, through the existing credential
+  helpers. Checked when a stack is opened and on demand, with an optional daily check, and never at
+  boot.
+- **History** of the operations Dray ran: command, exit code, duration.
+
+### 10.4 — Remote hosts
+
+- **SSH runs compose on the host** (`ssh host docker compose …`), and reads and writes the files
+  there. The files stay where the containers' `working_dir` labels already say they are, and a
+  relative bind mount means what it says.
+- **TCP keeps local files**, and the lint flags every relative bind mount, because the remote daemon
+  silently creates an empty directory for a path it cannot see.
+
+### 10.5 — Git, desktop-shaped
+
+A stack folder inside a repository shows its branch, uncommitted changes and ahead/behind, with
+*pull and redeploy*. System `git`, the user's own credentials, nothing stored. An optional command
+wrapper per stack (`op run --`, sops) keeps secrets in the user's tooling rather than in Dray's.
 
 ---
 

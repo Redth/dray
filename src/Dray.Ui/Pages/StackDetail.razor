@@ -214,28 +214,34 @@
 
         try
         {
-            var failed = false;
+            int? exitCode = null;
+            string? lastError = null;
 
             await foreach (var line in Engine.RunComposeAsync(
                 stack, ["up", "-d", "--no-recreate", "--scale", $"{service.Name}={replicas}"]))
             {
-                // Compose reports failure in its output rather than by failing the command, so a
-                // scale that could not happen otherwise looks like it worked.
-                if (line.IsError && line.Text.Contains("error", StringComparison.OrdinalIgnoreCase))
-                {
-                    _notice = line.Text.Trim();
-                    _noticeOk = false;
-                    failed = true;
-                }
+                if (line.IsExit) exitCode = line.ExitCode;
+                else if (line.IsError && line.Text.Trim() is { Length: > 0 } text) lastError = text;
             }
 
-            if (!failed)
+            // Success is a reported zero and nothing else. Compose writes its progress to stderr
+            // on a run that worked, so stderr alone says nothing; and a run that never reported how
+            // it ended is not one Dray can call done.
+            if (exitCode == 0)
             {
                 _notice = replicas == 1
                     ? $"{service.Name} is back to a single container."
                     : $"{service.Name} scaled to {replicas} containers.";
 
                 _noticeOk = true;
+            }
+            else
+            {
+                _notice = lastError ?? (exitCode is { } code
+                    ? $"Compose exited with {code} scaling {service.Name}."
+                    : $"Compose did not say whether {service.Name} scaled.");
+
+                _noticeOk = false;
             }
         }
         catch (Exception ex)

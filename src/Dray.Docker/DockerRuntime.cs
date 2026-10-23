@@ -106,7 +106,8 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             SupportsEvents = true,
 
             // Compose and buildx are CLI plugins on the client side, not engine features, so they
-            // are probed separately by the shell rather than read off the daemon.
+            // are probed separately rather than read off the daemon. EngineManager sets this one
+            // once it knows both halves — a compose here, and a way for it to reach this host.
             SupportsCompose = false,
             SupportsBuildKit = flavor == EngineFlavor.Docker,
 
