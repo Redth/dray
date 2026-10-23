@@ -67,6 +67,16 @@
     /// </summary>
     [Parameter] public IReadOnlyList<EditorAnnotation> Annotations { get; set; } = [];
 
+    /// <summary>
+    /// What the file is, for a language server that knows the format: <c>compose</c> turns on
+    /// completion, hover documentation and validation from the Compose Specification. Null for
+    /// anything else, which gets syntax highlighting only.
+    /// </summary>
+    [Parameter] public string? Schema { get; set; }
+
+    /// <summary>Problems to underline, from something that checked the file — compose itself.</summary>
+    [Parameter] public IReadOnlyList<EditorProblem> Problems { get; set; } = [];
+
     ElementReference _host;
     IJSObjectReference? _module;
     IJSObjectReference? _editor;
@@ -97,6 +107,8 @@
                     text = File.Text,
                     language = File.Language,
                     readOnly = ReadOnly,
+                    schema = Schema,
+                    name = FileName,
                 });
 
             _loadedPath = File.Path;
@@ -107,6 +119,7 @@
             Theme.Changed += OnThemeChanged;
 
             await AnnotateAsync();
+            await ReportProblemsAsync();
             return;
         }
 
@@ -124,6 +137,26 @@
         // Re-sent on every render: the annotations depend on the .env beside the file, which the
         // user edits in a panel next to this one, so they change without the file changing.
         await AnnotateAsync();
+        await ReportProblemsAsync();
+    }
+
+    IReadOnlyList<EditorProblem> _reported = [];
+
+    async Task ReportProblemsAsync()
+    {
+        if (_editor is null || _module is null) return;
+        if (_reported.SequenceEqual(Problems)) return;
+
+        _reported = Problems;
+        await _module.InvokeVoidAsync("editor.problems", _editor, Problems);
+    }
+
+    /// <summary>Move the cursor to a place in the file and show it.</summary>
+    public async Task RevealAsync(int line, int column)
+    {
+        if (_editor is null || _module is null) return;
+
+        await _module.InvokeVoidAsync("editor.reveal", _editor, line, column);
     }
 
     /// <summary>The annotations last sent, so an unchanged set is not pushed across the interop

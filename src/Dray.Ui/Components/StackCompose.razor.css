@@ -1,0 +1,180 @@
+/* The compose workspace: the stack's files as tabs, compose's verdict beside them, the editor, and
+   the .env as a reference column on the right. */
+.sc {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* The file row sits under the card's own tab bar, so it is quieter than it: same tab control, on
+   the card's surface rather than the bar's, and a step smaller. */
+.sc__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: 0 var(--s3) 0 var(--s2);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Scrolls sideways rather than wrapping: a stack with four override files keeps one row, and the
+   verdict never gets pushed onto a line of its own. */
+.sc__files {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.sc__tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+}
+
+/* How many problems are in a file that is not on screen. A number with an accessible name, so
+   it says what it counts without relying on its tint. */
+.sc__count {
+    min-width: 1.125rem;
+    padding: 0 var(--s1);
+    border-radius: var(--r-sm);
+    background: var(--danger-tint);
+    color: var(--danger-ink);
+    font-size: var(--text-xs);
+    line-height: var(--text-xs-lh);
+    text-align: center;
+}
+
+/* Compose's verdict on the stack. Glyph, word and tint, like a state pill — "Valid" has a check,
+   a refusal a stop sign, so the greyscale screenshot still reads. */
+.sc__verdict {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 2px var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.sc__verdict--ok {
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+}
+
+.sc__verdict--warn {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+}
+
+.sc__verdict--danger {
+    background: var(--danger-tint);
+    color: var(--danger-ink);
+}
+
+.sc__verdict--busy {
+    background: var(--neutral-tint);
+    color: var(--neutral-ink);
+}
+
+/* The YAML gets the room because it is what is being read; the variables are a reference column. */
+.sc__main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 26rem);
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* Below this the two columns stop being side by side and the .env would be a sliver, so it goes
+   under the editor instead. */
+@media (max-width: 60rem) {
+    .sc__main {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(20rem, 1fr) auto;
+    }
+}
+
+.sc__left {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.sc__note {
+    margin: 0;
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+}
+
+/* What compose said, under the editor it is about. Bounded, so a file with forty problems keeps
+   the editor on screen; each row takes you to its line. */
+.sc__problems {
+    flex: 0 0 auto;
+    max-height: 10rem;
+    overflow-y: auto;
+    border-top: 1px solid var(--line);
+    padding: var(--s1) 0;
+}
+
+.sc__problem {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: var(--s3);
+    width: 100%;
+    padding: var(--s1) var(--s3);
+    text-align: left;
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.sc__problem:hover:not(:disabled) {
+    background: var(--surface-2);
+}
+
+/* A problem compose could not attribute to a line still has to be read, so it is listed — it just
+   has nowhere to take you. */
+.sc__problem:disabled {
+    cursor: default;
+}
+
+.sc__sev {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 0 var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+}
+
+.sc__sev--error {
+    background: var(--danger-tint);
+    color: var(--danger-ink);
+}
+
+.sc__sev--warning {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+}
+
+.sc__where {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+.sc__message {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}

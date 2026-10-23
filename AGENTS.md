@@ -82,6 +82,8 @@ node build/lint-tokens.mjs             # raw colour / type / z-index literals
 npm install                            # build-time tooling only; nothing here ships except Monaco
 npm run vendor:monaco                  # refresh wwwroot/lib/monaco from node_modules
 npm run check:monaco                   # fail if the vendored copy is stale or hand-edited
+npm run vendor:monaco-yaml             # rebundle the YAML language server + pinned Compose schema
+npm run check:monaco-yaml
 npm run vendor:xterm                   # refresh wwwroot/lib/xterm from node_modules
 npm run check:xterm
 

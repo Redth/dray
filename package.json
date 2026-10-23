@@ -6,6 +6,8 @@
   "scripts": {
     "vendor:monaco": "node build/vendor-monaco.mjs",
     "check:monaco": "node build/vendor-monaco.mjs --check",
+    "vendor:monaco-yaml": "node build/vendor-monaco-yaml.mjs",
+    "check:monaco-yaml": "node build/vendor-monaco-yaml.mjs --check",
     "vendor:xterm": "node build/vendor-xterm.mjs",
     "check:xterm": "node build/vendor-xterm.mjs --check",
     "vendor:tabulator": "node build/vendor-tabulator.mjs",
@@ -23,7 +25,9 @@
     "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "5.5.0",
     "ansi_up": "^6.0.6",
+    "esbuild": "0.28.2",
     "monaco-editor": "0.55.0",
+    "monaco-yaml": "5.5.1",
     "tabulator-tables": "^6.3.1"
   }
 }

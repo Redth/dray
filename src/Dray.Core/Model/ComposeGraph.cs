@@ -15,9 +15,9 @@ public sealed record ServiceDependency(string Service, IReadOnlyList<string> Dep
 /// a stack that can only come from the file.
 /// </para>
 /// <para>
-/// Deliberately not a YAML parser. It reads two shapes of one key out of a file whose overall
-/// structure it does not care about, and a line it cannot make sense of costs that edge rather than
-/// the graph — a stack should still draw when someone has used an anchor or a merge key.
+/// The file is read by <see cref="ComposeDocument"/>, a real YAML parser, so a service built from
+/// an anchor or a merge key has its edges like any other. Text that does not parse draws no graph
+/// rather than a wrong one.
 /// </para>
 /// </summary>
 public static class ComposeGraph
@@ -36,9 +36,9 @@ public static class ComposeGraph
     /// </code>
     /// </summary>
     public static IReadOnlyList<ServiceDependency> Parse(string? yaml)
-        => [.. Scan(yaml)
-            .Where(s => s.Deps.Count > 0)
-            .Select(s => new ServiceDependency(s.Name, [.. s.Deps.Distinct(StringComparer.Ordinal)]))];
+        => [.. ComposeDocument.Parse(yaml).Services
+            .Where(s => s.DependsOn.Count > 0)
+            .Select(s => new ServiceDependency(s.Name, s.DependsOn))];
 
     /// <summary>
     /// Every service the file declares, in the order it declares them.
@@ -49,115 +49,7 @@ public static class ComposeGraph
     /// </para>
     /// </summary>
     public static IReadOnlyList<string> Services(string? yaml)
-        => [.. Scan(yaml).Select(s => s.Name)];
-
-    /// <summary>
-    /// Walk the <c>services:</c> block once, returning each service and whatever it declares.
-    /// </summary>
-    static List<(string Name, List<string> Deps)> Scan(string? yaml)
-    {
-        var found = new List<(string Name, List<string> Deps)>();
-
-        if (string.IsNullOrWhiteSpace(yaml)) return found;
-
-        var servicesIndent = -1;
-        var serviceIndent = -1;
-
-        string? service = null;
-        List<string> deps = [];
-
-        var dependsIndent = -1;
-        var collecting = false;
-
-        void Close()
-        {
-            if (service is not null) found.Add((service, deps));
-
-            service = null;
-            deps = [];
-            collecting = false;
-        }
-
-        foreach (var raw in yaml.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
-        {
-            var line = raw.TrimEnd();
-            if (line.Length == 0 || line.TrimStart().StartsWith('#')) continue;
-
-            var indent = line.Length - line.TrimStart().Length;
-            var text = line.Trim();
-
-            // Everything is relative to the `services:` block; a top-level `volumes:` has keys that
-            // look exactly like service names.
-            if (servicesIndent < 0)
-            {
-                if (text is "services:") servicesIndent = indent;
-                continue;
-            }
-
-            // Left the services block entirely — another top-level key.
-            if (indent <= servicesIndent && text.EndsWith(':'))
-            {
-                Close();
-                serviceIndent = -1;
-                servicesIndent = text is "services:" ? indent : -1;
-                continue;
-            }
-
-            // Inside a depends_on block, gathering names until the indentation says otherwise.
-            if (collecting)
-            {
-                if (indent > dependsIndent)
-                {
-                    // "- db" in the short form, "db:" in the long one. A "condition: …" line sits
-                    // deeper still and is turned away by the name check.
-                    var name = text.StartsWith("- ", StringComparison.Ordinal)
-                        ? text[2..].Trim().TrimEnd(':')
-                        : text.EndsWith(':') ? text[..^1].Trim() : null;
-
-                    if (name is { Length: > 0 } && IsServiceName(name)) deps.Add(name);
-                    continue;
-                }
-
-                collecting = false;
-            }
-
-            // A service name: one level in from `services:`.
-            if ((serviceIndent < 0 || indent == serviceIndent) && text.EndsWith(':'))
-            {
-                Close();
-
-                serviceIndent = indent;
-                service = text[..^1].Trim();
-                continue;
-            }
-
-            if (service is not null && text.StartsWith("depends_on:", StringComparison.Ordinal))
-            {
-                dependsIndent = indent;
-                collecting = true;
-
-                // The inline form, `depends_on: [db, cache]`.
-                var inline = text["depends_on:".Length..].Trim();
-                if (inline.StartsWith('[') && inline.EndsWith(']'))
-                {
-                    deps.AddRange(inline[1..^1]
-                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                        .Where(IsServiceName));
-
-                    collecting = false;
-                }
-            }
-        }
-
-        Close();
-        return found;
-    }
-
-    /// <summary>A plausible service name, so a stray `condition:` value never becomes a node.</summary>
-    static bool IsServiceName(string name)
-        => name.Length > 0
-           && !name.Contains(' ', StringComparison.Ordinal)
-           && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+        => [.. ComposeDocument.Parse(yaml).Services.Select(s => s.Name)];
 
     /// <summary>
     /// The services in start order, shallowest first, with each level being everything that can

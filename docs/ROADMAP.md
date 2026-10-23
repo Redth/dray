@@ -674,6 +674,19 @@ storing registry or git credentials.
 **Exit:** a stack on a non-current host deploys to that host · scaling a service that fails says so
 from the exit code.
 
+**Progress:** done. Compose runs name their host (`--context`, or `-H` with TLS flags), get an
+allow-listed environment, and end with an exit code; `SupportsCompose` is measured. YamlDotNet
+replaced both line scanners — 28 existing graph and watch tests passed on it unchanged, and a
+service built from a merge key now has its edges. `compose config` is the authority, and its
+refusals are read by patterns captured from compose 5.4.0, one of which (the scanner's
+single-point position) was only found by saving a broken file from the editor.
+
+Pulled forward from 10.2, because it is what made the editor worth using: the Compose tab is a
+workspace with every file of the stack as a tab, the effective config beside them (secrets masked),
+compose's verdict rechecked on every save, and its problems drawn on their lines and listed under
+the editor. The schema check is `monaco-yaml` with the Compose Specification's schema, so a
+misspelt key is underlined while typing and again, by compose, after saving.
+
 ### 10.1 — A registry, and the whole lifecycle
 
 - **Three sources, merged:** a `stacks.json` of known stacks (host, project, working directory,

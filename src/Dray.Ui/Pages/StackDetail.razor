@@ -122,22 +122,10 @@
                        decide start order and keeps no record of it afterwards. *@
                     <DependencyGraph Services="current.Services" Yaml="@(_file?.Text)" />
                 }
-                else if (_file is { } file)
+                else if (_file is not null)
                 {
-                    @* The compose file and its .env, side by side, because the first is unreadable
-                       without the second: nothing in the YAML refers to the .env, and every
-                       ${VAR} in it resolves from there. *@
-                    <div class="stack__compose">
-                        <CodeEditor File="file" ReadOnly="@(!_writable)" OnSave="SaveAsync"
-                                    OnClose="BackToServices" Annotations="_annotations" />
-
-                        @if (WorkingDirectory is { Length: > 0 } directory)
-                        {
-                            <StackEnvPanel WorkingDirectory="@directory"
-                                           Referenced="_referenced"
-                                           VariablesChanged="OnVariablesChangedAsync" />
-                        }
-                    </div>
+                    <StackCompose Stack="current" WorkingDirectory="@WorkingDirectory"
+                                  OnClose="BackToServices" OnSaved="LoadComposeFile" />
                 }
                 else
                 {
@@ -166,13 +154,14 @@
     StackSummary? Stack => Engine.Stacks.FirstOrDefault(s => s.Name == StackName);
 
     string _tab = "Services";
+
+    /// <summary>
+    /// The first compose file, for the dependency graph. The Compose tab reads every file itself;
+    /// this is re-read when it saves, so the graph follows an edit to <c>depends_on</c>.
+    /// </summary>
     FileContent? _file;
     string? _fileError;
-    bool _writable;
     string? _readFor;
-
-    IReadOnlyList<EditorAnnotation> _annotations = [];
-    IReadOnlyCollection<string> _referenced = [];
 
     /// <summary>
     /// Where compose looks for <c>.env</c> — the directory it was run from, which it records on
@@ -255,83 +244,6 @@
         }
     }
 
-    /// <summary>
-    /// Re-annotate as the variables change — before saving, not after.
-    /// <para>
-    /// Seeing what a value will do is the reason to type it, so making the annotation wait for a
-    /// save would put the feedback after the decision it was meant to inform.
-    /// </para>
-    /// </summary>
-    Task OnVariablesChangedAsync(IReadOnlyList<EnvVar> variables)
-    {
-        Annotate(variables);
-        return Task.CompletedTask;
-    }
-
-    void Annotate(IReadOnlyList<EnvVar> variables)
-    {
-        if (_file is not { } file)
-        {
-            _annotations = [];
-            _referenced = [];
-            return;
-        }
-
-        var values = variables.ToDictionary(v => v.Key, v => v.Value, StringComparer.Ordinal);
-        var found = ComposeInterpolation.Find(file.Text, values);
-
-        _referenced = [.. found.Select(s => s.Name).Distinct(StringComparer.Ordinal)];
-
-        _annotations =
-        [
-            .. found.Select(s => new EditorAnnotation(
-                s.Line,
-                s.Column,
-                s.Length,
-                Hint(s),
-                Kind(s.State),
-                Hover(s))),
-        ];
-    }
-
-    /// <summary>
-    /// What is drawn beside the reference. Short, because it sits inside a line of YAML — the
-    /// explanation goes in the hover.
-    /// </summary>
-    static string Hint(Substitution s) => s.State switch
-    {
-        SubstitutionState.Missing => "→ empty",
-        SubstitutionState.Required => "→ will not run",
-        _ when s.Resolved.Length == 0 => "→ empty",
-        _ => "→ " + (s.Resolved.Length > 40 ? s.Resolved[..40] + "…" : s.Resolved),
-    };
-
-    static string Kind(SubstitutionState state) => state switch
-    {
-        SubstitutionState.Resolved => "ok",
-        SubstitutionState.Defaulted => "default",
-        SubstitutionState.Required => "required",
-        _ => "missing",
-    };
-
-    static string? Hover(Substitution s) => s.State switch
-    {
-        // The quiet failure, stated plainly. Compose does not error on this — it substitutes an
-        // empty string and carries on, so an image tag becomes `myapp:` and fails much later.
-        SubstitutionState.Missing =>
-            $"**{s.Name}** is not set.\n\nCompose substitutes an empty string and carries on, so "
-            + "this line becomes whatever it reads without the variable. Add it on the right.",
-
-        SubstitutionState.Required =>
-            $"**{s.Name}** is not set, and this reference requires it.\n\nCompose refuses to run "
-            + "the stack until it has a value.",
-
-        SubstitutionState.Defaulted =>
-            $"**{s.Name}** is not set, so the default in this reference is used.",
-
-        _ => null,
-    };
-
     protected override void OnParametersSet()
     {
         if (_readFor == StackName) return;
@@ -354,6 +266,9 @@
     /// </summary>
     void LoadComposeFile()
     {
+        _file = null;
+        _fileError = null;
+
         if (Stack?.ConfigFiles.FirstOrDefault() is not { } path) return;
 
         try
@@ -361,39 +276,10 @@
             if (!System.IO.File.Exists(path)) return;
 
             _file = FileContent.Decode(path, System.IO.File.ReadAllBytes(path));
-
-            // Annotated once on load with no variables, so a file full of ${VAR} shows what it
-            // would do right now rather than nothing until the panel reports in.
-            Annotate([]);
-
-            // Editing is offered only where it would actually take effect. A read-only file, or one
-            // Dray cannot write, opens for reading rather than presenting a Save that fails.
-            var info = new System.IO.FileInfo(path);
-            _writable = !info.IsReadOnly;
         }
         catch (Exception ex)
         {
             _fileError = ex.Message;
-        }
-    }
-
-    /// <summary>
-    /// Write the file back.
-    /// <para>
-    /// Saving does not apply anything — compose reads the file when it next runs. Saying so is the
-    /// difference between a user thinking their change is live and finding out later.
-    /// </para>
-    /// </summary>
-    Task<string?> SaveAsync(string path, byte[] content)
-    {
-        try
-        {
-            System.IO.File.WriteAllBytes(path, content);
-            return Task.FromResult<string?>(null);
-        }
-        catch (Exception ex)
-        {
-            return Task.FromResult<string?>(ex.Message);
         }
     }
 

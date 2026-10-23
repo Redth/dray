@@ -156,6 +156,41 @@ public sealed class ComposeCli(
             ct);
 
     /// <summary>
+    /// Ask compose what it makes of a stack: <c>compose config</c>, the same parse, merge,
+    /// interpolation and validation <c>up</c> runs first — so a file it accepts is one <c>up</c>
+    /// will read, and a problem it reports is one Deploy would have hit.
+    /// <para>
+    /// The authority, rather than anything Dray checks itself. The schema the editor validates
+    /// against catches a typo while typing; this catches what only compose knows — an undefined
+    /// dependency, a required variable with no value, an override that does not merge.
+    /// </para>
+    /// </summary>
+    public async Task<Model.ComposeConfig> ConfigAsync(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        string? workingDirectory,
+        CancellationToken ct = default)
+    {
+        var yaml = new System.Text.StringBuilder();
+        var errors = new System.Text.StringBuilder();
+        int? exitCode = null;
+
+        await foreach (var line in RunAsync(command, target, project, files, ["config"], workingDirectory, ct).ConfigureAwait(false))
+        {
+            if (line.IsExit) exitCode = line.ExitCode;
+            else if (line.IsError) errors.AppendLine(line.Text);
+            else yaml.Append(line.Text).Append('\n');
+        }
+
+        return new Model.ComposeConfig(
+            exitCode == 0 ? yaml.ToString() : null,
+            Model.ComposeProblems.Parse(errors.ToString()),
+            exitCode);
+    }
+
+    /// <summary>
     /// The full argument list for one compose invocation.
     /// <para>
     /// A pure function so that what Dray runs can be tested exactly, and so a UI that shows the

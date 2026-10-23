@@ -43,6 +43,11 @@ jobs:
       - name: Vendored ansi_up is current
         run: node build/vendor-ansi.mjs --check
 
+      # Rebundles with esbuild and compares; the Compose schema is checked against its pinned hash
+      # without fetching anything.
+      - name: Vendored monaco-yaml and Compose schema are current
+        run: node build/vendor-monaco-yaml.mjs --check
+
   build:
     name: Build (${{ matrix.name }})
     needs: design

@@ -23,3 +23,27 @@ public sealed record EditorAnnotation(
     string Text,
     string Kind,
     string? Hover = null);
+
+/// <summary>
+/// Something wrong with the text at a place in it, drawn the way an editor draws a compile error:
+/// an underline, a gutter mark, a hover, and an entry on the scrollbar.
+/// <para>
+/// A separate record from <see cref="EditorAnnotation"/> because it is a different thing — an
+/// annotation explains what a span will become, a problem says the span is wrong — and Monaco keeps
+/// them apart too, as decorations and as markers.
+/// </para>
+/// </summary>
+/// <param name="Line">1-based.</param>
+/// <param name="Column">1-based, at the first character.</param>
+/// <param name="EndLine">1-based.</param>
+/// <param name="EndColumn">1-based, one past the last character, as Monaco's ranges are.</param>
+/// <param name="Severity"><c>error</c> or <c>warning</c>.</param>
+/// <param name="Source">Who said so, shown after the message — e.g. <c>compose</c>.</param>
+public sealed record EditorProblem(
+    int Line,
+    int Column,
+    int EndLine,
+    int EndColumn,
+    string Message,
+    string Severity,
+    string Source);

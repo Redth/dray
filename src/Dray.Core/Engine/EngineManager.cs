@@ -416,6 +416,28 @@ public sealed class EngineManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Have compose check a stack against the selected host — what <c>up</c> would read, without
+    /// running it.
+    /// </summary>
+    public async Task<ComposeConfig> ValidateComposeAsync(StackSummary stack, CancellationToken ct = default)
+    {
+        if (await _compose.DetectAsync(ct).ConfigureAwait(false) is not { } command)
+            return new ComposeConfig(null, [new ComposeProblem("Compose is not installed on this machine.", ProblemSeverity.Error)], null);
+
+        if (Selected is not { } host || ComposeTarget.For(host, command) is not { } target)
+        {
+            return new ComposeConfig(
+                null,
+                [new ComposeProblem($"{command.Display} has no way to address {Selected?.Endpoint.Display ?? "this host"}.", ProblemSeverity.Error)],
+                null);
+        }
+
+        return await _compose
+            .ConfigAsync(command, target, stack.Name, stack.ConfigFiles, stack.WorkingDirectory, ct)
+            .ConfigureAwait(false);
+    }
+
     // ---------------------------------------------------------------- images
 
     public async Task<IReadOnlyList<ImageSummary>> ListImagesAsync(bool includeDangling = true, CancellationToken ct = default)

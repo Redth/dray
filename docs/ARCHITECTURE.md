@@ -285,8 +285,18 @@ environment ahead of the stack's `.env`, so an exported `TAG` or `COMPOSE_FILE` 
 change what runs. `SupportsCompose` is measured from both halves — a compose on this machine, and a
 target for this host — which is why neither runtime sets it.
 
-Phase 10 moves reading the file onto compose's own parser (`compose config --format json`) and a
-real YAML parser for positions; today the graph and watch detection scan lines.
+**Two parsers, each for what it is the authority on.** What a stack *means* comes from
+`docker compose config` — merged files, interpolation, profiles, validation — and Dray
+reimplements none of it. What compose cannot say is *where* in the user's text something is: its
+output is re-serialised and its errors name paths like `services.web.ports`. `ComposeDocument`
+answers that with YamlDotNet, which keeps positions, so a problem compose reports lands on the
+line it is about, in whichever of the stack's files that line is in. `ComposeProblems` reads
+compose's refusals; every pattern in it was captured from a real run.
+
+**The editor knows the spec.** Compose files open with the YAML language server VS Code uses
+(`monaco-yaml`), fed the Compose Specification's own JSON schema: completion of every key, hover
+documentation, and validation as you type. Both are vendored by `build/vendor-monaco-yaml.mjs` —
+bundled with esbuild, the schema pinned to a commit and checked by hash — so it works offline.
 
 Running stacks are discovered from the `com.docker.compose.project`, `.service`, and
 `.project.config_files` labels on containers, so a stack started from a terminal appears in Dray

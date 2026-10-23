@@ -1,0 +1,485 @@
+@* A stack's compose files, as a workspace.
+
+   Every file the stack was brought up with is a tab, because an override is half the stack and
+   reading only the base file shows a different one. Beside them is what compose actually makes of
+   the lot — the effective config — and above them its verdict, rechecked on every save.
+
+   Two checkers, each for what it is the authority on. The editor validates against the Compose
+   Specification's schema as you type, which catches the misspelt key before anything runs.
+   `compose config` runs on save, and catches what only compose knows: a dependency on a service
+   that is not there, a required variable with no value, an override that does not merge. Its
+   problems are drawn on the line they are about, in whichever file that line is in. *@
+@implements IDisposable
+@inject EngineManager Engine
+@inject IShellBridge Shell
+
+<div class="sc">
+    <div class="sc__bar">
+        <div class="sc__files" role="tablist" aria-label="Files in this stack">
+            @for (var i = 0; i < _files.Count; i++)
+            {
+                var index = i;
+                var file = _files[i];
+                var count = _placed.Count(p => p.FileIndex == index);
+
+                <button type="button" role="tab" class="tab sc__tab @(_active == index ? "is-active" : null)"
+                        aria-selected="@((_active == index).ToString().ToLowerInvariant())"
+                        title="@file.Path" @onclick="() => SwitchAsync(index)">
+                    <Icon Name="IconRef.File" Size="IconSize.Sm" />
+                    <span class="mono">@System.IO.Path.GetFileName(file.Path)</span>
+
+                    @if (count > 0)
+                    {
+                        <span class="sc__count" aria-label="@($"{count} problem{(count == 1 ? "" : "s")}")">@count</span>
+                    }
+                </button>
+            }
+
+            <button type="button" role="tab" class="tab sc__tab @(_active == Effective ? "is-active" : null)"
+                    aria-selected="@((_active == Effective).ToString().ToLowerInvariant())"
+                    title="Every file merged and every variable substituted — what compose will run"
+                    @onclick="() => SwitchAsync(Effective)">
+                <Icon Name="IconRef.Inspect" Size="IconSize.Sm" />
+                <span>Effective config</span>
+            </button>
+        </div>
+
+        <span class="sc__verdict sc__verdict--@VerdictTone" role="status" title="@VerdictDetail">
+            <Icon Name="VerdictIcon" Size="IconSize.Sm" />
+            <span>@VerdictText</span>
+        </span>
+
+        <Button Label="Check" Icon="IconRef.Refresh" Variant="ButtonVariant.Ghost" Busy="_checking"
+                Disabled="_checking" OnClick="CheckAsync" />
+    </div>
+
+    <div class="sc__main">
+        <div class="sc__left">
+            @if (_active == Effective)
+            {
+                @if (EffectiveFile is { } effective)
+                {
+                    <div class="note sc__note">
+                        <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                        <span>What compose will run: every file merged, every variable substituted, every default filled in. Read only. Secrets are masked.</span>
+                    </div>
+
+                    <CodeEditor File="effective" ReadOnly="true" Schema="compose" OnSave="(_, _) => Task.FromResult<string?>(null)"
+                                OnClose="() => SwitchAsync(0)" />
+                }
+                else
+                {
+                    <div class="page">
+                        <EmptyState Icon="IconRef.Inspect"
+                                    Title="@(_checking ? "Asking compose…" : "Compose did not accept this stack")"
+                                    Body="@(_checking ? "The effective config is what compose makes of these files once they are merged." : "There is no effective config until the problems listed below are fixed.")" />
+                    </div>
+                }
+            }
+            else if (Active is { } file)
+            {
+                <CodeEditor @ref="_editor" File="file" ReadOnly="@(!_writable.GetValueOrDefault(_active))" Schema="compose"
+                            OnSave="SaveAsync" OnClose="OnClose" OnDirtyChanged="d => _dirty = d"
+                            Annotations="_annotations" Problems="EditorProblems" />
+            }
+
+            @if (_placed.Count > 0)
+            {
+                <ul class="sc__problems" aria-label="What compose reported">
+                    @foreach (var placed in _placed.OrderBy(p => p.Problem.Severity).ThenBy(p => p.FileIndex ?? int.MaxValue).ThenBy(p => p.Range?.Line ?? 0))
+                    {
+                        var captured = placed;
+                        var error = placed.Problem.Severity == ProblemSeverity.Error;
+
+                        <li>
+                            <button type="button" class="sc__problem" disabled="@(placed.FileIndex is null)"
+                                    @onclick="() => GoToAsync(captured)">
+                                <span class="sc__sev sc__sev--@(error ? "error" : "warning")">
+                                    <Icon Name="@(error ? IconRef.Error : IconRef.Warning)" Size="IconSize.Sm" />
+                                    @(error ? "Error" : "Warning")
+                                </span>
+
+                                <span class="sc__where mono muted">
+                                    @Where(placed)
+                                </span>
+
+                                <span class="sc__message">@placed.Problem.Message</span>
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        @if (WorkingDirectory is { Length: > 0 } directory)
+        {
+            <StackEnvPanel WorkingDirectory="@directory" Referenced="_referenced"
+                           VariablesChanged="OnVariablesChanged" Saved="CheckAsync" />
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The stack whose files these are.</summary>
+    [Parameter, EditorRequired] public StackSummary Stack { get; set; } = default!;
+
+    /// <summary>Where compose looks for <c>.env</c>.</summary>
+    [Parameter] public string? WorkingDirectory { get; set; }
+
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>Raised after a compose file is written, so the owner can re-read what it shows.</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    /// <summary>The tab index that means the effective config rather than a file.</summary>
+    const int Effective = -1;
+
+    CodeEditor? _editor;
+    readonly List<FileContent> _files = [];
+    readonly Dictionary<int, bool> _writable = [];
+    readonly List<ComposeDocument> _documents = [];
+
+    int _active;
+    bool _dirty;
+
+    ComposeConfig? _config;
+    IReadOnlyList<PlacedProblem> _placed = [];
+    bool _checking;
+    CancellationTokenSource? _checkCts;
+
+    IReadOnlyList<EnvVar> _variables = [];
+    IReadOnlyList<EditorAnnotation> _annotations = [];
+    IReadOnlyCollection<string> _referenced = [];
+
+    string? _loadedFor;
+
+    FileContent? Active => _active >= 0 && _active < _files.Count ? _files[_active] : null;
+
+    FileContent? EffectiveFile => _config?.Redact(_variables) is { } yaml
+        ? new FileContent { Path = "compose config", Text = yaml }
+        : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = string.Join('\n', Stack.ConfigFiles);
+        if (_loadedFor == key) return;
+
+        _loadedFor = key;
+        Load();
+        await CheckAsync();
+    }
+
+    /// <summary>
+    /// Read every compose file the stack was brought up with that exists on this machine.
+    /// <para>
+    /// The paths come from a label compose wrote on the containers, so for a stack started on a
+    /// remote host they name that host's disk and are simply absent here. The owner says so; this
+    /// component is only shown when at least one file is readable.
+    /// </para>
+    /// </summary>
+    void Load()
+    {
+        _files.Clear();
+        _documents.Clear();
+        _writable.Clear();
+        _active = 0;
+
+        foreach (var path in Stack.ConfigFiles)
+        {
+            try
+            {
+                if (!System.IO.File.Exists(path)) continue;
+
+                var content = FileContent.Decode(path, System.IO.File.ReadAllBytes(path));
+
+                // Editing is offered only where it would take effect. A read-only file opens for
+                // reading rather than presenting a Save that fails.
+                _writable[_files.Count] = !new System.IO.FileInfo(path).IsReadOnly;
+                _files.Add(content);
+                _documents.Add(ComposeDocument.Parse(content.Text));
+            }
+            catch (Exception)
+            {
+                // Unreadable is the same as absent here: the tab would have nothing to show.
+            }
+        }
+
+        Annotate();
+    }
+
+    /// <summary>
+    /// Ask compose what it makes of the stack, and place what it says.
+    /// <para>
+    /// The previous check is cancelled rather than awaited: a save while one is in flight means the
+    /// answer it is waiting for is already about a file that no longer exists.
+    /// </para>
+    /// </summary>
+    async Task CheckAsync()
+    {
+        _checkCts?.Cancel();
+        _checkCts?.Dispose();
+
+        var cts = _checkCts = new CancellationTokenSource();
+        _checking = true;
+        StateHasChanged();
+
+        try
+        {
+            var config = await Engine.ValidateComposeAsync(Stack, cts.Token);
+            if (cts.IsCancellationRequested) return;
+
+            _config = config;
+            Place();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (_checkCts == cts) _checking = false;
+            StateHasChanged();
+        }
+    }
+
+    void Place()
+    {
+        _placed = _config is null
+            ? []
+            : _config.Place([.. _files.Select((f, i) => (f.Path, _documents[i]))]);
+    }
+
+    /// <summary>The placed problems in the file on screen, as the editor draws them.</summary>
+    IReadOnlyList<EditorProblem> EditorProblems =>
+    [
+        .. _placed
+            .Where(p => p.FileIndex == _active && p.Range is not null)
+            .Select(p => ToEditor(p.Problem, p.Range!)),
+    ];
+
+    static EditorProblem ToEditor(ComposeProblem problem, YamlRange range)
+    {
+        // A zero-width range draws nothing. Widen it to the rest of the line's first word so the
+        // squiggle is visible; Monaco clamps an end past the line to the line's end.
+        var endColumn = range.EndLine == range.Line && range.EndColumn <= range.Column ? range.Column + 1 : range.EndColumn;
+
+        return new EditorProblem(
+            range.Line, range.Column, range.EndLine, endColumn,
+            problem.Message,
+            problem.Severity == ProblemSeverity.Error ? "error" : "warning",
+            "compose");
+    }
+
+    string Where(PlacedProblem placed)
+    {
+        if (placed.FileIndex is not { } index) return placed.Problem.File is { } file ? System.IO.Path.GetFileName(file) : "stack";
+
+        var name = System.IO.Path.GetFileName(_files[index].Path);
+        return placed.Range is { } range ? $"{name}:{range.Line}" : name;
+    }
+
+    async Task GoToAsync(PlacedProblem placed)
+    {
+        if (placed.FileIndex is not { } index) return;
+
+        if (index != _active)
+        {
+            if (!await SwitchAsync(index)) return;
+
+            // The editor swaps to the other file when it next renders; the reveal has to follow
+            // that swap rather than land in the file being left.
+            StateHasChanged();
+            await Task.Yield();
+        }
+
+        if (placed.Range is { } range && _editor is not null) await _editor.RevealAsync(range.Line, range.Column);
+    }
+
+    /// <returns>False when the user chose to keep their unsaved edit instead.</returns>
+    async Task<bool> SwitchAsync(int index)
+    {
+        if (index == _active) return true;
+
+        // Switching swaps the editor's content, so an unsaved edit would go with it.
+        if (_dirty && Active is { } current)
+        {
+            var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+                $"Discard your changes to {System.IO.Path.GetFileName(current.Path)}?",
+                "They have not been saved. Switching files puts the saved version back.",
+                "Discard changes"));
+
+            if (answer != ConfirmResult.Confirm) return false;
+        }
+
+        _dirty = false;
+        _active = index;
+        Annotate();
+        return true;
+    }
+
+    /// <summary>
+    /// Write a compose file, then have compose look at it again.
+    /// <para>
+    /// Saving does not apply anything — compose reads the file when it next runs. What a save does
+    /// change is compose's verdict, which is why the check follows it.
+    /// </para>
+    /// </summary>
+    async Task<string?> SaveAsync(string path, byte[] content)
+    {
+        try
+        {
+            await System.IO.File.WriteAllBytesAsync(path, content);
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+
+        var index = _files.FindIndex(f => f.Path == path);
+
+        if (index >= 0)
+        {
+            _files[index] = FileContent.Decode(path, content);
+            _documents[index] = ComposeDocument.Parse(_files[index].Text);
+        }
+
+        Annotate();
+        await OnSaved.InvokeAsync();
+        _ = CheckAsync();
+
+        return null;
+    }
+
+    void OnVariablesChanged(IReadOnlyList<EnvVar> variables)
+    {
+        _variables = variables;
+        Annotate();
+    }
+
+    /// <summary>
+    /// What every <c>${VAR}</c> in the file on screen resolves to, drawn beside it.
+    /// <para>
+    /// Re-annotated as the variables change, before saving: seeing what a value will do is the
+    /// reason to type it, and making that wait for a save would put the feedback after the decision.
+    /// </para>
+    /// </summary>
+    void Annotate()
+    {
+        var values = _variables.ToDictionary(v => v.Key, v => v.Value, StringComparer.Ordinal);
+
+        // Referenced across every file, so a variable used only in the override is not reported as
+        // unused while the base file is on screen.
+        _referenced =
+        [
+            .. _files.SelectMany(f => ComposeInterpolation.Find(f.Text, values)).Select(s => s.Name).Distinct(StringComparer.Ordinal),
+        ];
+
+        if (Active is not { } file)
+        {
+            _annotations = [];
+            return;
+        }
+
+        _annotations =
+        [
+            .. ComposeInterpolation.Find(file.Text, values).Select(s => new EditorAnnotation(
+                s.Line, s.Column, s.Length, Hint(s), Kind(s.State), Hover(s))),
+        ];
+    }
+
+    // ---------------------------------------------------------------- the verdict
+
+    int Errors => _config?.Problems.Count(p => p.Severity == ProblemSeverity.Error) ?? 0;
+
+    int Warnings => _config?.Problems.Count(p => p.Severity == ProblemSeverity.Warning) ?? 0;
+
+    string VerdictTone => _checking || _config is null
+        ? "busy"
+        : !_config.IsValid ? "danger" : Warnings > 0 ? "warn" : "ok";
+
+    IconRef VerdictIcon => VerdictTone switch
+    {
+        "ok" => IconRef.Check,
+        "warn" => IconRef.Warning,
+        "danger" => IconRef.Error,
+        _ => IconRef.Refresh,
+    };
+
+    string VerdictText
+    {
+        get
+        {
+            if (_checking || _config is null) return "Checking…";
+
+            if (!_config.IsValid)
+            {
+                return Errors switch
+                {
+                    0 => "Compose refused",
+                    1 => "1 problem",
+                    var n => $"{n} problems",
+                };
+            }
+
+            return Warnings switch
+            {
+                0 => "Valid",
+                1 => "Valid · 1 warning",
+                var n => $"Valid · {n} warnings",
+            };
+        }
+    }
+
+    string VerdictDetail => _config is null
+        ? "Compose is reading the stack's files."
+        : _config.IsValid
+            ? "docker compose config accepts every file in this stack."
+            : _config.ExitCode is { } code
+                ? $"docker compose config exited with {code}."
+                : "Compose did not say whether it accepts this stack.";
+
+    // ---------------------------------------------------------------- ${VAR} hints
+
+    /// <summary>
+    /// What is drawn beside the reference. Short, because it sits inside a line of YAML — the
+    /// explanation goes in the hover.
+    /// </summary>
+    static string Hint(Substitution s) => s.State switch
+    {
+        SubstitutionState.Missing => "→ empty",
+        SubstitutionState.Required => "→ will not run",
+        _ when s.Resolved.Length == 0 => "→ empty",
+        _ => "→ " + (s.Resolved.Length > 40 ? s.Resolved[..40] + "…" : s.Resolved),
+    };
+
+    static string Kind(SubstitutionState state) => state switch
+    {
+        SubstitutionState.Resolved => "ok",
+        SubstitutionState.Defaulted => "default",
+        SubstitutionState.Required => "required",
+        _ => "missing",
+    };
+
+    static string? Hover(Substitution s) => s.State switch
+    {
+        // The quiet failure, stated plainly. Compose does not error on this — it substitutes an
+        // empty string and carries on, so an image tag becomes `myapp:` and fails much later.
+        SubstitutionState.Missing =>
+            $"**{s.Name}** is not set.\n\nCompose substitutes an empty string and carries on, so "
+            + "this line becomes whatever it reads without the variable. Add it on the right.",
+
+        SubstitutionState.Required =>
+            $"**{s.Name}** is not set, and this reference requires it.\n\nCompose refuses to run "
+            + "the stack until it has a value.",
+
+        SubstitutionState.Defaulted =>
+            $"**{s.Name}** is not set, so the default in this reference is used.",
+
+        _ => null,
+    };
+
+    public void Dispose()
+    {
+        _checkCts?.Cancel();
+        _checkCts?.Dispose();
+    }
+}
