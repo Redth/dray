@@ -110,7 +110,8 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
             SupportsEvents = true,
 
             // Compose and buildx are CLI plugins on the client side, not engine features, so they
-            // are probed separately by the shell rather than read off the daemon.
+            // are probed separately rather than read off the daemon. EngineManager sets this one
+            // once it knows both halves — a compose here, and a way for it to reach this host.
             SupportsCompose = false,
             SupportsBuildKit = flavor == EngineFlavor.Docker,
 
@@ -426,6 +427,14 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
 
     public Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default)
         => DockerImages.HistoryAsync(Client, imageId, ct);
+
+    public Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
+        => DockerImages.DefaultsAsync(Client, image, ct);
+
+    public Task<ImageUpdate> CheckImageUpdateAsync(string reference, RegistryCredential? credential, CancellationToken ct = default)
+        => _raw is { } raw
+            ? DockerImages.CheckUpdateAsync(Client, raw, reference, credential, ct)
+            : Task.FromResult(ImageUpdate.Unknown("Not connected to an engine."));
 
     public Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default)
         => DockerImages.RemoveAsync(Client, imageId, force, ct);

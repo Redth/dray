@@ -34,6 +34,12 @@
     <PackageVersion Include="Docker.DotNet.Enhanced.X509" Version="4.3.3" />
   </ItemGroup>
 
+  <ItemGroup Label="Compose">
+    <!-- The YAML parser. Compose's own parser answers what a stack means (compose config); this
+         one answers where in the file a thing is, which compose's output cannot. -->
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Runtime">
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />

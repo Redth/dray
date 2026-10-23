@@ -144,3 +144,32 @@ public class DotEnvFileTests
         Assert.Equal("TOKEN=abc\n", written);
     }
 }
+
+public class DotEnvSetTests
+{
+    [Fact]
+    public void SettingOneLineLeavesEveryOtherAlone()
+    {
+        const string text = "# Database\nPOSTGRES_PASSWORD=\"s3 cret\"\n\n# Profiles\nCOMPOSE_PROFILES=debug\nTZ=UTC\n";
+
+        var after = Dray.Core.Model.DotEnvFile.Set(text, "COMPOSE_PROFILES", "debug,ops");
+
+        Assert.Equal("# Database\nPOSTGRES_PASSWORD=\"s3 cret\"\n\n# Profiles\nCOMPOSE_PROFILES=debug,ops\nTZ=UTC\n", after);
+    }
+
+    [Fact]
+    public void ANewVariableIsAppendedAndARemovedOneGoes()
+    {
+        Assert.Equal("TZ=UTC\nCOMPOSE_PROFILES=ops\n", Dray.Core.Model.DotEnvFile.Set("TZ=UTC\n", "COMPOSE_PROFILES", "ops"));
+        Assert.Equal("TZ=UTC\n", Dray.Core.Model.DotEnvFile.Set("TZ=UTC\nCOMPOSE_PROFILES=ops\n", "COMPOSE_PROFILES", null));
+        Assert.Equal("COMPOSE_PROFILES=ops\n", Dray.Core.Model.DotEnvFile.Set(null, "COMPOSE_PROFILES", "ops"));
+    }
+
+    [Fact]
+    public void ARepeatedKeyEndsUpDefinedOnce()
+        => Assert.Equal("A=1\nB=3\n", Dray.Core.Model.DotEnvFile.Set("A=1\nB=2\nB=x\n", "B", "3"));
+
+    [Fact]
+    public void CrlfStaysCrlf()
+        => Assert.Equal("A=1\r\nB=2\r\n", Dray.Core.Model.DotEnvFile.Set("A=1\r\n", "B", "2"));
+}

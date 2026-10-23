@@ -298,7 +298,11 @@ compose refuses to run one, and hiding the services involved would hide the reas
 subcommand, and a `develop.watch` block in the file. It is the one command here that never
 finishes, so it has its own token and stops when the page goes away.
 
-**Phase 5 is complete.**
+~~**Phase 5 is complete.**~~ **It was not.** A re-read against the exit criteria found that a down
+stack vanishes, because nothing tracks user-added files; that compose is never told which host to
+target, so it follows whatever the CLI's context happens to be; that `SupportsCompose` was never
+measured and reads false on every engine; and that build, recreate, per-service restart and exec,
+and schema validation were never built. Phase 10 picks all of it up.
 
 **Demo:** open a project's stack, bring it up, watch one service fail its healthcheck, read that
 service's logs in the aggregated view, fix the compose file, recreate just that service.
@@ -688,6 +692,232 @@ where the command already works instead of offering one that cannot.
 **Phase 9 — considered, not committed.** Machine lifecycle (creating the VM rather than driving it) ·
 `docker scout` vulnerability surfacing · Swarm · Kubernetes. Kubernetes and pods are explicitly out of
 v1 scope. Each of these is a product decision, not a backlog item.
+
+---
+
+## Phase 10 — Stacks you author, not just observe
+
+Phase 5 made stacks visible. This phase makes them something you create, edit, deploy and keep,
+on this machine and on a remote host, without Dray ever owning the files.
+
+The design borrows from two web UIs that do this well and avoids what their issue trackers say goes
+wrong. **Dockge**: files on disk in a folder per stack so the CLI keeps working, Save separate from
+Deploy, live output that replays to whoever joins late, one operation per stack at a time.
+**Dockhand**: managed / adopted / observed provenance, status and health as separate values,
+a redeploy popover that shows the exact command, `-H` on the command line rather than `DOCKER_HOST`
+in the environment, lint while typing with `compose config` as the authority, a delete that previews
+exactly what goes. **What both get wrong**, and Dray must not: regenerating YAML from an object on
+every form edit (comments, quotes and tags lost — Dockge's largest bug cluster), any exited
+container marking the whole stack exited (Dockge's most-upvoted bug), polling `compose ls` on a
+timer, read-only stacks for anything the tool did not create, one compose file per stack, and
+storing registry or git credentials.
+
+### 10.0 — Foundations
+
+- **One pure function builds every compose command line**, tested exhaustively. The host goes on
+  the command line — `--context <name>` for a context, otherwise `-H` plus the TLS flags — never in
+  the environment, where it would leak into compose's own interpolation and into services that read
+  `DOCKER_HOST`. The process gets a minimal environment for the same reason: a shell variable
+  overrides an `--env-file` value.
+- **Streamed commands report an exit code.** Failure is the exit code, not a search for "error" in
+  stderr.
+- **`SupportsCompose` is measured**: a compose CLI on this machine *and* an engine it can drive.
+  Apple's `container` is not one.
+- **Compose's own parser for meaning.** `docker compose config --format json` answers what the
+  stack *is* — services, ports, includes, overrides, profiles, interpolation — so the graph and every
+  derived view read the model compose will actually run. YAML positions, for editor markers and
+  surgical edits, come from a real parser rather than line scanning.
+
+**Exit:** a stack on a non-current host deploys to that host · scaling a service that fails says so
+from the exit code.
+
+**Progress:** done. Compose runs name their host (`--context`, or `-H` with TLS flags), get an
+allow-listed environment, and end with an exit code; `SupportsCompose` is measured. YamlDotNet
+replaced both line scanners — 28 existing graph and watch tests passed on it unchanged, and a
+service built from a merge key now has its edges. `compose config` is the authority, and its
+refusals are read by patterns captured from compose 5.4.0, one of which (the scanner's
+single-point position) was only found by saving a broken file from the editor.
+
+Pulled forward from 10.2, because it is what made the editor worth using: the Compose tab is a
+workspace with every file of the stack as a tab, the effective config beside them (secrets masked),
+compose's verdict rechecked on every save, and its problems drawn on their lines and listed under
+the editor. The schema check is `monaco-yaml` with the Compose Specification's schema, so a
+misspelt key is underlined while typing and again, by compose, after saving.
+
+### 10.1 — A registry, and the whole lifecycle
+
+- **Three sources, merged:** a `stacks.json` of known stacks (host, project, working directory,
+  files, env files, profiles — paths, never values), compose labels on containers, and stack folders
+  the user adds, scanned recursively and watched rather than polled. A stack that is down, or
+  written and never deployed, is still listed.
+- **The stacks folder is asked for on first use**, suggesting `~/Stacks`, never assumed.
+- **Provenance.** *Managed* — Dray created the folder. *Adopted* — files edited where they are and
+  never deleted by Dray, prefilled from `config_files` / `working_dir` when every container agrees.
+  *Observed* — labels only, with per-container fallback actions rather than none.
+- **Status:** running · partial · restarting · stopped · down · draft. A container that exited 0 is
+  a completed one-shot, not a failure. Health is a separate value, never folded into status. Tint,
+  glyph and word, as everywhere.
+- **Stack actions:** Deploy through a popover that shows the exact command, with presets (only
+  changed · recreate all · pull and recreate); start, stop, restart; pull and update, which brings up
+  only a stack that was already running; build; down, typed only when it takes volumes with it;
+  **Forget** (drop from Dray, touch nothing) separate from **Delete** (preview of exactly which
+  files and volumes go, typed name, adopted files never deleted).
+- **Per-service actions:** start, stop, restart, recreate (`up -d --no-deps --force-recreate`),
+  pull, scale, logs, and exec with a replica picker.
+- **One operation per stack**, with its output kept so leaving the page and coming back shows it.
+- `COMPOSE_FILE`, `COMPOSE_PROFILES` and `COMPOSE_PROJECT_NAME` in the stack's `.env` are honoured.
+
+**Exit:** a down stack is still listed · deleting an adopted stack cannot remove its files · one
+exited migration container does not turn a stack red.
+
+**Progress:** done, and driven end to end in a browser against Docker Desktop: a stacks folder of
+two drafts, one deployed through the dialog with the pull preset, stopped, brought down — still
+listed as Down, with Deploy as its next action — and the other deleted by typing its name, folder
+and all. **All three exit criteria met.**
+
+- **Three sources, one list** (`StackCatalog`): labels, `stacks.json` (paths only — a test asserts
+  no value is ever written), and the stacks folder, scanned without descending into a stack's own
+  data and watched rather than polled. A stack is remembered the moment its containers are seen with
+  their files on this machine, so one brought up from a terminal stays listed after a down too.
+- **Compose's own naming rules**, measured rather than read: `My_Stack.v2` is `my_stackv2`,
+  `.env`'s `COMPOSE_PROJECT_NAME` beats the file's `name:`, and an override is passed explicitly
+  because `-f` turns compose's discovery of it off.
+- **A stack whose files are elsewhere still has real controls.** Measured: `start`, `stop`,
+  `restart` and `down` work with nothing but `-p`, from any directory; `pull` and anything that
+  creates do not. So those stacks get the four that work and no Deploy.
+- **Every action is one builder** (`StackCommands`), so the dialog's command preview is the
+  command that runs, and each step of a multi-step action announces itself in the output.
+- **The first-use question** is a card on the Stacks page with `~/Stacks` suggested, not a folder
+  created unasked.
+
+A **Build** action appears for any stack or service with a `build:` section. Not done here: the
+Windows head, which does not exist yet. A `DRAY_CONFIG_DIR` override keeps development runs out of
+the installed app's registry.
+
+### 10.2 — Authoring
+
+- **New stack:** blank, from an image, from a `docker run` line, from running containers (their
+  inspect data, not a guessed command line), or by adopting a folder. A native dialog frame.
+- **Every file in the stack is a tab** — base, override, includes, `.env` — plus a read-only
+  *effective config* and a profile picker.
+- **Validation in three layers:** the compose-spec schema, vendored, for completion, hover and
+  errors in Monaco; lint rules that use what Dray already knows (a port another stack already
+  publishes, a relative bind mount on a remote host, a socket mount, `:latest`); and `compose config`
+  on save and before deploy as the authority.
+- **Drift without polling.** `compose config --hash` per service against each container's
+  `com.docker.compose.config-hash` gives "edited, not deployed". A snapshot of the last deployed
+  effective config — compose files only, never `.env` — gives a pending-changes diff, and a hash of
+  bind-mounted config files catches an edited `nginx.conf` the YAML never mentions.
+- **Quick actions, not a form editor.** Add a service, a port, a variable — as splices into the text
+  that leave every other byte alone.
+
+**Exit:** a comment survives every edit Dray makes · an invalid file is caught before Deploy, not by
+it · a deployed stack shows which services the edit will recreate.
+
+**Progress:** done, driven end to end in a browser against Docker Desktop in both themes. **All
+three exit criteria met.**
+
+- **New stack** from a template, an image, a `docker run` line (composerize, vendored — Dockge's
+  choice of library) or running containers. From containers, the inspect record is the source with
+  the image's own defaults subtracted: copying `NGINX_VERSION` into a compose file would pin it and
+  override the next image's value. A new runtime call, `GetImageDefaultsAsync`, answers that, and
+  answers "unknown" on an engine that cannot say — in which case everything is kept and the dialog
+  says so. Existing volumes and networks come across as `external`, so the data is reused rather
+  than recreated empty. A secret goes to `.env` and the file says `${NAME}`. The generated file was
+  checked with `docker compose config`.
+- **Drift is compose's own definition.** `compose config --hash` equals the
+  `com.docker.compose.config-hash` label for an unedited service, and differs for exactly the
+  edited one — measured. The Services tab marks the edited service, says what Deploy will do, and
+  the Deploy dialog says it again for the options chosen.
+- **Deploy asks compose first.** A file compose refuses never reaches `up`: its problems are listed
+  with a way to the line.
+- **Quick actions are insertions** — add a service, port or variable — computed against the
+  editor's unsaved text and landing in it unsaved, selected, one undo. They decline rather than
+  reformat when a block is written inline. Review shows any edit in Monaco's diff editor before
+  saving.
+- **Dray's lint**: a port another container already publishes, an unpinned image, the engine's
+  socket mounted, a relative path on a remote engine. Advice, labelled as Dray's, never part of
+  compose's verdict.
+
+- **Profiles** are chips on the stack's page that write `COMPOSE_PROFILES` into its `.env` — one
+  line, comments kept — because compose reads that for every command, a terminal's included.
+  Measured: honoured with `-f` given and from any directory.
+- **An edited mounted file is a change.** Compose's hash does not cover files a service binds in,
+  so Dray keeps SHA-256 digests of them at each deploy it runs (`history.json`, digests only) and
+  marks a service whose `nginx.conf` moved as "File changed". Deploy then adds
+  `up -d --no-deps --force-recreate` for exactly those services — verified: the edit is picked up,
+  and the drift clears.
+
+### 10.3 — Inspect and operate
+
+- **Overview:** published ports as links, the project's networks, volumes and images, combined
+  stats from the stats stream, and `x-dray: { urls, icon }` read from the file.
+- **Combined logs on the shared `LogView`**, picking up replicas that start after the page opens.
+- **Image updates:** registry digest against local, per platform, through the existing credential
+  helpers. Checked when a stack is opened and on demand, with an optional daily check, and never at
+  boot.
+- **History** of the operations Dray ran: command, exit code, duration.
+
+**Progress:** done, driven live against Docker Desktop in both themes.
+
+- **Overview** is the stack's first tab: `x-dray` links and icon (http and https only; the icon a
+  local file inlined, never fetched), every published port as a link — at this machine for a local
+  engine, at its host for a remote one — combined CPU and memory from the stats stream, and the
+  project's own networks and volumes by compose's labels.
+- **Image updates** are asked of the engine (`/distribution/{name}/json`), which has the registry's
+  address and its network path. Measured: the registry digest equals the local `RepoDigests` entry
+  while the tag stands still. Anonymous first, the stored credential only when refused — fetching
+  one can prompt — and every unknown says why: built here, pinned, private and signed out. Checked
+  when the stack is opened and on demand. A multi-platform index moves when any platform is
+  rebuilt, so the pill says "tag has moved", never "newer version".
+- **Logs follow the stack**: a replica scaled up, or restarted, while the page is open is picked up
+  from the event stream and read from where it began — verified by scaling a service from a
+  terminal with the page open.
+- **History** is a tab: each operation's outcome, duration and commands, copyable.
+- **A store bug it surfaced:** a container first seen at `create` kept no ports after starting,
+  because `start` was patched in place and ports are bound at start. It now fetches once in that
+  case — which also fixes the ports column on the Containers page.
+
+Not done: the optional daily update check, and moving the aggregated view onto the shared
+`LogView` — it still has its own renderer, now with the follow behaviour it lacked.
+
+### 10.4 — Remote hosts
+
+- **SSH runs compose on the host** (`ssh host docker compose …`), and reads and writes the files
+  there. The files stay where the containers' `working_dir` labels already say they are, and a
+  relative bind mount means what it says.
+- **TCP keeps local files**, and the lint flags every relative bind mount, because the remote daemon
+  silently creates an empty directory for a path it cannot see.
+
+**Progress:** done, and driven end to end against a real SSH host — a container running `sshd`
+and the Docker CLI with its own filesystem, reached through the user's `ssh` with a throwaway
+config, so the files under test existed only on the far side.
+
+- **A stack whose files are on the host is the host's.** When a stack's containers name files that
+  are not on this machine, Dray asks the host — one `test -f` per stack, once — and where they are
+  there, marks it *on the host* and remembers it so it stays listed when down.
+- **Compose runs there**: `ssh host -- 'cd <dir> && env -u COMPOSE_… docker compose …'`, shown before
+  it runs exactly as it will run. Check, drift and deploy all go the same way: verified, a variable
+  added in the editor was written to the host's file over SSH (comment kept), compose there said
+  Valid, the drift said the service would be recreated, and the deployed container carried it.
+- **Files are read and written there** through `IStackFiles` — the editor, the `.env` panel, the
+  graph and the overview no longer know which machine they are on. Writes go through a temporary
+  file and `mv`, so a dropped connection leaves the old file.
+- **Two bugs the real host flushed out.** SSH hosts had never connected: the raw API client threw
+  for any SSH endpoint, claiming it was "tunnelled to a local socket first" when nothing tunnelled
+  it. It now uses the same `docker system dial-stdio` relay as the typed client. And the host's
+  compose probe was cached as cancelled when its first caller was, which made every later run on the
+  host cancel before starting.
+- **TCP** keeps local files; the relative-path lint applies to it and not to a stack on the host.
+
+Not done: scanning a stacks folder *on* the host for stacks that have never run there, and creating
+a new stack on it — a remote stack appears once it has containers.
+
+### 10.5 — Git, desktop-shaped
+
+A stack folder inside a repository shows its branch, uncommitted changes and ahead/behind, with
+*pull and redeploy*. System `git`, the user's own credentials, nothing stored. An optional command
+wrapper per stack (`op run --`, sops) keeps secrets in the user's tooling rather than in Dray's.
 
 ---
 

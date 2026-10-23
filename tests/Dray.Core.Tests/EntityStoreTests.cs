@@ -45,12 +45,27 @@ public class EntityStoreTests
     [Fact]
     public void StartEventFlipsStateWithoutAFetch()
     {
+        // A container whose bindings are already known: the event says everything that changed.
         var store = new EntityStore();
-        store.Reset([Container("a", "web", DockerState.Exited)]);
+        store.Reset([Container("a", "web", DockerState.Exited) with { Ports = [new PortBinding(8080, 80)] }]);
 
         var needsFetch = store.Apply(Event("start", "a"));
 
         Assert.False(needsFetch);
+        Assert.Equal(DockerState.Running, store.Find("a")!.State);
+    }
+
+    [Fact]
+    public void AFirstStartFetchesThePortsItBound()
+    {
+        // Seen first at create, with no ports yet: the start binds them and its event does not say
+        // what they are. Found because a just-deployed stack showed no port to open.
+        var store = new EntityStore();
+        store.Reset([Container("a", "web", DockerState.Created)]);
+
+        var needsFetch = store.Apply(Event("start", "a"));
+
+        Assert.True(needsFetch);
         Assert.Equal(DockerState.Running, store.Find("a")!.State);
     }
 

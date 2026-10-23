@@ -109,7 +109,14 @@ public sealed record RuntimeCapabilities
     /// </summary>
     public bool IsWindowsContainers => ContainerOs == ContainerOs.Windows;
 
-    /// <summary><c>docker compose</c> is available for this host.</summary>
+    /// <summary>
+    /// A compose on this machine can drive this host.
+    /// <para>
+    /// Not the engine's to answer: compose is a client-side program, so neither runtime sets it.
+    /// <see cref="EngineManager"/> does, from the probe for a compose and from whether
+    /// <see cref="ComposeTarget.For"/> can address the host with it.
+    /// </para>
+    /// </summary>
     public bool SupportsCompose { get; init; }
 
     /// <summary>BuildKit / buildx is available.</summary>

@@ -1,0 +1,86 @@
+.ov {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    padding: var(--s3) 0;
+}
+
+/* Where to reach the stack, first: it is the most common reason to open it. */
+.ov__links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2);
+    padding: 0 var(--s3);
+}
+
+.ov__icon {
+    width: 1.75rem;
+    height: 1.75rem;
+    object-fit: contain;
+}
+
+.ov__link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: var(--s1) var(--s2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    font-size: var(--text-sm);
+    color: var(--ink);
+}
+
+.ov__link:hover {
+    background: var(--surface-2);
+}
+
+.ov__linknote {
+    font-size: var(--text-xs);
+}
+
+.ov__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+    gap: var(--s3) var(--s4);
+}
+
+.ov__panel {
+    min-width: 0;
+}
+
+.ov__sub {
+    font-size: var(--text-xs);
+}
+
+.ov__empty {
+    margin: 0;
+    padding: var(--s2) var(--s3);
+    font-size: var(--text-sm);
+}
+
+.ov__totals {
+    display: flex;
+    gap: var(--s5);
+    padding: var(--s2) var(--s3);
+}
+
+.ov__total {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: var(--text-xs);
+}
+
+.ov__figure {
+    font-size: var(--text-lg);
+    font-variant-numeric: tabular-nums;
+}
+
+.ov__table td {
+    font-size: var(--text-sm);
+}
+
+.ov__note {
+    margin: var(--s2) var(--s3) 0;
+}

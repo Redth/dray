@@ -50,6 +50,15 @@
     /// <summary>Raised whenever the values change, so the compose editor can re-annotate.</summary>
     [Parameter] public EventCallback<IReadOnlyList<EnvVar>> VariablesChanged { get; set; }
 
+    /// <summary>Where the .env is read from and written to: this machine, or the engine's host.</summary>
+    [Parameter] public IStackFiles Files { get; set; } = LocalStackFiles.Instance;
+
+    /// <summary>
+    /// Raised after the file is written. Compose substitutes from it, so what compose makes of the
+    /// stack can change with no edit to the YAML at all.
+    /// </summary>
+    [Parameter] public EventCallback Saved { get; set; }
+
     /// <summary>Names the compose file actually references, for the unused check.</summary>
     [Parameter] public IReadOnlyCollection<string> Referenced { get; set; } = [];
 
@@ -59,7 +68,9 @@
     bool _dirty;
     bool _saving;
 
-    string Path => System.IO.Path.Combine(WorkingDirectory, DotEnvFile.FileName);
+    // Joined with a slash rather than Path.Combine: on an SSH host the path is the host's, and the
+    // host is POSIX whatever this machine is.
+    string Path => Files.IsRemote ? $"{WorkingDirectory.TrimEnd('/')}/{DotEnvFile.FileName}" : System.IO.Path.Combine(WorkingDirectory, DotEnvFile.FileName);
 
     IReadOnlyList<string> Unused =>
     [
@@ -76,7 +87,7 @@
         _dirty = false;
         _error = null;
 
-        Load();
+        await LoadAsync();
         await VariablesChanged.InvokeAsync(_variables);
     }
 
@@ -87,12 +98,12 @@
     /// error — the editor simply starts empty and writes the file if anything is added.
     /// </para>
     /// </summary>
-    void Load()
+    async Task LoadAsync()
     {
         try
         {
-            _variables = System.IO.File.Exists(Path)
-                ? DotEnvFile.Parse(System.IO.File.ReadAllText(Path))
+            _variables = await Files.ReadAsync(Path) is { } bytes
+                ? DotEnvFile.Parse(System.Text.Encoding.UTF8.GetString(bytes))
                 : [];
         }
         catch (Exception ex)
@@ -119,10 +130,14 @@
 
         try
         {
-            System.IO.Directory.CreateDirectory(WorkingDirectory);
-            await System.IO.File.WriteAllTextAsync(Path, DotEnvFile.Serialize(_variables));
+            if (await Files.WriteAsync(Path, System.Text.Encoding.UTF8.GetBytes(DotEnvFile.Serialize(_variables))) is { } failed)
+            {
+                _error = $"Could not write {DotEnvFile.FileName}: {failed}";
+                return;
+            }
 
             _dirty = false;
+            await Saved.InvokeAsync();
         }
         catch (Exception ex)
         {

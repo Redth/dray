@@ -1,0 +1,50 @@
+.hist {
+    display: flex;
+    flex-direction: column;
+}
+
+.hist__item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+}
+
+.hist__head {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    font-size: var(--text-sm);
+}
+
+.hist__label {
+    font-weight: 500;
+}
+
+.hist__when,
+.hist__took {
+    font-size: var(--text-xs);
+}
+
+.hist__took {
+    margin-left: auto;
+}
+
+.hist__command {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+}
+
+/* The command is the thing worth copying, and it has a button for it as well. */
+.hist__command code {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: var(--text-xs);
+    color: var(--muted);
+    overflow-wrap: anywhere;
+    user-select: text;
+    -webkit-user-select: text;
+}

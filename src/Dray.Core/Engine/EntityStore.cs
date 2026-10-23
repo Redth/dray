@@ -231,7 +231,12 @@ public sealed class EntityStore
         _containers[e.Id] = updated;
         Touch(e.Id);
         Changed?.Invoke(new StoreChange(StoreChangeKind.Updated, e.Id));
-        return false;
+
+        // Ports are bound when a container starts, not when it is created — so one first seen at
+        // `create` carries none, and the start event does not say what they became. Patched above
+        // so the row moves at once; fetched once more so its ports are real. Only when it has none:
+        // a container restarting with its bindings already known does not cost a fetch.
+        return action == "start" && existing.Ports.Count == 0;
     }
 
     void Touch(string id) => _recentlyChanged[id] = _time.GetUtcNow();

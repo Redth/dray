@@ -66,12 +66,19 @@ public static class MacProgram
         builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
         builder.Services.AddSingleton<IContainerRuntimeFactory>(
             new CompositeRuntimeFactory(new AppleRuntimeFactory(), new DockerRuntimeFactory()));
+        // Stacks beyond what is running: remembered ones and the stacks folder. Paths only — see
+        // StackRegistry for why nothing else is written.
+        builder.Services.AddSingleton(new StackRegistry(Path.Combine(DrayPaths.ConfigDirectory, "stacks.json")));
+        builder.Services.AddSingleton<StackCatalog>();
         builder.Services.AddSingleton<EngineManager>();
+        builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
+        builder.Services.AddSingleton<StackOperations>();
         builder.Services.AddSingleton<HostSwitcher>();
         // Scoped: it holds one live stream per watched container and must go away with the view
         // that asked for them.
         builder.Services.AddScoped<StatsHub>();
         builder.Services.AddScoped<PruneService>();
+        builder.Services.AddScoped<StackActionService>();
         builder.Services.AddSingleton<RegistryReader>();
 
         builder.Services.AddSingleton<MacShellReadySignal>();

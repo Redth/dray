@@ -1,0 +1,22 @@
+.qe {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+}
+
+.qe__pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s3);
+}
+
+.qe__hint {
+    font-size: var(--text-xs);
+    line-height: var(--text-sm-lh);
+}
+
+.qe__problem {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--danger-ink);
+}

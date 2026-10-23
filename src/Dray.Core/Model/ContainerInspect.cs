@@ -109,6 +109,34 @@ public enum MountKind
     Other,
 }
 
+/// <summary>What an image's own configuration sets — the values a container inherits unless told otherwise.</summary>
+public sealed record ImageDefaults(
+    IReadOnlyList<EnvVar> Environment,
+    IReadOnlyDictionary<string, string> Labels,
+    IReadOnlyList<string> Command,
+    IReadOnlyList<string> Entrypoint,
+    string? WorkingDirectory,
+    string? User);
+
+public enum ImageUpdateState
+{
+    /// <summary>The registry's copy of the tag is the one this engine has.</summary>
+    Current,
+
+    /// <summary>The tag has moved at the registry since this engine pulled it.</summary>
+    Available,
+
+    /// <summary>Not known — and said why, rather than shown as either answer.</summary>
+    Unknown,
+}
+
+/// <summary>Whether an image's tag has moved at its registry.</summary>
+/// <param name="NeedsCredential">The registry refused an anonymous question; signing in might let it answer.</param>
+public sealed record ImageUpdate(ImageUpdateState State, string? Detail = null, string? RemoteDigest = null, bool NeedsCredential = false)
+{
+    public static ImageUpdate Unknown(string why, bool needsCredential = false) => new(ImageUpdateState.Unknown, why, NeedsCredential: needsCredential);
+}
+
 /// <summary>One mount on a container.</summary>
 /// <param name="Source">Volume name for a volume, host path for a bind, empty for tmpfs.</param>
 /// <param name="Destination">Path inside the container.</param>

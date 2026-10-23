@@ -170,6 +170,30 @@ public interface IContainerRuntime : IAsyncDisposable
     /// <summary>An image's layers, newest first.</summary>
     Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default);
 
+    /// <summary>
+    /// What an image sets by itself — its environment, labels, command — so a container's own
+    /// settings can be told from the ones it inherited.
+    /// <para>
+    /// Null when this engine cannot say, which is an answer: a caller then keeps everything rather
+    /// than guessing which values were the image's. Defaulted, so an engine without image
+    /// inspection reports that rather than failing to compile.
+    /// </para>
+    /// </summary>
+    Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
+        => Task.FromResult<ImageDefaults?>(null);
+
+    /// <summary>
+    /// Whether <paramref name="reference"/>'s tag has moved at its registry since this engine
+    /// pulled it. Asked of the engine, which already has the registry's address and its network
+    /// path; the credential, when there is one, is for a private registry.
+    /// <para>
+    /// Defaulted to unknown: an engine that cannot ask is an engine whose images are not
+    /// "up to date", they are unchecked.
+    /// </para>
+    /// </summary>
+    Task<ImageUpdate> CheckImageUpdateAsync(string reference, RegistryCredential? credential, CancellationToken ct = default)
+        => Task.FromResult(ImageUpdate.Unknown("This engine cannot ask a registry about its images."));
+
     /// <summary>Delete an image. <paramref name="force"/> removes it even when a container uses it.</summary>
     Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default);
 

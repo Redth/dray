@@ -1,0 +1,154 @@
+@* The latest action on one stack, and everything compose printed for it.
+
+   It belongs to the stack, not the page: the operation keeps running when the page goes away, and
+   coming back — to this page or the stack's own — shows it again, still streaming or finished.
+   Each step announces itself as the command it is (`$ docker --context nas compose … up -d`), so
+   the output reads like the terminal session it replaces, and a failure is visibly the failure of
+   that command. *@
+@implements IDisposable
+@inject StackOperations Operations
+
+@if (Operation is { } operation && !_hidden.Contains(operation))
+{
+    <section class="oplog oplog--@Tone(operation)" aria-label="@($"{operation.Label} {operation.Stack}")">
+        <div class="oplog__head">
+            <span class="oplog__state" role="status">
+                <span aria-hidden="true">@Glyph(operation)</span>
+                @Word(operation)
+            </span>
+
+            <span class="oplog__label">@operation.Label</span>
+            <span class="oplog__when mono muted">@Humanize.Since(operation.StartedAt)</span>
+
+            <span class="oplog__spacer"></span>
+
+            @if (operation.IsRunning)
+            {
+                <Button Label="Cancel" Icon="IconRef.Stop" Variant="ButtonVariant.Ghost" OnClick="operation.Cancel" />
+            }
+            else
+            {
+                <Button Label="Hide" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost"
+                        OnClick="() => _hidden.Add(operation)" />
+            }
+        </div>
+
+        <div class="oplog__out mono" @ref="_out" role="log">
+            @foreach (var line in Tail(operation))
+            {
+                <div class="oplog__line @(line.Text.StartsWith("$ ", StringComparison.Ordinal) ? "oplog__cmd" : null)">@line.Text</div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Stack { get; set; } = "";
+
+    /// <summary>Lines drawn. The operation keeps more; nobody reads past the last screen or two.</summary>
+    [Parameter] public int Lines { get; set; } = 400;
+
+    [Inject] IJSRuntime JS { get; set; } = default!;
+
+    ElementReference _out;
+    readonly HashSet<StackOperation> _hidden = [];
+    bool _renderQueued;
+
+    StackOperation? Operation => Operations.For(Stack);
+
+    protected override void OnInitialized() => Operations.Changed += OnChanged;
+
+    void OnChanged(StackOperation operation)
+    {
+        if (operation.Stack != Stack || _renderQueued) return;
+
+        // At most one render per frame or so. A pull prints hundreds of lines a second, and a render
+        // per line would spend the circuit redrawing text nobody can read that fast.
+        _renderQueued = true;
+
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Delay(80);
+            _renderQueued = false;
+            StateHasChanged();
+        });
+    }
+
+    IJSObjectReference? _module;
+    IJSObjectReference? _follow;
+    StackOperation? _followed;
+    DotNetObjectReference<OperationLog>? _self;
+
+    /// <summary>
+    /// Follow the tail — the log view's own follow, which lets go when the reader scrolls up and
+    /// takes hold again at the bottom. Attached per operation, because each one is a new element.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Operation is not { } operation || _hidden.Contains(operation)) return;
+
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+
+            if (_followed != operation)
+            {
+                if (_follow is not null) await _module.InvokeVoidAsync("logs.detach", _follow);
+
+                _self ??= DotNetObjectReference.Create(this);
+                _follow = await _module.InvokeAsync<IJSObjectReference>("logs.attach", _out, _self);
+                _followed = operation;
+                await _module.InvokeVoidAsync("logs.scrollToBottom", _follow);
+            }
+            else
+            {
+                await _module.InvokeVoidAsync("logs.followIfAttached", _follow);
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    /// <summary>Nothing to show for it: the output panel has no "jump to latest" control of its own.</summary>
+    [JSInvokable("OnFollowChanged")]
+    public void OnFollowChanged(bool following)
+    {
+    }
+
+    IEnumerable<ComposeOutput> Tail(StackOperation operation)
+    {
+        var lines = operation.Lines;
+        return lines.Count > Lines ? lines.Skip(lines.Count - Lines) : lines;
+    }
+
+    static string Tone(StackOperation o) => o.State switch
+    {
+        OperationState.Running => "busy",
+        OperationState.Succeeded => "ok",
+        OperationState.Failed => "danger",
+        _ => "neutral",
+    };
+
+    static string Glyph(StackOperation o) => o.State switch
+    {
+        OperationState.Running => "↻",
+        OperationState.Succeeded => "✓",
+        OperationState.Failed => "✕",
+        _ => "■",
+    };
+
+    static string Word(StackOperation o) => o.State switch
+    {
+        OperationState.Running => "Running",
+        OperationState.Succeeded => "Done",
+        OperationState.Failed => o.ExitCode is { } code ? $"Failed · exit {code}" : "Failed",
+        _ => "Cancelled",
+    };
+
+    public void Dispose()
+    {
+        Operations.Changed -= OnChanged;
+        _self?.Dispose();
+    }
+}

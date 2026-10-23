@@ -1,0 +1,76 @@
+@* What Dray has done to this stack on this host: each operation's label, outcome, duration, and
+   the commands it ran — copyable, because the commonest next step after "what did it run?" is
+   running it again in a terminal. Output is not kept; the operation log shows it live. *@
+@implements IDisposable
+@inject EngineManager Engine
+@inject StackOperations Operations
+@inject IShellBridge Shell
+
+@if (Operations.History is null)
+{
+    <EmptyState Icon="IconRef.Logs" Title="No history here" Body="This head does not keep a history of stack operations." />
+}
+else if (Records.Count == 0)
+{
+    <EmptyState Icon="IconRef.Logs" Title="Nothing yet"
+                Body="Every deploy, stop, pull and down Dray runs on this stack is listed here, with the commands it ran and how it ended. Stacks driven from a terminal are not — compose keeps no record of its own." />
+}
+else
+{
+    <ul class="hist" aria-label="Operations on @Stack.Name">
+        @foreach (var record in Records)
+        {
+            <li class="hist__item">
+                <div class="hist__head">
+                    <StatePill Status="Outcome(record)" />
+                    <span class="hist__label">@record.Label</span>
+                    <span class="muted hist__when" title="@record.Started.ToLocalTime().ToString("f")">@Humanize.Since(record.Started) ago</span>
+                    <span class="muted mono hist__took">@Took(record.Duration)</span>
+                </div>
+
+                @foreach (var command in record.Commands)
+                {
+                    var captured = command;
+
+                    <div class="hist__command">
+                        <code class="mono">@command</code>
+                        <Button Label="Copy command" Icon="IconRef.Copy" IconOnly="true" Variant="ButtonVariant.Ghost"
+                                OnClick="() => Shell.WriteClipboardAsync(captured)" />
+                    </div>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter, EditorRequired] public StackSummary Stack { get; set; } = default!;
+
+    IReadOnlyList<OperationRecord> Records => Engine.Selected is { } host && Operations.History is { } history
+        ? history.For(host.Id, Stack.Name)
+        : [];
+
+    protected override void OnInitialized()
+    {
+        if (Operations.History is { } history) history.Changed += OnChanged;
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    static ContainerStatus Outcome(OperationRecord record) => record.State switch
+    {
+        OperationState.Succeeded => new(StateTone.Ok, "✓", "Done"),
+        OperationState.Failed => new(StateTone.Danger, "✕", "Failed", record.ExitCode is { } code ? $"exit {code}" : null),
+        OperationState.Cancelled => new(StateTone.Neutral, "■", "Cancelled"),
+        _ => new(StateTone.Neutral, "↻", "Running"),
+    };
+
+    static string Took(TimeSpan span) => span.TotalSeconds < 1
+        ? "<1s"
+        : span.TotalMinutes < 1 ? $"{span.TotalSeconds:0}s" : $"{(int)span.TotalMinutes}m {span.Seconds}s";
+
+    public void Dispose()
+    {
+        if (Operations.History is { } history) history.Changed -= OnChanged;
+    }
+}

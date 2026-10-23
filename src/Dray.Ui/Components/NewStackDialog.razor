@@ -1,0 +1,271 @@
+@* The body of the New stack dialog: a name, where the compose file comes from, and the file.
+
+   Four ways in, because people arrive with four different things: nothing yet, an image they
+   want running, a `docker run` line from a README, or containers they started by hand and now
+   want to keep. Each ends as the same thing — a compose.yaml, previewed exactly as it will be
+   written, in the stacks folder, opened in the editor. *@
+@implements IDisposable
+@inject EngineManager Engine
+@inject IJSRuntime JS
+
+<div class="ns">
+    <div class="ns__form">
+        <div class="field">
+            <label class="field__label" for="ns-name">Name</label>
+            <input id="ns-name" class="input mono" @bind="Request.Name" @bind:event="oninput"
+                   placeholder="shop" spellcheck="false" autocomplete="off" />
+            @if (Request.NameProblem is { } nameProblem)
+            {
+                <span class="ns__problem" role="alert">@nameProblem</span>
+            }
+            else
+            {
+                <span class="ns__hint muted mono">@System.IO.Path.Combine(Display(Request.StacksFolder), Request.Name.Length > 0 ? Request.Name : "…", "compose.yaml")</span>
+            }
+        </div>
+
+        <div class="ns__sources" role="radiogroup" aria-label="Start from">
+            @foreach (var (source, title, body) in Sources)
+            {
+                var captured = source;
+                var selected = Request.Source == source;
+
+                <button type="button" role="radio" aria-checked="@(selected.ToString().ToLowerInvariant())"
+                        class="ns__source @(selected ? "is-selected" : null)" @onclick="() => ChooseAsync(captured)">
+                    <span class="ns__title">
+                        <Icon Name="@(selected ? IconRef.Check : IconRef.ChevronRight)" Size="IconSize.Sm" />
+                        @title
+                    </span>
+                    <span class="ns__body muted">@body</span>
+                </button>
+            }
+        </div>
+
+        @switch (Request.Source)
+        {
+            case NewStackSource.Image:
+                <div class="field">
+                    <label class="field__label" for="ns-image">Image</label>
+                    <input id="ns-image" class="input mono" value="@Request.Image" @oninput="e => SetAsync(() => Request.Image = (string)e.Value!)"
+                           placeholder="postgres:16" spellcheck="false" autocomplete="off" />
+                </div>
+                <div class="field">
+                    <label class="field__label" for="ns-ports">Ports <span class="muted">— optional, one per line</span></label>
+                    <textarea id="ns-ports" class="input mono ns__area" rows="2" value="@Request.Ports"
+                              @oninput="e => SetAsync(() => Request.Ports = (string)e.Value!)" placeholder="5432:5432" spellcheck="false"></textarea>
+                </div>
+                break;
+
+            case NewStackSource.Run:
+                <div class="field">
+                    <label class="field__label" for="ns-run">docker run line</label>
+                    <textarea id="ns-run" class="input mono ns__area" rows="4" value="@Request.RunLine"
+                              @oninput="e => SetAsync(() => Request.RunLine = (string)e.Value!)"
+                              placeholder="docker run -d -p 8080:80 -e TZ=UTC nginx:alpine" spellcheck="false"></textarea>
+                    <span class="ns__hint muted">Converted by composerize, the library Dockge uses for this.</span>
+                </div>
+                break;
+
+            case NewStackSource.Containers:
+                <div class="field">
+                    <span class="field__label">Containers</span>
+                    @if (Candidates.Count == 0)
+                    {
+                        <span class="muted ns__hint">There are no containers on this host to start from.</span>
+                    }
+                    else
+                    {
+                        <div class="ns__containers">
+                            @foreach (var container in Candidates)
+                            {
+                                var id = container.Id;
+
+                                <label class="ns__container">
+                                    <input type="checkbox" checked="@Request.Containers.Contains(id)"
+                                           @onchange="e => ToggleAsync(id, (bool)e.Value!)" />
+                                    <StatePill Status="container.Status" />
+                                    <span class="mono ns__cname" title="@container.Name">@container.Name</span>
+                                    <span class="muted ns__image">@container.Image</span>
+                                    @if (container.Stack is { } stack)
+                                    {
+                                        <span class="muted ns__image">in @stack</span>
+                                    }
+                                </label>
+                            }
+                        </div>
+                    }
+                </div>
+                break;
+        }
+
+        @if (Request.SourceProblem is { } problem)
+        {
+            <p class="ns__problem" role="alert">@problem</p>
+        }
+
+        @if (Request.Result is { Notes.Count: > 0 } result)
+        {
+            <ul class="ns__notes">
+                @foreach (var note in result.Notes)
+                {
+                    <li class="note"><Icon Name="IconRef.Info" Size="IconSize.Sm" /><span>@note</span></li>
+                }
+            </ul>
+        }
+    </div>
+
+    <div class="ns__preview">
+        <span class="field__label">compose.yaml</span>
+        <CodePreview Text="@(Request.Result?.Compose ?? "")" Schema="compose" />
+
+        @if (Request.Result is { Environment.Count: > 0 } withEnv)
+        {
+            <span class="ns__hint muted">
+                .env gets @withEnv.Environment.Count value@(withEnv.Environment.Count == 1 ? "" : "s"):
+                <span class="mono">@string.Join(", ", withEnv.Environment.Select(e => e.Key))</span>
+            </span>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public NewStackRequest Request { get; set; } = default!;
+
+    static readonly (NewStackSource Source, string Title, string Body)[] Sources =
+    [
+        (NewStackSource.Blank, "Blank", "A one-service template to edit."),
+        (NewStackSource.Image, "From an image", "A service for an image you name."),
+        (NewStackSource.Run, "From a docker run line", "Paste the command from a README."),
+        (NewStackSource.Containers, "From running containers", "Keep what you started by hand."),
+    ];
+
+    IJSObjectReference? _composerize;
+    CancellationTokenSource? _pending;
+
+    /// <summary>Containers on this host, those not already in a stack first — they are the ones people mean.</summary>
+    IReadOnlyList<ContainerSummary> Candidates =>
+    [
+        .. Engine.Store.Containers
+            .OrderBy(c => c.Stack is null ? 0 : 1)
+            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase),
+    ];
+
+    protected override Task OnInitializedAsync() => RebuildAsync();
+
+    Task ChooseAsync(NewStackSource source)
+    {
+        Request.Source = source;
+        return RebuildAsync();
+    }
+
+    Task SetAsync(Action change)
+    {
+        change();
+        return RebuildAsync();
+    }
+
+    Task ToggleAsync(string id, bool on)
+    {
+        if (on) Request.Containers.Add(id);
+        else Request.Containers.Remove(id);
+
+        return RebuildAsync();
+    }
+
+    /// <summary>
+    /// Produce the files from the chosen source. Debounced for typing, and cancelled when superseded,
+    /// so the preview is always of the latest text rather than whichever conversion finished last.
+    /// </summary>
+    async Task RebuildAsync()
+    {
+        _pending?.Cancel();
+        var cts = _pending = new CancellationTokenSource();
+
+        try
+        {
+            if (Request.Source is NewStackSource.Run or NewStackSource.Image) await Task.Delay(200, cts.Token);
+
+            var (result, problem) = await BuildAsync(cts.Token);
+            if (cts.IsCancellationRequested) return;
+
+            Request.Result = result;
+            Request.SourceProblem = problem;
+            StateHasChanged();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    async Task<(AuthoredStack? Result, string? Problem)> BuildAsync(CancellationToken ct)
+    {
+        switch (Request.Source)
+        {
+            case NewStackSource.Blank:
+                return (ComposeAuthoring.Blank(), null);
+
+            case NewStackSource.Image:
+            {
+                if (Request.Image.Trim().Length == 0) return (null, null);
+
+                var ports = Request.Ports.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                RunParser.ParsePorts(Request.Ports, out var portProblem);
+
+                return portProblem is null
+                    ? (ComposeAuthoring.FromImage(Request.Image.Trim(), ports), null)
+                    : (null, portProblem);
+            }
+
+            case NewStackSource.Run:
+            {
+                var line = Request.RunLine.Trim();
+                if (line.Length == 0) return (null, null);
+                if (!line.StartsWith("docker ", StringComparison.Ordinal) && !line.StartsWith("podman ", StringComparison.Ordinal))
+                    return (null, "Paste the whole command, starting with docker run.");
+
+                try
+                {
+                    _composerize ??= await JS.InvokeAsync<IJSObjectReference>("import", ct, "./_content/Dray.Ui/js/composerize.js");
+                    var yaml = await _composerize.InvokeAsync<string>("convert", ct, line);
+
+                    return (ComposeAuthoring.FromConverted(yaml), null);
+                }
+                catch (JSException ex)
+                {
+                    // composerize names the flag it could not map; that is the useful sentence.
+                    return (null, $"composerize could not convert this: {ex.Message.Split('\n')[0]}");
+                }
+            }
+
+            default:
+            {
+                if (Request.Containers.Count == 0) return (null, null);
+
+                var picked = new List<(ContainerInspect, ImageDefaults?)>();
+
+                foreach (var id in Request.Containers)
+                {
+                    try
+                    {
+                        var inspect = await Engine.InspectAsync(id, ct);
+                        picked.Add((inspect, await Engine.GetImageDefaultsAsync(inspect.Image, ct)));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        return (null, $"Could not read a container: {ex.Message}");
+                    }
+                }
+
+                return (ComposeAuthoring.FromContainers(picked), null);
+            }
+        }
+    }
+
+    static string Display(string path)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return path.StartsWith(home, StringComparison.Ordinal) ? "~" + path[home.Length..] : path;
+    }
+
+    public void Dispose() => _pending?.Cancel();
+}

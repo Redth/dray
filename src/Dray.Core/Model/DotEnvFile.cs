@@ -95,6 +95,48 @@ public static class DotEnvFile
     public static string Serialize(IEnumerable<EnvVar> variables)
         => string.Join('\n', variables.Select(v => $"{v.Key}={Quote(v.Value)}")) + "\n";
 
+    /// <summary>
+    /// Set one variable in a <c>.env</c>'s text, or remove it when <paramref name="value"/> is null,
+    /// changing nothing else — not the comments, not the order, not another line's quoting.
+    /// <para>
+    /// For the settings Dray writes on the user's behalf, like <c>COMPOSE_PROFILES</c>. Rewriting
+    /// the whole file through <see cref="Serialize"/> to change one line would drop every comment
+    /// in it, which is the Dockge bug in a different file.
+    /// </para>
+    /// </summary>
+    public static string Set(string? text, string key, string? value)
+    {
+        text ??= "";
+        var nl = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var lines = text.Length == 0 ? [] : text.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+
+        // A trailing newline splits into an empty last element; it is put back at the end.
+        var trailing = lines.Count > 0 && lines[^1].Length == 0;
+        if (trailing) lines.RemoveAt(lines.Count - 1);
+
+        var written = value is null ? null : $"{key}={Quote(value)}";
+        var found = false;
+
+        for (var i = lines.Count - 1; i >= 0; i--)
+        {
+            var line = lines[i].Trim();
+            if (line.StartsWith("export ", StringComparison.Ordinal)) line = line[7..].TrimStart();
+
+            var split = line.IndexOf('=');
+            if (split <= 0 || line[..split].TrimEnd() != key) continue;
+
+            // The last definition is the one that counts; earlier ones go, so there is one again.
+            if (!found && written is not null) lines[i] = written;
+            else lines.RemoveAt(i);
+
+            found = true;
+        }
+
+        if (!found && written is not null) lines.Add(written);
+
+        return lines.Count == 0 ? "" : string.Join(nl, lines) + nl;
+    }
+
     static string Quote(string value)
     {
         if (value.Length == 0) return value;

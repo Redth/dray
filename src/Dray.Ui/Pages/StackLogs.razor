@@ -172,9 +172,22 @@
         await StopAllAsync();
         _startedFor = StackName;
         _lines.Clear();
+        _opened = DateTimeOffset.Now;
+
+        Engine.Store.Changed -= OnStoreChanged;
+        Engine.Store.Changed += OnStoreChanged;
 
         StartStreams();
     }
+
+    /// <summary>When the page began following. A replica that appears later is read from here on.</summary>
+    DateTimeOffset _opened;
+
+    /// <summary>
+    /// A replica started, scaled up or restarted: follow it too. Driven by the event stream — the
+    /// store changes when the engine says so — never by checking on a timer.
+    /// </summary>
+    void OnStoreChanged(StoreChange _) => InvokeAsync(StartStreams);
 
     /// <summary>
     /// One stream per running container in the stack.
@@ -197,22 +210,32 @@
                 var cts = new CancellationTokenSource();
                 _streams[replica.Id] = cts;
 
+                // The first streams carry the recent tail; one that starts later — a new replica,
+                // or a restart of one already followed — carries what it printed since this view
+                // opened or since it last stopped, so nothing is shown twice and nothing is missed.
+                DateTimeOffset? since = _seen.TryGetValue(replica.Id, out var seen) ? seen : null;
+                var options = since is null && (replica.Since is null || replica.Since <= _opened)
+                    ? new LogOptions(Follow: true, Tail: 200, Timestamps: true)
+                    : new LogOptions(Follow: true, Tail: null, Timestamps: true, Since: since ?? _opened);
+
                 // Labelled by service rather than container: with one replica they are the same,
                 // and with three the service is what the reader is following.
-                _ = PumpAsync(service.Name, replica.Id, cts.Token);
+                _ = PumpAsync(service.Name, replica.Id, options, cts.Token);
             }
         }
     }
 
-    async Task PumpAsync(string service, string containerId, CancellationToken ct)
+    /// <summary>The last moment each container's stream was read to, for picking it up again after a restart.</summary>
+    readonly Dictionary<string, DateTimeOffset> _seen = new(StringComparer.Ordinal);
+
+    async Task PumpAsync(string service, string containerId, LogOptions options, CancellationToken ct)
     {
         try
         {
-            var options = new LogOptions(Follow: true, Tail: 200, Timestamps: true);
-
             await foreach (var line in Engine.StreamLogsAsync(containerId, options, ct))
             {
                 _lines.Add(new Entry(_sequence++, service, line));
+                if (line.Timestamp is { } at) _seen[containerId] = at.AddTicks(1);
 
                 // Bounded. Six services at a hundred lines a second is how a log view turns into a
                 // memory leak.
@@ -228,6 +251,18 @@
         {
             // The container stopped, or the engine dropped the connection. The other services keep
             // streaming; one ending is not the view failing.
+        }
+        finally
+        {
+            // Ended — the container stopped. Forgetting the stream is what lets a restart of the
+            // same container be followed again when the store says it is running.
+            if (!ct.IsCancellationRequested)
+            {
+                await InvokeAsync(() =>
+                {
+                    if (_streams.Remove(containerId, out var done)) done.Dispose();
+                });
+            }
         }
     }
 
@@ -263,7 +298,11 @@
         if (id == "back") Nav.NavigateTo("/stacks");
     }
 
-    public async ValueTask DisposeAsync() => await StopAllAsync();
+    public async ValueTask DisposeAsync()
+    {
+        Engine.Store.Changed -= OnStoreChanged;
+        await StopAllAsync();
+    }
 
     sealed record Entry(long Key, string Service, LogLine Line);
 }

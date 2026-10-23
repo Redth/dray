@@ -87,6 +87,108 @@ public static class DockerImages
         }
     }
 
+    /// <summary>
+    /// Compare the registry's digest for a tag with the digests this engine pulled it as.
+    /// <para>
+    /// The engine's <c>/distribution/{name}/json</c> asks the registry on Dray's behalf and returns
+    /// the tag's digest; the local image's <c>RepoDigests</c> are the digests it was pulled as.
+    /// Measured against Docker Desktop: for an image pulled by tag they match exactly while the tag
+    /// stands still. For a multi-platform image the digest is the index's, so a rebuild for another
+    /// platform moves it too — which is why the answer is "the tag has moved", never "a newer
+    /// version is available".
+    /// </para>
+    /// </summary>
+    public static async Task<ImageUpdate> CheckUpdateAsync(
+        DockerClient client, DockerRawApi raw, string reference, RegistryCredential? credential, CancellationToken ct = default)
+    {
+        if (reference.Contains('@', StringComparison.Ordinal))
+            return new ImageUpdate(ImageUpdateState.Current, "Pinned to a digest, so it cannot move.");
+
+        IList<string> local;
+
+        try
+        {
+            local = (await client.Images.InspectImageAsync(reference, ct).ConfigureAwait(false)).RepoDigests ?? [];
+        }
+        catch (DockerApiException ex) when ((int)ex.StatusCode == 404)
+        {
+            return ImageUpdate.Unknown("Not on this engine yet, so there is nothing to compare.");
+        }
+
+        // Built here, or loaded from a file: there is no registry copy it came from.
+        if (local.Count == 0) return ImageUpdate.Unknown("Built or loaded on this engine — it was never pulled, so no registry copy to compare with.");
+
+        Dictionary<string, string>? headers = null;
+
+        if (credential is not null)
+        {
+            // Built here and not held: the secret lives in this local for the length of the call
+            // and is never returned, logged or rendered (docs/CREDENTIALS.md).
+            var json = System.Text.Json.JsonSerializer.Serialize(new { username = credential.Username, password = credential.Secret, serveraddress = credential.Server });
+            headers = new() { ["X-Registry-Auth"] = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json)).Replace('+', '-').Replace('/', '_') };
+        }
+
+        try
+        {
+            var (status, body) = await raw.GetWithStatusAsync($"/distribution/{reference}/json", headers, ct).ConfigureAwait(false);
+
+            if (status is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                return ImageUpdate.Unknown(
+                    credential is null
+                        ? "The registry would not answer without signing in."
+                        : "The registry refused the credential stored for it.",
+                    needsCredential: credential is null);
+            }
+
+            if (status == System.Net.HttpStatusCode.NotFound) return ImageUpdate.Unknown("This engine cannot ask its registry about images.");
+            if ((int)status >= 400) return ImageUpdate.Unknown($"The registry answered {(int)status}.");
+
+            using var document = System.Text.Json.JsonDocument.Parse(body);
+            var digest = document.RootElement.GetProperty("Descriptor").GetProperty("digest").GetString();
+
+            if (digest is null) return ImageUpdate.Unknown("The registry did not say which digest the tag points at.");
+
+            return local.Any(d => d.EndsWith("@" + digest, StringComparison.Ordinal))
+                ? new ImageUpdate(ImageUpdateState.Current, RemoteDigest: digest)
+                : new ImageUpdate(ImageUpdateState.Available, "The tag has moved at the registry since this was pulled.", digest);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return ImageUpdate.Unknown($"Could not ask the registry: {ex.Message}");
+        }
+    }
+
+    public static async Task<ImageDefaults?> DefaultsAsync(DockerClient client, string image, CancellationToken ct = default)
+    {
+        try
+        {
+            var inspect = await client.Images.InspectImageAsync(image, ct).ConfigureAwait(false);
+            var config = inspect.Config;
+
+            if (config is null) return null;
+
+            return new ImageDefaults(
+                [
+                    .. (config.Env ?? []).Select(e => e.IndexOf('=') is var i and > 0
+                        ? new EnvVar(e[..i], e[(i + 1)..])
+                        : new EnvVar(e, "")),
+                ],
+                config.Labels is { Count: > 0 } labels
+                    ? new Dictionary<string, string>(labels, StringComparer.Ordinal)
+                    : new Dictionary<string, string>(StringComparer.Ordinal),
+                [.. config.Cmd ?? []],
+                [.. config.Entrypoint ?? []],
+                string.IsNullOrEmpty(config.WorkingDir) ? null : config.WorkingDir,
+                string.IsNullOrEmpty(config.User) ? null : config.User);
+        }
+        catch (DockerApiException ex) when ((int)ex.StatusCode == 404)
+        {
+            // Not here — pulled by digest and since removed, or never pulled to this engine.
+            return null;
+        }
+    }
+
     public static async Task RemoveAsync(
         DockerClient client, string imageId, bool force, CancellationToken ct = default)
     {

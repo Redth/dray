@@ -408,34 +408,61 @@ an error.
 ### 2.5 Compose
 
 There is no viable .NET Compose library, and reimplementing the Compose spec is a trap. Dray shells
-out to `docker compose` with `--progress json` / `--format json` and parses the stream, while reading
-compose files with YamlDotNet for the editor, validation, and the service graph.
+out to `docker compose` and streams its output, ending with the exit code — which is what failure
+is, since compose writes progress to stderr on runs that succeed.
+
+**Every run names its host.** `ComposeTarget` puts it on the command line — `--context` for a
+context, `-H` plus TLS flags otherwise — and only falls back to the environment for the standalone
+binary, which reads no such flag. Left unnamed, compose follows the CLI's current context, which is
+whatever the terminal was last switched to rather than the host on screen. The process gets a short
+allow-list of the environment and nothing else (`ComposeEnvironment`): compose reads its own
+environment ahead of the stack's `.env`, so an exported `TAG` or `COMPOSE_FILE` would silently
+change what runs. `SupportsCompose` is measured from both halves — a compose on this machine, and a
+target for this host — which is why neither runtime sets it.
+
+**Two parsers, each for what it is the authority on.** What a stack *means* comes from
+`docker compose config` — merged files, interpolation, profiles, validation — and Dray
+reimplements none of it. What compose cannot say is *where* in the user's text something is: its
+output is re-serialised and its errors name paths like `services.web.ports`. `ComposeDocument`
+answers that with YamlDotNet, which keeps positions, so a problem compose reports lands on the
+line it is about, in whichever of the stack's files that line is in. `ComposeProblems` reads
+compose's refusals; every pattern in it was captured from a real run.
+
+**A stack on an SSH host runs there.** Where a stack's files are on the engine's host rather than
+this machine, compose runs on the host over the user's own `ssh` (`RemoteCompose`), and its files
+are read and written there (`IStackFiles`, `SshStackFiles`). Relative bind mounts then mean what
+they say. A TCP host keeps compose and the files here, as Docker's remote contexts do.
+
+**The editor knows the spec.** Compose files open with the YAML language server VS Code uses
+(`monaco-yaml`), fed the Compose Specification's own JSON schema: completion of every key, hover
+documentation, and validation as you type. Both are vendored by `build/vendor-monaco-yaml.mjs` —
+bundled with esbuild, the schema pinned to a commit and checked by hash — so it works offline.
 
 Running stacks are discovered from the `com.docker.compose.project`, `.service`, and
 `.project.config_files` labels on containers, so a stack started from a terminal appears in Dray
 automatically. User-added compose files are tracked separately so a stack that is *down* is still
 visible — the thing Docker Desktop gets wrong.
 
-**Compose acts on the engine selected in Dray.** It used to be run with no target, so it acted on
-the CLI's current context instead. With Ubuntu selected and the CLI on Docker Desktop, Up would have
-started the stack on Docker Desktop. `ComposeCli.Invocation` now decides the target:
+**Where compose runs, per engine** — decided by `ComposeTarget.For` and run through one pure
+function, `ComposeCli.Invocation`:
 
-- **Addressable engines** (sockets, pipes, TCP, SSH): this machine's compose, with
-  `DOCKER_HOST` set to the CLI's form of the endpoint, plus `DOCKER_TLS_VERIFY`/`DOCKER_CERT_PATH`
-  for TLS. `DOCKER_HOST` rather than `--context`, because every form compose ships in honours it
-  and no context has to exist.
+- **Addressable engines** (sockets, pipes, TCP, SSH with files here): this machine's compose, with
+  the host on its command line as above. Not `DOCKER_HOST`: it works for every form compose ships
+  in, but it is also visible to compose's own interpolation, so a file that says `${DOCKER_HOST}` —
+  a socket proxy, a CI runner — would quietly pick up Dray's value. The standalone binary, which
+  reads no flags, is the one case that gets the environment.
 - **An engine in a WSL distribution**: the distribution's own compose, `wsl.exe -d <distro> --cd
   <recorded dir> --exec docker compose …`, as its default user. A Windows compose cannot reach that
-  socket, and the paths compose recorded are Linux paths that only resolve in there.
+  socket, and the paths compose recorded are Linux paths that only resolve in there. Its files are
+  opened from Windows through `\\wsl.localhost\<distro>\…`, or straight from the drive for a
+  `/mnt/c/…` project (`EnginePaths`, `WslStackFiles`) — opened as recorded, every WSL stack's
+  compose file read as missing.
+- **An SSH host whose stack files are there**: compose on that host, over `ssh` (above).
 - **Apple's engine**: none.
 
-Whether a compose exists for an engine is measured once per host, when it first connects, and
-recorded as `SupportsCompose`. The runtime cannot answer it, since compose is a client and `/info`
-has no opinion, and leaving it false made every engine claim it could not run a stack.
-
-A WSL stack's files are opened from Windows through `\\wsl.localhost\<distro>\…`, or straight from
-the drive for a `/mnt/c/…` project (`EnginePaths`). Opened as recorded, every WSL stack's compose
-file read as missing.
+Whether a compose exists for an engine, and can address it, is measured once per host when it first
+connects, and recorded as `SupportsCompose`. The runtime cannot answer it — compose is a client and
+`/info` has no opinion — and leaving it false made every engine claim it could not run a stack.
 
 ### 2.6 What a real non-Docker engine actually does
 

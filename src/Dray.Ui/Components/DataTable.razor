@@ -263,7 +263,9 @@
                           <span class="mono muted">@sub</span>
                       }
                   </span>
-                : @<span></span>,
+                : value is string text
+                    ? @<span class="muted">@text</span>
+                    : @<span></span>,
 
             @* An icon and a name. The icon is the fastest way to tell a directory from a file —
                faster than reading the name or the mode. *@

@@ -65,16 +65,28 @@ public sealed class EngineManager : IAsyncDisposable
     /// leaves every host to stand on its own and no mode to switch.
     /// </param>
     /// <param name="selection">Where the user's choice of host is kept between launches. Null keeps nothing.</param>
+    /// <param name="compose">How compose is found and run; a test hands in one over a scripted runner.</param>
+    /// <param name="catalog">Stacks beyond what is running — remembered ones and the stacks folder.</param>
     public EngineManager(
         DockerContextReader reader,
         IContainerRuntimeFactory factory,
         DockerDesktop? desktop = null,
-        IHostSelectionStore? selection = null)
+        IHostSelectionStore? selection = null,
+        ComposeCli? compose = null,
+        StackCatalog? catalog = null)
     {
         _reader = reader;
         _factory = factory;
         _desktop = desktop;
         _selection = selection;
+        _compose = compose ?? new ComposeCli();
+        Catalog = catalog;
+
+        if (catalog is not null)
+        {
+            catalog.Changed += () => Changed?.Invoke();
+            Store.Changed += OnStoreChangedForStacks;
+        }
     }
 
     /// <summary>
@@ -110,6 +122,186 @@ public sealed class EngineManager : IAsyncDisposable
             owner.Changed?.Invoke();
         }
     }
+
+    /// <summary>
+    /// The stacks Dray knows about beyond what is running — remembered and on disk. Null where the
+    /// head did not supply one, in which case <see cref="Stacks"/> is the running ones only.
+    /// </summary>
+    public StackCatalog? Catalog { get; }
+
+    void OnStoreChangedForStacks(StoreChange change)
+    {
+        if (Selected is not { } host) return;
+
+        var observed = StackDiscovery.From(Store.Containers);
+        Catalog?.Observe(host.Id, observed);
+
+        if (_remote is { } remote) _ = ProbeRemoteStacksAsync(host, remote, observed);
+        else if (host.Endpoint.Scheme == EndpointScheme.Wsl) _ = ProbeWslStacksAsync(host, observed);
+    }
+
+    /// <summary>
+    /// The WSL counterpart of <see cref="ProbeRemoteStacksAsync"/>: a stack whose files are in the
+    /// distribution, as Windows reaches them through <c>\wsl.localhost</c>, is the distribution's —
+    /// compose runs in there, and its files are opened through the translation.
+    /// </summary>
+    async Task ProbeWslStacksAsync(DockerHost host, IReadOnlyList<StackSummary> observed)
+    {
+        var files = new WslStackFiles(host.Endpoint);
+
+        foreach (var stack in observed)
+        {
+            if (stack.ConfigFiles.Count == 0) continue;
+
+            lock (_onHost)
+            {
+                if (!_probed.Add(stack.Name)) continue;
+            }
+
+            if (!files.AllExist(stack.ConfigFiles) || Selected?.Id != host.Id) continue;
+
+            lock (_onHost) _onHost.Add(stack.Name);
+
+            if (Catalog is { } catalog)
+            {
+                if (!catalog.Registry.IsForgotten(host.Id, stack.Name))
+                {
+                    var directory = stack.WorkingDirectory ?? RemoteDirectoryOf(stack.ConfigFiles[0]);
+                    catalog.Registry.Remember(new StackRecord(host.Id, stack.Name, directory, stack.ConfigFiles, OnHost: true));
+                }
+
+                foreach (var file in stack.ConfigFiles)
+                {
+                    if (await files.ReadAsync(file).ConfigureAwait(false) is { } bytes)
+                        catalog.SetRemoteDeclared(file, ComposeDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes)).Services);
+                }
+            }
+
+            Changed?.Invoke();
+        }
+    }
+
+    // ---------------------------------------------------------------- stacks on an SSH host
+
+    /// <summary>Compose and files on the selected host, when it is reached over SSH. Null otherwise.</summary>
+    RemoteCompose? _remote;
+
+    /// <summary>Stacks on the selected host whose files were found there.</summary>
+    readonly HashSet<string> _onHost = new(StringComparer.Ordinal);
+
+    /// <summary>Stacks already asked about, so a busy event stream asks each one once.</summary>
+    readonly HashSet<string> _probed = new(StringComparer.Ordinal);
+
+    void ResetRemote(DockerHost host)
+    {
+        lock (_onHost)
+        {
+            _onHost.Clear();
+            _probed.Clear();
+        }
+
+        _remote = SshShell.Handles(host.Endpoint) ? new RemoteCompose(new SshShell(host.Endpoint, _compose.Runner)) : null;
+
+        // Stacks remembered on this host by their files there are on the host still, down or not.
+        if ((_remote is not null || host.Endpoint.Scheme == EndpointScheme.Wsl) && Catalog is { } catalog)
+        {
+            lock (_onHost)
+            {
+                foreach (var record in catalog.Registry.KnownOn(host.Id).Where(r => r.OnHost)) _onHost.Add(record.Project);
+            }
+
+            _ = ReadRemoteDeclaredAsync(catalog.Registry.KnownOn(host.Id).Where(r => r.OnHost).SelectMany(r => r.Files));
+        }
+    }
+
+    /// <summary>
+    /// For each stack on an SSH host whose files are not on this machine, ask the host whether they
+    /// are there — one round trip per stack, once.
+    /// <para>
+    /// Where they are, the stack is the host's: compose runs there, the editor reads and writes
+    /// there, and it is remembered so it stays listed when it is down. Where they are not — compose
+    /// was run from another machine — it stays observed, with the controls compose has from labels.
+    /// </para>
+    /// </summary>
+    async Task ProbeRemoteStacksAsync(DockerHost host, RemoteCompose remote, IReadOnlyList<StackSummary> observed)
+    {
+        foreach (var stack in observed)
+        {
+            if (stack.ConfigFiles.Count == 0 || stack.ConfigFiles.All(File.Exists)) continue;
+
+            lock (_onHost)
+            {
+                if (!_probed.Add(stack.Name)) continue;
+            }
+
+            try
+            {
+                if (!await new SshStackFiles(remote.Shell).AllExistAsync(stack.ConfigFiles).ConfigureAwait(false)) continue;
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            if (Selected?.Id != host.Id) return;
+
+            lock (_onHost) _onHost.Add(stack.Name);
+
+            var directory = stack.WorkingDirectory ?? RemoteDirectoryOf(stack.ConfigFiles[0]);
+
+            if (Catalog is { } catalog && !catalog.Registry.IsForgotten(host.Id, stack.Name))
+                catalog.Registry.Remember(new StackRecord(host.Id, stack.Name, directory, stack.ConfigFiles, OnHost: true));
+
+            await ReadRemoteDeclaredAsync(stack.ConfigFiles).ConfigureAwait(false);
+            Changed?.Invoke();
+        }
+    }
+
+    async Task ReadRemoteDeclaredAsync(IEnumerable<string> files)
+    {
+        if (Catalog is not { } catalog || Selected is not { } host) return;
+
+        IStackFiles? reader = _remote is { } remote
+            ? new SshStackFiles(remote.Shell)
+            : host.Endpoint.Scheme == EndpointScheme.Wsl ? new WslStackFiles(host.Endpoint) : null;
+
+        if (reader is null) return;
+
+        foreach (var file in files.Distinct(StringComparer.Ordinal))
+        {
+            try
+            {
+                if (await reader.ReadAsync(file).ConfigureAwait(false) is { } bytes)
+                    catalog.SetRemoteDeclared(file, ComposeDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes)).Services);
+            }
+            catch (Exception)
+            {
+                // Unreadable is unknown; the stack still lists what its containers say.
+            }
+        }
+    }
+
+    /// <summary>A POSIX path's directory — the host's paths, whatever this machine's separator is.</summary>
+    static string RemoteDirectoryOf(string path) => path.LastIndexOf('/') is var slash and > 0 ? path[..slash] : "/";
+
+    /// <summary>
+    /// Where a stack's files are, for reading and writing them: this machine, or the engine's host.
+    /// </summary>
+    public IStackFiles FilesFor(StackSummary stack)
+        => stack.Provenance != StackProvenance.Remote
+            ? LocalStackFiles.Instance
+            : _remote is { } remote
+                ? new SshStackFiles(remote.Shell)
+                : Selected?.Endpoint is { Scheme: EndpointScheme.Wsl } wsl ? new WslStackFiles(wsl) : LocalStackFiles.Instance;
+
+    /// <summary>Compose on the host, for a stack whose files are there and a host that has compose. Null otherwise.</summary>
+    async Task<RemoteCompose?> RemoteFor(StackSummary stack, CancellationToken ct)
+        => stack.Provenance == StackProvenance.Remote && _remote is { } remote && await remote.DetectAsync(ct).ConfigureAwait(false) is not null
+            ? remote
+            : null;
+
+    static string RemoteDirectory(StackSummary stack)
+        => stack.WorkingDirectory ?? (stack.ConfigFiles.Count > 0 ? RemoteDirectoryOf(stack.ConfigFiles[0]) : "/");
 
     /// <summary>How long a health probe of an unselected host may take before it counts as unreachable.</summary>
     public TimeSpan ProbeTimeout { get; init; } = TimeSpan.FromSeconds(5);
@@ -246,6 +438,7 @@ public sealed class EngineManager : IAsyncDisposable
             Store.Clear();
 
             Selected = host;
+            ResetRemote(host);
             Changed?.Invoke();
 
             _runtime = _factory.Create(host.Endpoint);
@@ -571,7 +764,7 @@ public sealed class EngineManager : IAsyncDisposable
 
     // ---------------------------------------------------------------- compose
 
-    readonly ComposeCli _compose = new();
+    readonly ComposeCli _compose;
     readonly BuildxCli _buildx = new();
 
     /// <summary>
@@ -601,7 +794,9 @@ public sealed class EngineManager : IAsyncDisposable
     {
         if (_composeFor.ContainsKey(host.Id)) return;
 
-        var found = await _compose.DetectAsync(host.Endpoint).ConfigureAwait(false) is not null;
+        // Found, and able to reach this host: a compose that cannot address an engine cannot drive it.
+        var found = await _compose.DetectAsync(host.Endpoint).ConfigureAwait(false) is { } command
+            && ComposeTarget.For(host, command) is not null;
         _composeFor[host.Id] = found;
 
         if (!found || !_hosts.TryGetValue(host.Id, out var current)) return;
@@ -626,26 +821,151 @@ public sealed class EngineManager : IAsyncDisposable
     /// else: a container starting or dying updates its stack without a refresh.
     /// </para>
     /// </summary>
-    public IReadOnlyList<StackSummary> Stacks => StackDiscovery.From(Store.Containers);
+    public IReadOnlyList<StackSummary> Stacks
+    {
+        get
+        {
+            if (Catalog is not { } catalog) return StackDiscovery.From(Store.Containers);
 
-    /// <summary>Run a compose subcommand, streaming its output.</summary>
+            HashSet<string> onHost;
+            lock (_onHost) onHost = [.. _onHost];
+
+            return catalog.For(Selected?.Id, Store.Containers, onHost);
+        }
+    }
+
+    /// <summary>
+    /// Run a compose subcommand against the selected host, streaming its output.
+    /// <para>
+    /// The last item carries the exit code (<see cref="ComposeOutput.IsExit"/>) whenever the
+    /// process reported one.
+    /// </para>
+    /// </summary>
     public async IAsyncEnumerable<ComposeOutput> RunComposeAsync(
         StackSummary stack,
         IReadOnlyList<string> arguments,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
+        if (await RemoteFor(stack, ct).ConfigureAwait(false) is { } remote)
+        {
+            await foreach (var line in remote.RunAsync(stack.Name, stack.ConfigFiles, arguments, RemoteDirectory(stack), ct).ConfigureAwait(false))
+                yield return line;
+
+            yield break;
+        }
+
         if (await _compose.DetectAsync(Selected?.Endpoint, ct).ConfigureAwait(false) is not { } command)
         {
             yield return new ComposeOutput(Selected?.Endpoint.Scheme == EndpointScheme.Wsl ? $"Compose is not installed in {Selected.Endpoint.Distro}." : "Compose is not installed on this machine.", IsError: true);
             yield break;
         }
 
+        // Read once: the selection can move mid-run, and the run must stay with the host it
+        // started on rather than finish against whichever one is on screen by then.
+        if (Selected is not { } host || ComposeTarget.For(host, command) is not { } target)
+        {
+            yield return new ComposeOutput(
+                $"{command.Display} has no way to address {Selected?.Endpoint.Display ?? "this host"}.", IsError: true);
+            yield break;
+        }
+
+        var (files, directory) = Locate(stack, target);
+
         await foreach (var line in _compose
-            .RunAsync(command, stack.Name, stack.ConfigFiles, arguments, stack.WorkingDirectory, Selected?.Endpoint, ct)
+            .RunAsync(command, target, stack.Name, files, arguments, directory, ct)
             .ConfigureAwait(false))
         {
             yield return line;
         }
+    }
+
+    /// <summary>
+    /// The files and directory to run compose with — or none at all, for a stack whose files are
+    /// not on this machine.
+    /// <para>
+    /// Paths from labels name the disk of whichever machine ran <c>compose up</c>. Handing compose a
+    /// <c>-f</c> that does not exist fails every command; handing it only <c>-p</c> lets the ones
+    /// that work from labels alone — start, stop, restart, down — do so
+    /// (<see cref="StackCommands.NeedsFiles"/>).
+    /// </para>
+    /// </summary>
+    /// <para>
+    /// Inside a WSL distribution the paths are the distribution's own, and compose runs there, so
+    /// they are passed as compose recorded them — they mean what they say where they are read.
+    /// </para>
+    static (IReadOnlyList<string> Files, string? Directory) Locate(StackSummary stack, ComposeTarget target)
+    {
+        if (target.Distro is not null)
+            return (stack.ConfigFiles, stack.WorkingDirectory ?? (stack.ConfigFiles.Count > 0 ? RemoteDirectoryOf(stack.ConfigFiles[0]) : null));
+
+        return stack.ConfigFiles.Count > 0 && stack.ConfigFiles.All(File.Exists)
+            ? (stack.ConfigFiles, stack.WorkingDirectory is { } wd && Directory.Exists(wd) ? wd : Path.GetDirectoryName(stack.ConfigFiles[0]))
+            : ([], null);
+    }
+
+    /// <summary>
+    /// What Deploy would change, service by service — see <see cref="StackDrift"/>. Null when there
+    /// is nothing to compare: no compose, no files here, or files compose refuses.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, ServiceDrift>?> DriftAsync(StackSummary stack, CancellationToken ct = default)
+    {
+        if (await RemoteFor(stack, ct).ConfigureAwait(false) is { } remote)
+        {
+            var remoteHashes = await remote.HashesAsync(stack.Name, stack.ConfigFiles, RemoteDirectory(stack), ct).ConfigureAwait(false);
+            return remoteHashes is null ? null : StackDrift.Compare(stack, remoteHashes);
+        }
+
+        if (await _compose.DetectAsync(Selected?.Endpoint, ct).ConfigureAwait(false) is not { } command) return null;
+        if (Selected is not { } host || ComposeTarget.For(host, command) is not { } target) return null;
+
+        var (files, directory) = Locate(stack, target);
+        if (files.Count == 0) return null;
+
+        var hashes = await _compose.HashesAsync(command, target, stack.Name, files, directory, ct).ConfigureAwait(false);
+        return hashes is null ? null : StackDrift.Compare(stack, hashes);
+    }
+
+    /// <summary>
+    /// The command line a compose run would use, for showing before it runs. Null when compose is
+    /// not installed or cannot reach the selected host — there is then no command to show.
+    /// </summary>
+    public async Task<string?> DescribeComposeAsync(StackSummary stack, IReadOnlyList<string> arguments, CancellationToken ct = default)
+    {
+        if (await RemoteFor(stack, ct).ConfigureAwait(false) is { } remote)
+            return remote.Display(stack.Name, stack.ConfigFiles, arguments, RemoteDirectory(stack));
+
+        if (await _compose.DetectAsync(Selected?.Endpoint, ct).ConfigureAwait(false) is not { } command) return null;
+        if (Selected is not { } host || ComposeTarget.For(host, command) is not { } target) return null;
+
+        var (files, _) = Locate(stack, target);
+        return ComposeCli.Display(command, target, stack.Name, files, arguments);
+    }
+
+    /// <summary>
+    /// Have compose check a stack against the selected host — what <c>up</c> would read, without
+    /// running it.
+    /// </summary>
+    public async Task<ComposeConfig> ValidateComposeAsync(StackSummary stack, CancellationToken ct = default)
+    {
+        if (await RemoteFor(stack, ct).ConfigureAwait(false) is { } remote)
+            return await remote.ConfigAsync(stack.Name, stack.ConfigFiles, RemoteDirectory(stack), ct).ConfigureAwait(false);
+
+        if (await _compose.DetectAsync(Selected?.Endpoint, ct).ConfigureAwait(false) is not { } command)
+            return new ComposeConfig(null, [new ComposeProblem("Compose is not installed on this machine.", ProblemSeverity.Error)], null);
+
+        if (Selected is not { } host || ComposeTarget.For(host, command) is not { } target)
+        {
+            return new ComposeConfig(
+                null,
+                [new ComposeProblem($"{command.Display} has no way to address {Selected?.Endpoint.Display ?? "this host"}.", ProblemSeverity.Error)],
+                null);
+        }
+
+        var (files, directory) = Locate(stack, target);
+
+        return await _compose
+            .ConfigAsync(command, target, stack.Name, files, directory, ct)
+            .ConfigureAwait(false);
     }
 
     // ---------------------------------------------------------------- images
@@ -662,6 +982,32 @@ public sealed class EngineManager : IAsyncDisposable
         if (_runtime is not { } runtime) return [];
 
         return await runtime.GetImageHistoryAsync(imageId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether an image's tag has moved at its registry. Asked anonymously first, and with the
+    /// stored credential only when the registry refuses — fetching a credential can mean the system
+    /// asking for permission, and a public image should never cause that.
+    /// </summary>
+    public async Task<ImageUpdate> CheckImageUpdateAsync(string reference, RegistryReader registries, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return ImageUpdate.Unknown("Not connected to an engine.");
+
+        var anonymous = await runtime.CheckImageUpdateAsync(reference, null, ct).ConfigureAwait(false);
+        if (!anonymous.NeedsCredential) return anonymous;
+
+        var credential = await registries.FindForAsync(ImageTag.Parse(reference).Registry, ct).ConfigureAwait(false);
+        return credential is null
+            ? anonymous with { Detail = "The registry would not answer without signing in. Sign in on the Registries page to check it." }
+            : await runtime.CheckImageUpdateAsync(reference, credential, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>What an image sets on its own, or null when the engine cannot say.</summary>
+    public async Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return null;
+
+        return await runtime.GetImageDefaultsAsync(image, ct).ConfigureAwait(false);
     }
 
     /// <returns>Null on success, or a sentence explaining what went wrong.</returns>

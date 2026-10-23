@@ -11,20 +11,28 @@ public class ComposeTargetTests
 {
     static readonly ComposeCommand Plugin = new("docker", ["compose"], "2.40.0");
 
-    static ComposeCli.ComposeRun Run(string endpoint, string? workingDirectory = "/home/jon/app")
-        => ComposeCli.Invocation(Plugin, "app", ["/home/jon/app/compose.yaml"], ["up", "-d"], workingDirectory, DockerEndpoint.Parse(endpoint));
+    static DockerHost Host(string endpoint, HostOrigin origin = HostOrigin.Discovered, EndpointTls? tls = null)
+        => new() { Id = "h", Name = "h", Endpoint = DockerEndpoint.Parse(endpoint, tls)!, Origin = origin };
 
+    static ComposeCli.ComposeRun Run(DockerHost host, string? workingDirectory = "/home/jon/app")
+        => ComposeCli.Invocation(Plugin, ComposeTarget.For(host, Plugin)!, "app", ["/home/jon/app/compose.yaml"], ["up", "-d"], workingDirectory);
+
+    /// <summary>
+    /// The engine on compose's command line, as <c>-H</c> — not <c>DOCKER_HOST</c>, which would be
+    /// visible to compose's own interpolation (docs/ARCHITECTURE.md section 2.5).
+    /// </summary>
     [Theory]
     [InlineData("//./pipe/dockerDesktopLinuxEngine", "npipe://./pipe/dockerDesktopLinuxEngine")]
     [InlineData("unix:///Users/jon/.colima/default/docker.sock", "unix:///Users/jon/.colima/default/docker.sock")]
     [InlineData("ssh://jon@nas", "ssh://jon@nas")]
-    public void PointsComposeAtTheSelectedEngine(string endpoint, string dockerHost)
+    public void PointsComposeAtTheSelectedEngine(string endpoint, string cli)
     {
-        var run = Run(endpoint);
+        var host = Host(endpoint);
+        var run = Run(host);
 
         Assert.Equal("docker", run.Executable);
-        Assert.Equal(dockerHost, run.Environment!["DOCKER_HOST"]);
-        Assert.Equal(["compose", "-p", "app", "-f", "/home/jon/app/compose.yaml", "up", "-d"], run.Arguments);
+        Assert.Equal(["-H", cli, "compose", "-p", "app", "-f", "/home/jon/app/compose.yaml", "up", "-d"], run.Arguments);
+        Assert.Empty(ComposeTarget.For(host, Plugin)!.Environment);
     }
 
     /// <summary>
@@ -34,7 +42,8 @@ public class ComposeTargetTests
     [Fact]
     public void RunsComposeInsideTheDistributionForAWslEngine()
     {
-        var run = Run("wsl://Ubuntu");
+        var host = Host("wsl://Ubuntu", HostOrigin.WslDistro);
+        var run = Run(host);
 
         Assert.Equal("wsl.exe", run.Executable);
         Assert.Equal(
@@ -42,22 +51,26 @@ public class ComposeTargetTests
             run.Arguments);
         Assert.DoesNotContain("-u", run.Arguments);
         Assert.Null(run.WorkingDirectory);
+
+        // wsl.exe writes UTF-16 unless told not to.
+        Assert.Equal("1", ComposeTarget.For(host, Plugin)!.Environment["WSL_UTF8"]);
     }
 
     [Fact]
     public void AWslStackWithNoRecordedDirectoryRunsFromHome()
-        => Assert.Contains("~", Run("wsl://Ubuntu", workingDirectory: null).Arguments);
+        => Assert.Contains("~", Run(Host("wsl://Ubuntu", HostOrigin.WslDistro), workingDirectory: null).Arguments);
 
-    /// <summary>TLS the way the CLI reads it: verify unless the context said not to, and the directory holding the certificates.</summary>
+    /// <summary>TLS the way the CLI reads it: verify unless the context said not to, and every file it has.</summary>
     [Fact]
     public void CarriesTlsMaterialForATcpEngine()
     {
-        var endpoint = DockerEndpoint.Parse("tcp://10.0.0.4:2376", new EndpointTls("/certs/ca.pem", "/certs/cert.pem", "/certs/key.pem", false))!;
+        var host = Host("tcp://10.0.0.4:2376", HostOrigin.Environment, new EndpointTls("/certs/ca.pem", "/certs/cert.pem", "/certs/key.pem", false));
 
-        var run = ComposeCli.Invocation(Plugin, "app", [], ["ps"], null, endpoint);
+        var run = ComposeCli.Invocation(Plugin, ComposeTarget.For(host, Plugin)!, "app", [], ["ps"], null);
 
-        Assert.Equal("1", run.Environment!["DOCKER_TLS_VERIFY"]);
-        Assert.Equal(Path.GetDirectoryName("/certs/cert.pem"), run.Environment["DOCKER_CERT_PATH"]);
+        Assert.Equal(
+            ["-H", "tcp://10.0.0.4:2376", "--tlsverify", "--tlscacert", "/certs/ca.pem", "--tlscert", "/certs/cert.pem", "--tlskey", "/certs/key.pem", "compose", "-p", "app", "ps"],
+            run.Arguments);
     }
 }
 
