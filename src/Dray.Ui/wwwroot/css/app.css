@@ -1167,8 +1167,12 @@ textarea,
   background: var(--scrim);
 }
 
+/* The gap under the title is split across the two: half here, half as the body's top padding. The
+   body scrolls and so clips what it holds at its own edge, and a field at the top of it lost the
+   top of its focus ring until there was a focus ring's room inside that edge. Same distance on
+   screen as before. */
 .dialog__head {
-  padding: var(--s4) var(--s5) var(--s2);
+  padding: var(--s4) var(--s5) var(--s1);
 }
 
 .dialog__title {
@@ -1177,7 +1181,7 @@ textarea,
 }
 
 .dialog__body {
-  padding: 0 var(--s5) var(--s4);
+  padding: var(--s1) var(--s5) var(--s4);
   font-size: var(--text-base);
   color: var(--muted);
 
