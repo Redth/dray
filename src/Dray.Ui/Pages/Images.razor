@@ -49,7 +49,7 @@
                             : "This engine has no images. Pull one to get started.")">
                 <Actions>
                     <Button Label="Pull an image…" Icon="IconRef.Pull" Variant="ButtonVariant.Primary"
-                            OnClick="() => _pulling = true" />
+                            OnClick="PullAsync" />
                 </Actions>
             </EmptyState>
         }
@@ -70,35 +70,6 @@
         }
     </div>
 
-    @if (_tagging is { } tagging)
-    {
-        <TagDialog @key="tagging.Id" Image="tagging" Open="true"
-                   OpenChanged="open => _tagging = open ? tagging : null" OnTagged="LoadAsync" />
-    }
-
-    @if (_pushing is { } pushing)
-    {
-        <PushDialog @key="pushing" Reference="pushing" Open="true"
-                    OpenChanged="open => _pushing = open ? pushing : null" />
-    }
-
-    @if (_runFrom is { } runFrom)
-    {
-        @* Keyed on the reference so opening it for a second image rebuilds the form rather than
-           leaving the first image's ports and environment behind. *@
-        <RunDialog @key="runFrom" Image="runFrom" Open="true"
-                   OpenChanged="open => _runFrom = open ? runFrom : null" />
-    }
-
-    @if (_pulling)
-    {
-        <PullDialog Open="true" OpenChanged="open => _pulling = open" OnPulled="LoadAsync" />
-    }
-
-    @if (_buildDialog)
-    {
-        <BuildDialog Open="true" OpenChanged="open => _buildDialog = open" OnBuilt="LoadAsync" />
-    }
 </EngineScope>
 
 @code {
@@ -112,7 +83,11 @@
     bool _noticeOk;
     string _search = "";
     int _danglingFilter;
-    bool _pulling;
+    async Task PullAsync()
+    {
+        await Shell.ShowDialogAsync(PullDialog.Request());
+        await LoadAsync();
+    }
 
     /// <summary>The image reference the run dialog was opened for, or null when it is closed.</summary>
     /// <summary>
@@ -157,16 +132,13 @@
         switch (id)
         {
             case "run":
-                _runFrom = image.Tags[0].Display;
-                break;
+                return Shell.ShowDialogAsync(RunDialog.Request(image.Tags[0].Display));
 
             case "tag":
-                _tagging = image;
-                break;
+                return TagAsync(image);
 
             case "push":
-                _pushing = image.Tags[0].Display;
-                break;
+                return Shell.ShowDialogAsync(PushDialog.Request(image.Tags[0].Display));
 
             case "save":
                 return SaveAsync(image);
@@ -181,11 +153,10 @@
         return Task.CompletedTask;
     }
 
-    string? _runFrom;
-
-    ImageSummary? _tagging;
-    string? _pushing;
-    bool _buildDialog;
+    async Task TagAsync(ImageSummary image)
+    {
+        if (await Shell.ShowDialogAsync(TagDialog.Request(image)) == "tag") await LoadAsync();
+    }
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -389,12 +360,15 @@
                 await LoadAsync();
                 break;
 
+            // Refreshed however these close: a pull or build that finished and one that was walked
+            // away from mid-stream can both have left something new on the engine.
             case "pull":
-                _pulling = true;
+                await PullAsync();
                 break;
 
             case "build":
-                _buildDialog = true;
+                await Shell.ShowDialogAsync(BuildDialog.Request());
+                await LoadAsync();
                 break;
 
             case "load":

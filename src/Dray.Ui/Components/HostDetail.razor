@@ -1,0 +1,321 @@
+@* Everything about the host in use, in one card: what it is, whether it answers, what it can do,
+   and how to point the docker command at it.
+
+   One card with sections rather than a stack of panels — DESIGN.md 4.1: a panel inside a card
+   flattens into a section, so CliTarget sits here as the last one without a box of its own. *@
+@implements IDisposable
+@inject EngineManager Engine
+@inject DockerCliContext Cli
+@inject IShellBridge Shell
+
+<section class="card hostd" aria-labelledby="hostd-title">
+    <header class="hostd__head">
+        <EngineGlyph Icon="HostFacts.Icon(Host)" Large="true" Active="@(Host.State == HostConnectionState.Connected)" />
+
+        <div class="hostd__title">
+            <div class="hostd__nameline">
+                <h2 id="hostd-title" class="hostd__name">@Host.Name</h2>
+                <HostState Host="Host" />
+            </div>
+            <p class="hostd__engine">@EngineLine</p>
+        </div>
+
+        @if (DockerCliContext.CanRemove(Host))
+        {
+            <div class="hostd__actions">
+                <Button Label="Remove" Icon="IconRef.Trash" Variant="ButtonVariant.Ghost" Danger="true"
+                        Tooltip="Remove this host from Dray and from docker context ls"
+                        Disabled="_working" OnClick="RemoveAsync" />
+            </div>
+        }
+    </header>
+
+    @if (Host.State == HostConnectionState.Unreachable)
+    {
+        <div class="hostd__problem" role="status">
+            <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+            <span>@(Host.StateDetail ?? "The engine did not answer.")</span>
+        </div>
+    }
+
+    @if (_error is { } problem)
+    {
+        <div class="hostd__problem" role="alert">
+            <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+            <span>@problem</span>
+        </div>
+    }
+
+    <dl class="kv hostd__facts">
+        <dt>Endpoint</dt>
+        <dd class="hostd__endpoint">
+            <span class="mono">@Host.Endpoint.Display</span>
+            <Button Label="Copy endpoint" Icon="IconRef.Copy" IconOnly="true" Variant="ButtonVariant.Ghost"
+                    Tooltip="Copy endpoint" OnClick="() => Shell.WriteClipboardAsync(Host.Endpoint.Raw)" />
+        </dd>
+
+        <dt>Found in</dt>
+        <dd>@HostFacts.Source(Host)</dd>
+
+        @if (HostFacts.ContainerOsLabel(Host.Capabilities.ContainerOs) is { } os)
+        {
+            @* Which kind of container this engine runs is the first thing to say about it on
+               Windows, and it cannot be read off the endpoint: Docker Desktop, a native dockerd and
+               podman's machine all answer on the same pipe name, and only one of the three runs
+               Windows containers. *@
+            <dt>Runs</dt>
+            <dd>
+                @os
+                @if (Host.Capabilities.DefaultIsolation is { Length: > 0 } isolation)
+                {
+                    <span class="muted"> · @isolation isolation by default</span>
+                }
+            </dd>
+        }
+
+        @if (HostFacts.Machine(Host.Capabilities) is { } machine)
+        {
+            <dt>Machine</dt>
+            <dd>@machine</dd>
+        }
+
+        @if (Host.Description is { Length: > 0 } description && Host.Origin != HostOrigin.AppleContainer)
+        {
+            <dt>Description</dt>
+            <dd>@description</dd>
+        }
+    </dl>
+
+    @* An engine whose service runs on this machine can be started and stopped from here.
+       Apple's container is the case: its CLI answers --version whether or not the API server
+       behind it is up, so an engine that looks installed can fail every call — and the fix is one
+       command nobody has a reason to know. *@
+    @if (Engine.CanControlService)
+    {
+        <div class="hostd__section">
+            <div class="hostd__sectionhead">
+                <h3 class="hostd__h">Engine service</h3>
+                @if (_service is { } state)
+                {
+                    <StatePill Status="ServiceStatus(state)" />
+                }
+            </div>
+            <div class="hostd__service">
+                <p class="hostd__note">
+                    @(_service?.Detail ?? "Checking the service…")
+                    @if (_service?.Version is { Length: > 0 } version)
+                    {
+                        <span class="mono"> · @version</span>
+                    }
+                </p>
+
+                @if (_service is { Running: false })
+                {
+                    <Button Label="Start service" Icon="IconRef.Play" Variant="ButtonVariant.Primary"
+                            Busy="_working" Disabled="_working" OnClick="StartServiceAsync" />
+                }
+                else if (_service is { Running: true })
+                {
+                    <Button Label="Stop service" Icon="IconRef.Stop" Variant="ButtonVariant.Secondary"
+                            Danger="true" Busy="_working" Disabled="_working" OnClick="StopServiceAsync" />
+                }
+            </div>
+        </div>
+    }
+
+    @if (Host.Capabilities.Flavor is not EngineFlavor.Unknown)
+    {
+        var caps = Capabilities(Host.Capabilities);
+        var missing = caps.Where(c => !c.Supported).ToList();
+
+        <div class="hostd__section">
+            <div class="hostd__sectionhead">
+                <h3 class="hostd__h">What it supports</h3>
+                <span class="hostd__count">
+                    @(missing.Count == 0 ? $"All {caps.Count}" : $"{caps.Count - missing.Count} of {caps.Count}")
+                </span>
+            </div>
+
+            <ul class="hostd__chips" aria-label="Supported">
+                @foreach (var cap in caps.Where(c => c.Supported))
+                {
+                    <li class="hostd__chip">
+                        <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+                        @cap.Name
+                    </li>
+                }
+            </ul>
+
+            @if (missing.Count > 0)
+            {
+                @* What is missing gets a sentence each — what the user loses — rather than a cross on
+                   its own. DESIGN.md 8.1: one place to answer "why can't I do X here?". *@
+                <div class="hostd__missing">
+                    @foreach (var cap in missing)
+                    {
+                        <Capability Name="@cap.Name" Supported="false" Absent="@cap.Absent" />
+                    }
+                </div>
+            }
+        </div>
+    }
+    else if (Host.State is HostConnectionState.Connecting or HostConnectionState.Disconnected)
+    {
+        <div class="hostd__section" aria-busy="true">
+            <div class="hostd__sectionhead"><h3 class="hostd__h">What it supports</h3></div>
+            <div class="hostd__skeleton">
+                <Skeleton Width="40%" />
+                <Skeleton Width="65%" />
+            </div>
+        </div>
+    }
+
+    <CliTarget Host="Host" />
+</section>
+
+@code {
+    [Parameter, EditorRequired] public DockerHost Host { get; set; } = default!;
+
+    EngineServiceState? _service;
+    bool _working;
+    string? _error;
+
+    /// <summary>Which host the service state belongs to, so it is not shown for a different one.</summary>
+    string? _serviceFor;
+
+    string EngineLine => Host.Capabilities.EngineVersion is { } version
+        ? $"{HostFacts.Flavor(Host.Capabilities.Flavor)} {version}"
+            + (Host.Capabilities.ApiVersion is { Length: > 0 } api ? $" · API {api}" : "")
+            + (Host.Capabilities.IsRootless ? " · rootless" : "")
+        : Host.State == HostConnectionState.Unreachable ? "Not answering" : "Connecting…";
+
+    sealed record Cap(string Name, bool Supported, string Absent);
+
+    static IReadOnlyList<Cap> Capabilities(RuntimeCapabilities c) =>
+    [
+        new("Event stream", c.SupportsEvents, "Dray checks this engine every couple of seconds instead, so a change can be that late — and something that appears and disappears between checks is never seen."),
+        new("Container stats", c.SupportsStats, "CPU and memory columns stay empty on this engine."),
+        new("Shell", c.SupportsShell, "The Terminal tab is hidden. Use the engine's own exec command in a terminal."),
+        new("Pause and resume", c.SupportsPause, "Those buttons are hidden. Stop and start are unaffected."),
+        new("Rename", c.SupportsRename, "This engine identifies a container by its name, so renaming means recreating it."),
+        new("Volumes", c.SupportsVolumes, "Containers mount host directories directly instead."),
+        new("Networks", c.SupportsNetworks, "Networks are attached at creation and cannot be managed afterwards."),
+        new("Compose", c.SupportsCompose, "The Stacks page has nothing to read on this engine."),
+        new("BuildKit", c.SupportsBuildKit, "Builds fall back to the legacy builder."),
+    ];
+
+    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
+
+    /// <summary>
+    /// Re-check when the selection changes, and only then. Changed also fires for every container
+    /// event on the selected host, and asking the engine about its service each time would be a
+    /// process launched per event — the polling this design exists to avoid.
+    /// </summary>
+    void OnEngineChanged()
+    {
+        if (_serviceFor == Engine.Selected?.Id) return;
+
+        _ = InvokeAsync(RefreshServiceAsync);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_serviceFor != Host.Id)
+        {
+            _error = null;
+            await RefreshServiceAsync();
+        }
+    }
+
+    async Task RefreshServiceAsync()
+    {
+        _serviceFor = Engine.Selected?.Id;
+
+        if (Engine.ServiceStatusAsync() is not { } pending)
+        {
+            // The engine has no service Dray can see. Cleared rather than left showing the last
+            // engine's answer.
+            _service = null;
+            StateHasChanged();
+            return;
+        }
+
+        _service = await pending;
+        StateHasChanged();
+    }
+
+    public void Dispose() => Engine.Changed -= OnEngineChanged;
+
+    /// <summary>
+    /// The service's state in the app's own vocabulary, so it reads as every other state does —
+    /// tint, glyph and word (DESIGN.md 2.4).
+    /// </summary>
+    static ContainerStatus ServiceStatus(EngineServiceState state) => state.Running
+        ? new ContainerStatus(StateTone.Ok, "●", "Running")
+        : new ContainerStatus(StateTone.Danger, "■", "Stopped");
+
+    async Task StartServiceAsync()
+    {
+        _working = true;
+
+        try
+        {
+            _error = await Engine.StartServiceAsync();
+            await RefreshServiceAsync();
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    async Task StopServiceAsync()
+    {
+        // Everything running under it stops with it, so this is confirmed like any other stop.
+        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+            "Stop the engine service?",
+            "Every container it is running stops with it. Nothing is deleted, and starting the "
+            + "service again brings the containers back to whatever state they were left in.",
+            "Stop service"));
+
+        if (answer != ConfirmResult.Confirm) return;
+
+        _working = true;
+
+        try
+        {
+            _error = await Engine.StopServiceAsync();
+            await RefreshServiceAsync();
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    async Task RemoveAsync()
+    {
+        // Nothing on the engine is lost, so this is a plain confirmation rather than a typed one —
+        // but it still names exactly what goes and what stays.
+        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+            $"Remove {Host.Name}?",
+            $"Dray stops showing it, and the {Host.Id} Docker context is deleted, so docker --context "
+            + $"{Host.Id} stops working too. The engine and everything on it are untouched, and you "
+            + "can add it again at any time.",
+            "Remove"));
+
+        if (answer != ConfirmResult.Confirm) return;
+
+        _working = true;
+
+        try
+        {
+            _error = await Cli.RemoveContextAsync(Host);
+            if (_error is null) await Engine.InitializeAsync();
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+}

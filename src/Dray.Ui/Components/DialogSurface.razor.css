@@ -1,9 +1,28 @@
-/* The body fills the accessory view the platform gave it, and scrolls inside it. The alert has
-   already decided how big that is — see MacDialogSheet on why the size is asked for rather than
-   measured. */
+/* The body fills the region of the sheet the platform gave it, and scrolls inside it once the
+   content is taller than the sheet may grow. The head sizes that region from the content's own
+   measured height, so in the ordinary case nothing scrolls at all.
+
+   Inset on every side, because a WebView clips at its own edge and a focus ring is drawn outside
+   the control it belongs to — two pixels of outline at a two-pixel offset, so four past a field's
+   border. Without this a field against the edge loses its ring on that side. The native frame
+   widens the WebView by exactly this much (MacDialogFrame.Inset), so the content still lines up
+   with the AppKit title and buttons; change one and the other has to follow. */
 .surface {
+    /* The ground of a sheet is the platform's material, not a colour: AppKit draws it translucent
+       and tinted by whatever is behind the window. An opaque panel colour over it reads as a grey
+       slab beside AppKit's own buttons, which take the tint (DESIGN.md 9.1.1 — a material cannot be
+       matched by a colour). So the raised fills here are ink laid over the material at low
+       strength, the way a native control's fill is, and carry its tint in both appearances.
+
+       --bg is left opaque on purpose. It is what text fields and dropdowns paint, and both are
+       solid on the platform too: a field is recessed, and a list floating over content must hide
+       what is under it. */
+    --surface: color-mix(in oklab, var(--ink) 5%, transparent);
+    --surface-2: color-mix(in oklab, var(--ink) 9%, transparent);
+
     height: 100%;
     overflow: auto;
+    padding: var(--s2);
     color: var(--ink);
     font-size: var(--text-base);
 }

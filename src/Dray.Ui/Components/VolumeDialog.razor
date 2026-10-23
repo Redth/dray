@@ -1,70 +1,62 @@
-@* Create a volume. Just a name — the driver options the engine accepts are for storage plugins
-   nobody configures from a GUI, and offering them would be offering choices with no guidance. *@
+@* Create a volume. A dialog body: the title and buttons are the platform's.
+
+   Just a name — the driver options the engine accepts are for storage plugins nobody configures
+   from a GUI, and offering them would be offering choices with no guidance. *@
+@inherits DialogBody
 @inject EngineManager Engine
 
-<Dialog Title="Create a volume" Open="Open" OpenChanged="OpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="vol-name">Name</label>
-            <input id="vol-name" class="input" @bind="_name" @bind:event="oninput"
-                   autocomplete="off" spellcheck="false" @onkeydown="OnKeyDown" />
-        </div>
+<div class="field">
+    <label class="field__label" for="vol-name">Name</label>
+    <input id="vol-name" class="input" @bind="_name" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" disabled="@_saving" />
+</div>
 
-        @if (_problem is { } problem)
-        {
-            <p class="vol__problem">@problem</p>
-        }
-        else
-        {
-            <p class="vol__hint muted">
-                The volume is empty until a container mounts it. Nothing is stored on your machine
-                directly — the engine owns it, which is what makes it survive the container.
-            </p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => OpenChanged.InvokeAsync(false)" />
-        <Button Label="Create" Variant="ButtonVariant.Primary" Busy="_saving"
-                Disabled="@(_saving || !ContainerName.IsValid(_name))" OnClick="SubmitAsync" />
-    </Footer>
-</Dialog>
+@if (_problem is { } problem)
+{
+    <p class="vol__problem" role="alert">@problem</p>
+}
+else
+{
+    <p class="vol__hint muted">
+        The volume is empty until a container mounts it. Nothing is stored on your machine
+        directly — the engine owns it, which is what makes it survive the container.
+    </p>
+}
 
 @code {
-    [Parameter] public bool Open { get; set; }
-
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
-
-    [Parameter] public EventCallback OnCreated { get; set; }
+    /// <summary>Closes with "create" once the engine has made it, so the list behind can refresh.</summary>
+    public static DialogRequest Request() => new(
+        "Create a volume",
+        typeof(VolumeDialog),
+        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
+        Size: DialogSize.Small);
 
     string _name = "";
     string? _problem;
     bool _saving;
 
-    async Task OnKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && !_saving && ContainerName.IsValid(_name)) await SubmitAsync();
-    }
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(),
+        DialogButton.Confirm("create", "Create") with { Enabled = ContainerName.IsValid(_name), Busy = _saving },
+    ];
 
-    async Task SubmitAsync()
+    protected override async Task<bool> OnPressedAsync(string id)
     {
         if (ContainerName.Validate(_name) is { } invalid)
         {
             _problem = invalid;
-            return;
+            return false;
         }
 
         _saving = true;
         _problem = null;
+        StateHasChanged();
 
         try
         {
             _problem = await Engine.CreateVolumeAsync(_name.Trim());
-
-            if (_problem is null)
-            {
-                await OnCreated.InvokeAsync();
-                await OpenChanged.InvokeAsync(false);
-            }
+            return _problem is null;
         }
         finally
         {

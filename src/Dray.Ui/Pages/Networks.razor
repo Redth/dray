@@ -122,10 +122,6 @@
         }
     </div>
 
-    @if (_creating)
-    {
-        <NetworkDialog Open="true" OpenChanged="open => _creating = open" OnCreated="LoadAsync" />
-    }
 </EngineScope>
 
 @code {
@@ -138,9 +134,13 @@
     string? _notice;
     bool _noticeOk;
     string _search = "";
-    bool _creating;
 
     protected override Task OnInitializedAsync() => LoadAsync();
+
+    async Task CreateAsync()
+    {
+        if (await Shell.ShowDialogAsync(NetworkDialog.Request()) == "create") await LoadAsync();
+    }
 
     IReadOnlyList<NetworkSummary> Visible
     {
@@ -257,7 +257,7 @@
                 break;
 
             case "create":
-                _creating = true;
+                await CreateAsync();
                 break;
 
             case "prune":

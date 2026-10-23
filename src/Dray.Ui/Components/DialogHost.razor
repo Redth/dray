@@ -1,54 +1,90 @@
-@* Renders a DialogRequest for hosts with no native dialog. Mounted once by the layout.
+@* Renders a dialog for hosts with no native dialog. Mounted once by the layout.
 
    This is the one head that draws its own title row and button row, because a browser has no other
    frame to put them in — and it draws them with <dialog> and showModal(), which is where focus
-   trapping, focus restore, Escape and the top layer come from. The native heads present an NSAlert
-   sheet, a ContentDialog or an AdwMessageDialog and never render this. See docs/NATIVE-SHELL.md
-   section 4. *@
+   trapping, focus restore, Escape and the top layer come from. The native heads present an NSPanel
+   sheet, a ContentDialog or an AdwWindow and never render this. See docs/NATIVE-SHELL.md section 4.
+
+   What it draws is the session, not the request: a body changes its title and buttons as the form
+   is filled in, and this follows them exactly as the native frames do. *@
 @implements IDisposable
 @inject WebDialogService Dialogs
 
-@if (Dialogs.Request is { } request)
+@if (Dialogs.Session is { } session)
 {
-    <Dialog Title="@request.Title" Open="true" OpenChanged="OnOpenChanged" Class="@SizeClass(request.Size)">
+    <Dialog @key="session" Title="@session.Title" Open="true" OpenChanged="open => OnOpenChanged(session, open)"
+            Class="@SizeClass(session.Request.Size)">
         <ChildContent>
-            @if (request.Subtitle is { Length: > 0 } subtitle)
+            @if (session.Subtitle is { Length: > 0 } subtitle)
             {
                 <p class="dialog__subtitle muted">@subtitle</p>
             }
 
-            @* The body is the same component every head hosts. Rendered by type rather than as a
-               fragment because a fragment cannot cross into a native head's own WebView. *@
-            <DynamicComponent Type="request.Body" Parameters="Writable(request.ParameterMap)" />
+            <DialogContent Session="session" />
         </ChildContent>
 
         <Footer>
-            @foreach (var button in request.Ordered(DialogButtonOrder.CommitLast))
+            @foreach (var button in session.Buttons.Where(b => b.Leading))
             {
-                var captured = button;
+                @Render(session, button)
+            }
 
-                <Button Label="@button.Label"
-                        Variant="@Variant(button.Role)"
-                        Danger="@(button.Role == DialogButtonRole.Destructive)"
-                        OnClick="() => Dialogs.Close(captured.Id)" />
+            @if (session.Buttons.Any(b => b.Leading))
+            {
+                <span class="dialog__spacer"></span>
+            }
+
+            @foreach (var button in DialogRequest.Order(session.Buttons, DialogButtonOrder.CommitLast))
+            {
+                @Render(session, button)
             }
         </Footer>
     </Dialog>
 }
 
 @code {
+    DialogSession? _watching;
+
     protected override void OnInitialized() => Dialogs.Changed += OnChanged;
 
     void OnChanged() => InvokeAsync(StateHasChanged);
 
-    /// <summary>Escape and the backdrop are a dismissal, not a choice.</summary>
-    void OnOpenChanged(bool open)
+    protected override void OnParametersSet() => Watch(Dialogs.Session);
+
+    protected override void OnAfterRender(bool firstRender) => Watch(Dialogs.Session);
+
+    /// <summary>Redraw the frame when the body changes its title or buttons.</summary>
+    void Watch(DialogSession? session)
     {
-        if (!open) Dialogs.Close(null);
+        if (ReferenceEquals(_watching, session)) return;
+
+        if (_watching is not null) _watching.Changed -= OnChanged;
+        _watching = session;
+        if (session is not null) session.Changed += OnChanged;
     }
 
-    static ButtonVariant Variant(DialogButtonRole role) => role switch
+    RenderFragment Render(DialogSession session, DialogButton button) => __builder =>
     {
+        <Button @key="button.Id"
+                Label="@button.Label"
+                Variant="@Variant(button)"
+                Danger="@(button.Role == DialogButtonRole.Destructive)"
+                Disabled="@(!button.Pressable)"
+                Busy="@button.Busy"
+                OnClick="() => session.PressAsync(button.Id)" />
+    };
+
+    /// <summary>Escape and the backdrop are a dismissal, not a choice.</summary>
+    static void OnOpenChanged(DialogSession session, bool open)
+    {
+        if (!open) session.Dismiss();
+    }
+
+    static ButtonVariant Variant(DialogButton button) => button.Role switch
+    {
+        // A Back sits apart from the decision and reads as navigation, not as a choice.
+        DialogButtonRole.Normal when button.Leading => ButtonVariant.Ghost,
+
         DialogButtonRole.Confirm => ButtonVariant.Primary,
 
         // The committing button in a dialog is the one place a filled destructive button is right:
@@ -65,21 +101,9 @@
         _ => "",
     };
 
-    /// <summary>
-    /// DynamicComponent wants a mutable dictionary. Copied rather than cast, so a caller cannot
-    /// hand one dictionary to two dialogs and have the second edit the first.
-    /// </summary>
-    static Dictionary<string, object> Writable(IReadOnlyDictionary<string, object?> parameters)
+    public void Dispose()
     {
-        var copy = new Dictionary<string, object>(StringComparer.Ordinal);
-
-        foreach (var (key, value) in parameters)
-        {
-            if (value is not null) copy[key] = value;
-        }
-
-        return copy;
+        Dialogs.Changed -= OnChanged;
+        if (_watching is not null) _watching.Changed -= OnChanged;
     }
-
-    public void Dispose() => Dialogs.Changed -= OnChanged;
 }

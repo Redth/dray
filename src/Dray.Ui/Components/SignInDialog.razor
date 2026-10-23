@@ -1,91 +1,85 @@
-@* Sign in to a registry.
+@* Sign in to a registry. A dialog body: the title and buttons are the platform's.
 
    docs/CREDENTIALS.md §1.4: Dray takes a username and a token, hands both to the helper's `store`,
    and forgets them. The secret lives in a local for the length of one call — never rendered, never
-   logged, never held in a field that survives this dialog. *@
+   logged, never held in a field that survives this dialog. Nothing about it crosses back to the
+   page: the dialog closes with a button id and nothing else. *@
+@inherits DialogBody
 @inject RegistryReader Reader
 
-<Dialog Title="@($"Sign in to {Registry.DisplayName}")" Open="Open" OpenChanged="OpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="signin-user">Username</label>
-            <input id="signin-user" class="input" @bind="_username" @bind:event="oninput"
-                   autocomplete="off" spellcheck="false" disabled="@_saving" />
-        </div>
+<div class="field">
+    <label class="field__label" for="signin-user">Username</label>
+    <input id="signin-user" class="input" @bind="_username" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" disabled="@_saving" />
+</div>
 
-        <div class="field">
-            <label class="field__label" for="signin-secret">
-                Token <span class="muted">— prefer an access token over your password</span>
-            </label>
-            <input id="signin-secret" class="input" type="password"
-                   @bind="_secret" @bind:event="oninput"
-                   autocomplete="off" spellcheck="false" disabled="@_saving" />
-        </div>
+<div class="field">
+    <label class="field__label" for="signin-secret">
+        Token <span class="muted">— prefer an access token over your password</span>
+    </label>
+    <input id="signin-secret" class="input" type="password"
+           @bind="_secret" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" disabled="@_saving" />
+</div>
 
-        @if (_problem is { } problem)
-        {
-            <p class="signin__problem">@problem</p>
-        }
-        else
-        {
-            <p class="signin__hint muted">
-                This goes straight to <span class="mono">@("docker-credential-" + Registry.Helper)</span>,
-                the same store the <span class="mono">docker</span> command uses. Dray keeps no copy.
-            </p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => OpenChanged.InvokeAsync(false)" />
-        <Button Label="Sign in" Variant="ButtonVariant.Primary" Busy="_saving"
-                Disabled="@(_saving || _username.Length == 0 || _secret.Length == 0)"
-                OnClick="SubmitAsync" />
-    </Footer>
-</Dialog>
+@if (_problem is { } problem)
+{
+    <p class="signin__problem" role="alert">@problem</p>
+}
+else
+{
+    <p class="signin__hint muted">
+        This goes straight to <span class="mono">@("docker-credential-" + Registry.Helper)</span>,
+        the same store the <span class="mono">docker</span> command uses. Dray keeps no copy.
+    </p>
+}
 
 @code {
     [Parameter, EditorRequired] public RegistryEntry Registry { get; set; } = default!;
 
-    [Parameter] public bool Open { get; set; }
-
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
-
-    /// <summary>Raised with the server on success. Deliberately carries no credential.</summary>
-    [Parameter] public EventCallback<string> OnSignedIn { get; set; }
+    /// <summary>Closes with "signin" once the helper has stored it. Carries no credential back.</summary>
+    public static DialogRequest Request(RegistryEntry registry) => new(
+        $"Sign in to {registry.DisplayName}",
+        typeof(SignInDialog),
+        new Dictionary<string, object?> { [nameof(Registry)] = registry },
+        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("signin", "Sign in")],
+        Size: DialogSize.Small);
 
     string _username = "";
     string _secret = "";
     string? _problem;
     bool _saving;
 
-    protected override void OnParametersSet()
-    {
-        if (!Open) return;
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(),
+        DialogButton.Confirm("signin", "Sign in") with
+        {
+            Enabled = _username.Trim().Length > 0 && _secret.Length > 0,
+            Busy = _saving,
+        },
+    ];
 
-        // Prefilled with the username already stored, because signing in again to refresh a token
-        // is the common case and retyping it is friction for nothing.
-        if (_username.Length == 0) _username = Registry.Username ?? "";
-    }
+    // Prefilled with the username already stored, because signing in again to refresh a token is
+    // the common case and retyping it is friction for nothing.
+    protected override void OnInitialized() => _username = Registry.Username ?? "";
 
-    async Task SubmitAsync()
+    protected override async Task<bool> OnPressedAsync(string id)
     {
         if (Registry.Helper is not { } helper)
         {
             _problem = "There is no credential helper configured, and Dray will not write a credential in plaintext.";
-            return;
+            return false;
         }
 
         _saving = true;
         _problem = null;
+        StateHasChanged();
 
         try
         {
             _problem = await Reader.StoreAsync(helper, Registry.Server, _username.Trim(), _secret);
-
-            if (_problem is null)
-            {
-                await OnSignedIn.InvokeAsync(Registry.DisplayName);
-                await OpenChanged.InvokeAsync(false);
-            }
+            return _problem is null;
         }
         finally
         {

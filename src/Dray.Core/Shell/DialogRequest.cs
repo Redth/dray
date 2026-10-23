@@ -27,6 +27,30 @@ public enum DialogButtonRole
 /// </summary>
 public sealed record DialogButton(string Id, string Label, DialogButtonRole Role = DialogButtonRole.Normal)
 {
+    /// <summary>
+    /// Whether it can be pressed right now. A body turns its commit button off until the form is
+    /// complete, so the platform's own disabled state says so rather than a press that does nothing.
+    /// </summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// Work started by this button is in flight. The head shows the platform's own progress
+    /// indicator beside it and refuses a second press; the body still says what is happening.
+    /// </summary>
+    public bool Busy { get; init; }
+
+    /// <summary>
+    /// Sits at the leading edge of the row, apart from the decision — a Back, or a Help. Every
+    /// platform puts these on the far side from the commit button, so it is a placement rather than
+    /// a role: it changes where the button goes, not what Return or Escape do.
+    /// </summary>
+    public bool Leading { get; init; }
+
+    /// <summary>Can be pressed: enabled, and not already working.</summary>
+    public bool Pressable => Enabled && !Busy;
+
+    public static DialogButton Back(string label = "Back") => new("back", label) { Leading = true };
+
     public static DialogButton Cancel(string label = "Cancel") => new("cancel", label, DialogButtonRole.Cancel);
 
     public static DialogButton Confirm(string id, string label) => new(id, label, DialogButtonRole.Confirm);
@@ -109,13 +133,21 @@ public sealed record DialogRequest(
     /// taking the Return key.
     /// </para>
     /// </summary>
-    public IReadOnlyList<DialogButton> Ordered(DialogButtonOrder order)
-    {
-        IReadOnlyList<DialogButton> commit =
-            [.. ButtonList.Where(b => b.Role is DialogButtonRole.Confirm or DialogButtonRole.Destructive)];
+    public IReadOnlyList<DialogButton> Ordered(DialogButtonOrder order) => Order(ButtonList, order);
 
-        IReadOnlyList<DialogButton> rest = [.. ButtonList.Where(b => b.Role == DialogButtonRole.Normal)];
-        IReadOnlyList<DialogButton> cancel = [.. ButtonList.Where(b => b.Role == DialogButtonRole.Cancel)];
+    /// <summary>
+    /// The trailing buttons of a row in a head's order. Leading buttons are left out — every head
+    /// puts those at the far edge on their own, in the order given.
+    /// </summary>
+    public static IReadOnlyList<DialogButton> Order(IReadOnlyList<DialogButton> buttons, DialogButtonOrder order)
+    {
+        var trailing = buttons.Where(b => !b.Leading).ToList();
+
+        IReadOnlyList<DialogButton> commit =
+            [.. trailing.Where(b => b.Role is DialogButtonRole.Confirm or DialogButtonRole.Destructive)];
+
+        IReadOnlyList<DialogButton> rest = [.. trailing.Where(b => b.Role == DialogButtonRole.Normal)];
+        IReadOnlyList<DialogButton> cancel = [.. trailing.Where(b => b.Role == DialogButtonRole.Cancel)];
 
         return order == DialogButtonOrder.CommitFirst
             ? [.. commit, .. rest, .. cancel]
@@ -123,7 +155,7 @@ public sealed record DialogRequest(
     }
 
     /// <summary>The button Escape chooses, or null when the dialog has no way to be cancelled.</summary>
-    public DialogButton? CancelButton => ButtonList.FirstOrDefault(b => b.Role == DialogButtonRole.Cancel);
+    public DialogButton? CancelButton => CancelOf(ButtonList);
 
     /// <summary>
     /// The button Return commits.
@@ -133,5 +165,11 @@ public sealed record DialogRequest(
     /// by reflex.
     /// </para>
     /// </summary>
-    public DialogButton? DefaultButton => ButtonList.FirstOrDefault(b => b.Role == DialogButtonRole.Confirm);
+    public DialogButton? DefaultButton => DefaultOf(ButtonList);
+
+    public static DialogButton? CancelOf(IReadOnlyList<DialogButton> buttons)
+        => buttons.FirstOrDefault(b => b.Role == DialogButtonRole.Cancel);
+
+    public static DialogButton? DefaultOf(IReadOnlyList<DialogButton> buttons)
+        => buttons.FirstOrDefault(b => b.Role == DialogButtonRole.Confirm);
 }

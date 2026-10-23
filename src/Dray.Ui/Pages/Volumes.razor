@@ -55,7 +55,7 @@
                             : "This engine has no volumes. One appears the first time a container asks for persistent storage.")">
                 <Actions>
                     <Button Label="Create a volume…" Icon="IconRef.Plus" Variant="ButtonVariant.Primary"
-                            OnClick="() => _creating = true" />
+                            OnClick="CreateAsync" />
                 </Actions>
             </EmptyState>
         }
@@ -73,10 +73,6 @@
         }
     </div>
 
-    @if (_creating)
-    {
-        <VolumeDialog Open="true" OpenChanged="open => _creating = open" OnCreated="LoadAsync" />
-    }
 </EngineScope>
 
 @code {
@@ -85,9 +81,13 @@
     string? _notice;
     bool _noticeOk;
     string _search = "";
-    bool _creating;
 
     protected override Task OnInitializedAsync() => LoadAsync();
+
+    async Task CreateAsync()
+    {
+        if (await Shell.ShowDialogAsync(VolumeDialog.Request()) == "create") await LoadAsync();
+    }
 
     IReadOnlyList<VolumeSummary> Visible
     {
@@ -218,7 +218,7 @@
                 break;
 
             case "create":
-                _creating = true;
+                await CreateAsync();
                 break;
 
             case "prune":

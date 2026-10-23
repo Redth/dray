@@ -7,11 +7,86 @@ export const dialog = {
    * Hand-rolling any of those is how Sherpa ended up intercepting every Tab keypress.
    */
   show(el) {
-    if (el && !el.open) el.showModal();
+    if (!el || el.open) return;
+
+    el.showModal();
+
+    // showModal() focuses the first focusable thing, and Chrome counts a scrolling region as one —
+    // so a dialog that is only something to read opens with a ring around its whole body. A native
+    // sheet focuses its default button in that case, and so does this.
+    if (document.activeElement?.classList.contains('dialog__body')) {
+      el.querySelector('.dialog__foot .btn--primary:not(:disabled)')?.focus();
+    }
   },
 
   close(el) {
     if (el && el.open) el.close();
+  },
+
+  /**
+   * Watch a dialog body: Return in a field presses the frame's default button, and the content's
+   * natural height is reported so a native sheet can size itself to it.
+   *
+   * Return is taken here rather than left to the platform because the frame is not always in the
+   * same document — on macOS the buttons are AppKit's and the field is in a WebView, and a key the
+   * page did not handle would otherwise reach the sheet only if WebKit chose to pass it on. A field
+   * that wants Return for itself (a combobox picking an option, a textarea) prevents the default
+   * first, and is left alone.
+   *
+   * @param {HTMLElement} el the body's root
+   * @param {any} dotnet a DotNetObjectReference with Enter() and Measured(height)
+   * @param {boolean} measure whether the head sizes its frame to the content
+   */
+  watch(el, dotnet, measure) {
+    if (!el) return null;
+
+    const onKey = (e) => {
+      if (e.key !== 'Enter' || e.defaultPrevented || e.isComposing) return;
+      if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
+
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) return;
+      if (target.type === 'button' || target.type === 'submit' || target.type === 'file') return;
+
+      // An open combobox owns Return: it picks the highlighted option. Blazor decides whether to
+      // prevent the default after this listener has already run, so the ARIA state the list
+      // renders is what says so in time.
+      if (target.getAttribute('aria-expanded') === 'true') return;
+
+      e.preventDefault();
+      dotnet.invokeMethodAsync('Enter');
+    };
+
+    el.addEventListener('keydown', onKey);
+
+    let observer = null;
+    if (measure && 'ResizeObserver' in window) {
+      let last = 0;
+      observer = new ResizeObserver(() => {
+        const height = Math.ceil(el.scrollHeight);
+        if (Math.abs(height - last) < 1) return;
+        last = height;
+        dotnet.invokeMethodAsync('Measured', height);
+      });
+      observer.observe(el);
+    }
+
+    return {
+      dispose() {
+        el.removeEventListener('keydown', onKey);
+        observer?.disconnect();
+      },
+    };
+  },
+
+  /**
+   * Focus the first field in a body, the way a native sheet focuses its first control. Not when
+   * that field is a combobox: focusing one opens its list, and a dialog that opens with a dropdown
+   * already covering the form reads as something having gone wrong.
+   */
+  focusFirst(el) {
+    const field = el?.querySelector('input:not([type=hidden]):not([disabled]), select, textarea');
+    if (field && field.getAttribute('role') !== 'combobox') field.focus({ preventScroll: true });
   },
 };
 

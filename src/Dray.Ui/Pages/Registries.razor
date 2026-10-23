@@ -138,18 +138,10 @@
     }
 </div>
 
-@if (_signingIn is { } target)
-{
-    <SignInDialog Registry="target" Open="true"
-                  OpenChanged="open => _signingIn = open ? target : null"
-                  OnSignedIn="OnSignedInAsync" />
-}
-
 @code {
     static readonly ContainerStatus MissingStatus = new(StateTone.Danger, "▲", "Helper missing");
 
     IReadOnlyList<RegistryEntry>? _entries;
-    RegistryEntry? _signingIn;
     string? _notice;
     bool _noticeOk;
 
@@ -168,11 +160,11 @@
         }
     }
 
-    void BeginSignIn(RegistryEntry entry) => _signingIn = entry;
-
-    async Task OnSignedInAsync(string server)
+    async Task BeginSignIn(RegistryEntry entry)
     {
-        Notify($"Signed in to {server}. The credential is in your system store, not in Dray.", ok: true);
+        if (await Shell.ShowDialogAsync(SignInDialog.Request(entry)) != "signin") return;
+
+        Notify($"Signed in to {entry.DisplayName}. The credential is in your system store, not in Dray.", ok: true);
         await LoadAsync();
     }
 

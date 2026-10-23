@@ -34,8 +34,10 @@ legible. See DESIGN.md §2.4 for the full vocabulary.
 viewer — is a native title row, a Blazor body and a native button row. Only an inline menu (an
 overflow `⋯`, a combobox list, a row's context menu) stays entirely in the page. A dialog that draws
 its own title bar or button row in HTML is a bug on every head that has a native dialog; the web
-head uses `<dialog>` and `showModal()`, never a hand-rolled overlay. DESIGN.md §2.4b, and
-`docs/NATIVE-SHELL.md` §4 for each platform's frame.
+head uses `<dialog>` and `showModal()`, never a hand-rolled overlay. In practice: a dialog is a
+component that inherits `DialogBody`, declares its title and buttons, and is opened with
+`Shell.ShowDialogAsync(SomeDialog.Request(...))` — never placed in a page with an `Open` flag.
+DESIGN.md §2.4b, and `docs/NATIVE-SHELL.md` §4 for each platform's frame.
 
 **Text is not selectable by default.** `user-select: none` on the app, menus and dialogs — drag-
 selecting chrome is the clearest tell that a window is a web page. Anything worth copying gets a

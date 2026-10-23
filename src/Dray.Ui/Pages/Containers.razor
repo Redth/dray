@@ -124,18 +124,6 @@
         }
     </div>
 
-    @if (_renaming is { } renaming)
-    {
-        <RenameDialog Container="renaming" Open="true"
-                      OpenChanged="open => _renaming = open ? renaming : null"
-                      OnRename="name => Engine.RenameAsync(renaming.Id, name)" />
-    }
-
-    @* No success banner: the new container appearing in the list *is* the confirmation, and it
-       arrives the same way every other change does — through the event stream, or the poll. A
-       banner saying "created" while the row was not yet there would be Dray claiming something
-       the engine had not confirmed. *@
-    <RunDialog Open="_running" OpenChanged="open => _running = open" />
 </EngineScope>
 
 @code {
@@ -144,10 +132,6 @@
     string _search = "";
     string? _error;
     int _stateFilter;
-    ContainerSummary? _renaming;
-
-    /// <summary>Whether the run-from-image dialog is open. Its own flag, not a container.</summary>
-    bool _running;
     bool _working;
     bool _showUsage;
 
@@ -444,8 +428,7 @@
         switch (id)
         {
             case "rename":
-                BeginRename(c);
-                return Task.CompletedTask;
+                return Shell.ShowDialogAsync(RenameDialog.Request(c));
 
             case "copy-id":
                 return CopyIdAsync(c);
@@ -453,8 +436,6 @@
 
         return Task.CompletedTask;
     }
-
-    void BeginRename(ContainerSummary container) => _renaming = container;
 
     async Task CopyIdAsync(ContainerSummary container)
     {
@@ -531,8 +512,12 @@
     {
         switch (id)
         {
+            // No success banner: the new container appearing in the list *is* the confirmation, and
+            // it arrives the same way every other change does — through the event stream, or the
+            // poll. A banner saying "created" before the row was there would be Dray claiming
+            // something the engine had not confirmed.
             case "run":
-                _running = true;
+                await Shell.ShowDialogAsync(RunDialog.Request());
                 break;
 
             case "refresh" when Engine.Selected is { } host:

@@ -6,7 +6,7 @@
             Body="@LookedFor">
     <Actions>
         <Button Label="Look again" Icon="IconRef.Refresh" Variant="ButtonVariant.Primary" OnClick="OnRetry" />
-        <Button Label="Add a host…" Icon="IconRef.Plus" />
+        <Button Label="Add a host…" Icon="IconRef.Plus" OnClick="OnAdd" />
     </Actions>
 </EmptyState>
 
@@ -54,11 +54,14 @@
 @code {
     [Parameter] public EventCallback OnRetry { get; set; }
 
+    /// <summary>Opens the add-a-host flow, which walks through getting an engine running.</summary>
+    [Parameter] public EventCallback OnAdd { get; set; }
+
     /// <summary>
     /// What Dray actually looked at, named rather than summarised — a user who can see the list
     /// can tell whether the thing they installed is on it.
     /// </summary>
     static string LookedFor => OperatingSystem.IsWindows()
         ? "Dray looked at your Docker contexts, DOCKER_HOST, the named pipes Docker Desktop, a native Docker engine and Podman use, and your WSL2 distributions. Start one of those, or add a host to connect over SSH."
-        : "Dray looked at your Docker contexts, DOCKER_HOST, and the sockets Docker Desktop, OrbStack, Colima, Rancher Desktop and Podman use. Start one of those, or add a host to connect over SSH.";
+        : "Dray looked at your Docker contexts, DOCKER_HOST, and the sockets Docker Desktop, OrbStack, Colima, Rancher Desktop and Podman use. Start one of those, or add a host and Dray will walk you through getting one running.";
 }

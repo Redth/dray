@@ -1,5 +1,6 @@
 @page "/gallery"
 @using Dray.Ui.Fixtures
+@inject IShellBridge Shell
 
 @* Every component against fixtures, in one place.
    This is how Phase 1's exit criteria get checked: both themes, greyscale state pills, and every
@@ -81,15 +82,42 @@
     </section>
 
     <section class="gal">
+        <h2 class="gal__h">Adding a host</h2>
+        <p class="gal__note">
+            What the chooser measured, as tint + glyph + word — and nothing for an engine with no trace
+            on the machine. Commands are shown to copy, never run.
+        </p>
+        <div class="gal__row">
+            @foreach (var state in Enum.GetValues<GuideState>().Where(s => s != GuideState.Absent))
+            {
+                <GuideStatePill State="state" />
+            }
+        </div>
+        <div class="gal__row">
+            <EngineGlyph Icon="IconRef.Host" />
+            <EngineGlyph Icon="IconRef.Host" Active="true" />
+            <EngineGlyph Icon="IconRef.Terminal" Large="true" />
+            <EngineGlyph Icon="IconRef.Container" Large="true" Active="true" />
+        </div>
+        <div style="max-width: 32rem">
+            <CopyCommand Command="colima start --cpu 4 --memory 8" />
+        </div>
+        <div class="gal__row">
+            <Button Label="Open the add-a-host flow" Icon="IconRef.Plus"
+                    OnClick="() => Shell.ShowDialogAsync(AddHostDialog.Request())" />
+        </div>
+    </section>
+
+    <section class="gal">
         <h2 class="gal__h">Dialog</h2>
         <p class="gal__note">
             One component over the native <code>&lt;dialog&gt;</code>. Focus trap, focus restore and
             Escape come from the platform. No page defines its own overlay CSS.
         </p>
         <div class="gal__row">
-            <Button Label="Open dialog" Icon="IconRef.Inspect" OnClick="() => _dialogOpen = true" />
+            <Button Label="Open dialog" Icon="IconRef.Inspect" OnClick="OpenDialogAsync" />
             <Button Label="Destructive confirm" Icon="IconRef.Trash" Variant="ButtonVariant.Ghost" Danger="true"
-                    OnClick="() => _confirmOpen = true" />
+                    OnClick="ConfirmAsync" />
         </div>
     </section>
 
@@ -141,31 +169,16 @@
     </section>
 
 </div>
-
-<Dialog Title="Container details" @bind-Open="_dialogOpen">
-    <p>
-        A plain dialog. Tab is trapped inside it, Escape closes it, and focus returns to the button
-        that opened it — all from <code>showModal()</code> rather than hand-rolled key handling.
-    </p>
-</Dialog>
-
-<Dialog Title="Remove 3 stopped containers?" @bind-Open="_confirmOpen">
-    <ChildContent>
-        <p>
-            <strong>migrate</strong>, <strong>worker</strong> and <strong>old-jenkins</strong> will be
-            removed. Anything written inside them that is not on a volume is lost.
-        </p>
-    </ChildContent>
-    <Footer>
-        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => _confirmOpen = false" />
-        <Button Label="Remove" Icon="IconRef.Trash" Variant="ButtonVariant.Primary" Danger="true"
-                OnClick="() => _confirmOpen = false" />
-    </Footer>
-</Dialog>
-
 @code {
-    bool _dialogOpen;
-    bool _confirmOpen;
+    Task OpenDialogAsync() => Shell.ShowDialogAsync(new DialogRequest(
+        "Container details",
+        typeof(GalleryDialog),
+        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("save", "Save")]));
+
+    Task ConfirmAsync() => Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+        "Remove 3 stopped containers?",
+        "migrate, worker and old-jenkins will be removed. Anything written inside them that is not on a volume is lost.",
+        "Remove"));
 
     static readonly IconRef[] IconNames = Enum.GetValues<IconRef>();
 
@@ -194,9 +207,9 @@
             ChromeAction.Destructive("destructive", "Delete", IconRef.Trash),
         ]);
 
-    void HandleAction(string id)
+    async Task HandleAction(string id)
     {
-        if (id == "destructive") _confirmOpen = true;
-        else _dialogOpen = true;
+        if (id == "destructive") await ConfirmAsync();
+        else await OpenDialogAsync();
     }
 }

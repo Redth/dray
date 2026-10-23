@@ -7,89 +7,98 @@
    which Dray can already bring up.
 
    Every box takes the syntax people already have in their shell history, because a dialog that
-   invented its own would be one people retype things for. *@
+   invented its own would be one people retype things for.
+
+   A dialog body: the title and buttons are the platform's. *@
+@inherits DialogBody
 @inject EngineManager Engine
 
-<Dialog Title="Run a container" Class="run" Open="Open" OpenChanged="OpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="run-image">Image</label>
+<div class="field">
+    <label class="field__label" for="run-image">Image</label>
 
-            @* Free text is a valid answer — an image not on this host is pulled — so this ranks
-               what is here rather than restricting to it. *@
-            <Combobox TItem="ImageChoice"
-                      Label="Image"
-                      Placeholder="postgres:16"
-                      InputClass="mono"
-                      Query="@_image"
-                      QueryChanged="@(v => _image = v)"
-                      Source="SearchImagesAsync"
-                      DebounceMs="350"
-                      GroupOf="i => i.IsLocal ? 0 : 1"
-                      LabelOf="i => i.Reference"
-                      HaystackOf="i => i.Haystack"
-                      KeyOf="i => i.Reference"
-                      EmptyText="Not on this host — running it will pull it first.">
-                <Row Context="match">
-                    <span class="mono run__opt-name">
-                        <Highlighted Text="@match.Value.Reference" Highlights="match.Highlights" />
-                    </span>
-                    <span class="muted run__opt-meta">@match.Value.Detail</span>
-                </Row>
-            </Combobox>
-        </div>
+    @* Free text is a valid answer — an image not on this host is pulled — so this ranks
+       what is here rather than restricting to it. *@
+    <Combobox TItem="ImageChoice"
+              Label="Image"
+              Placeholder="postgres:16"
+              InputClass="mono"
+              Query="@_image"
+              QueryChanged="@(v => _image = v)"
+              Source="SearchImagesAsync"
+              DebounceMs="350"
+              GroupOf="i => i.IsLocal ? 0 : 1"
+              LabelOf="i => i.Reference"
+              HaystackOf="i => i.Haystack"
+              KeyOf="i => i.Reference"
+              EmptyText="Not on this host — running it will pull it first.">
+        <Row Context="match">
+            <span class="mono run__opt-name">
+                <Highlighted Text="@match.Value.Reference" Highlights="match.Highlights" />
+            </span>
+            <span class="muted run__opt-meta">@match.Value.Detail</span>
+        </Row>
+    </Combobox>
+</div>
 
-        <div class="field">
-            <label class="field__label" for="run-name">
-                Name <span class="muted">(optional — the engine invents one otherwise)</span>
-            </label>
-            <input id="run-name" class="input" placeholder="my-database"
-                   @bind="_name" @bind:event="oninput" autocomplete="off" spellcheck="false" />
-        </div>
+<div class="field">
+    <label class="field__label" for="run-name">
+        Name <span class="muted">(optional — the engine invents one otherwise)</span>
+    </label>
+    <input id="run-name" class="input" placeholder="my-database"
+           @bind="_name" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+</div>
 
-        <div class="field">
-            <span class="field__label">Ports</span>
-            <PortEditor Ports="_ports" PortsChanged="@(p => _ports = p)" />
-        </div>
+<div class="field">
+    <span class="field__label">Ports</span>
+    <PortEditor Ports="_ports" PortsChanged="@(p => _ports = p)" />
+</div>
 
-        <div class="field">
-            <span class="field__label">Environment</span>
-            <EnvEditor Variables="_env" VariablesChanged="@(v => _env = v)" />
-        </div>
+<div class="field">
+    <span class="field__label">Environment</span>
+    <EnvEditor Variables="_env" VariablesChanged="@(v => _env = v)" />
+</div>
 
-        <div class="field">
-            <span class="field__label">Mounts</span>
-            <MountEditor Mounts="_mounts" MountsChanged="@(m => _mounts = m)" />
-        </div>
+<div class="field">
+    <span class="field__label">Mounts</span>
+    <MountEditor Mounts="_mounts" MountsChanged="@(m => _mounts = m)" />
+</div>
 
-        <label class="toggle">
-            <input type="checkbox" @bind="_start" />
-            <span>Start it now — leave this off to create it and look at it first</span>
-        </label>
+<label class="toggle">
+    <input type="checkbox" @bind="_start" />
+    <span>Start it now — leave this off to create it and look at it first</span>
+</label>
 
-        @if (Problem is { } problem)
-        {
-            <p class="run__problem" role="alert">@problem</p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="Cancel" Variant="ButtonVariant.Ghost" Disabled="_running"
-                OnClick="() => OpenChanged.InvokeAsync(false)" />
-        <Button Label="@(_start ? "Run" : "Create")" Variant="ButtonVariant.Primary" Busy="_running"
-                Disabled="@(_running || _image.Trim().Length == 0)" OnClick="SubmitAsync" />
-    </Footer>
-</Dialog>
+@if (Problem is { } problem)
+{
+    <p class="run__problem" role="alert">@problem</p>
+}
 
 @code {
-    [Parameter] public bool Open { get; set; }
-
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
-
     /// <summary>Pre-filled when the dialog is opened from a specific image's row.</summary>
     [Parameter] public string? Image { get; set; }
 
-    /// <summary>Raised with the new container's id once the engine has accepted it.</summary>
-    [Parameter] public EventCallback<string> OnStarted { get; set; }
+    /// <summary>
+    /// Closes with "run" once the engine has accepted it. The new container arrives on the
+    /// Containers page through the event stream, so there is nothing to hand back.
+    /// </summary>
+    public static DialogRequest Request(string? image = null) => new(
+        "Run a container",
+        typeof(RunDialog),
+        image is null ? null : new Dictionary<string, object?> { [nameof(Image)] = image },
+        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("run", "Run")],
+        Size: DialogSize.Large);
+
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(),
+        DialogButton.Confirm("run", _start ? "Run" : "Create") with
+        {
+            Enabled = _image.Trim().Length > 0 && Problem is null,
+            Busy = _running,
+        },
+    ];
+
+    protected override Task<bool> OnPressedAsync(string id) => SubmitAsync();
 
     string _image = "";
     string _name = "";
@@ -132,11 +141,11 @@
         }
     }
 
-    protected override async Task OnParametersSetAsync()
+    protected override async Task OnInitializedAsync()
     {
-        if (Image is { Length: > 0 } image && _image.Length == 0) _image = image;
+        if (Image is { Length: > 0 } image) _image = image;
 
-        if (Open && _local.Count == 0) await LoadLocalAsync();
+        await LoadLocalAsync();
     }
 
     /// <summary>
@@ -224,13 +233,14 @@
         }
     }
 
-    async Task SubmitAsync()
+    async Task<bool> SubmitAsync()
     {
         _failure = null;
 
-        if (Problem is not null) return;
+        if (Problem is not null) return false;
 
         _running = true;
+        StateHasChanged();
 
         try
         {
@@ -249,29 +259,11 @@
             };
 
             _failure = await Engine.RunAsync(request);
-
-            if (_failure is null)
-            {
-                await OnStarted.InvokeAsync(request.Name ?? request.Image);
-                await OpenChanged.InvokeAsync(false);
-                Reset();
-            }
+            return _failure is null;
         }
         finally
         {
             _running = false;
         }
-    }
-
-    /// <summary>Cleared on success so reopening the dialog does not offer to run the same thing twice.</summary>
-    void Reset()
-    {
-        _image = "";
-        _name = "";
-        _ports = [];
-        _env = [];
-        _mounts = [];
-        _start = true;
-        _local = [];
     }
 }

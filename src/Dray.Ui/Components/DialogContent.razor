@@ -1,0 +1,82 @@
+@* The body region of a dialog, shared by every head: the native sheet's WebView and the browser's
+   <dialog> both render this and nothing else between their own title and button rows.
+
+   It does three things a body should never have to: hands the body its session, turns Return in a
+   field into a press of the frame's default button, and — where the head sizes its frame to the
+   content — reports how tall the content is. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="dlgcontent" @ref="_el">
+    <CascadingValue Value="Session" IsFixed="true">
+        <DynamicComponent Type="Session.Request.Body" Parameters="_parameters" />
+    </CascadingValue>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DialogSession Session { get; set; } = default!;
+
+    /// <summary>Whether the head sizes its frame from the content's measured height.</summary>
+    [Parameter] public bool Measure { get; set; }
+
+    ElementReference _el;
+    IJSObjectReference? _module;
+    IJSObjectReference? _watch;
+    DotNetObjectReference<DialogContent>? _self;
+    Dictionary<string, object> _parameters = [];
+
+    protected override void OnParametersSet()
+    {
+        // DynamicComponent wants a mutable dictionary. Copied rather than cast, so a caller cannot
+        // hand one dictionary to two dialogs and have the second edit the first.
+        _parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+
+        foreach (var (key, value) in Session.Request.ParameterMap)
+        {
+            if (value is not null) _parameters[key] = value;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Dray.Ui/js/dray.js");
+            _self = DotNetObjectReference.Create(this);
+            _watch = await _module.InvokeAsync<IJSObjectReference?>("dialog.watch", _el, _self, Measure);
+            await _module.InvokeVoidAsync("dialog.focusFirst", _el);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Closed before it finished opening.
+        }
+    }
+
+    [JSInvokable]
+    public Task Enter() => InvokeAsync(Session.PressDefaultAsync);
+
+    [JSInvokable]
+    public void Measured(double height) => Session.ReportContentHeight(height);
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_watch is not null)
+            {
+                await _watch.InvokeVoidAsync("dispose");
+                await _watch.DisposeAsync();
+            }
+
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The WebView went away first. Nothing to release.
+        }
+
+        _self?.Dispose();
+    }
+}

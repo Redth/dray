@@ -1154,8 +1154,11 @@ textarea,
   background: var(--scrim);
 }
 
+/* The gap between the title and the body is split across the two: half of it is inside the
+   body's scroll container, so a focus ring on the first control — drawn four pixels outside it —
+   has room rather than being clipped by the scroller's top edge. */
 .dialog__head {
-  padding: var(--s4) var(--s5) var(--s2);
+  padding: var(--s4) var(--s5) var(--s1);
 }
 
 .dialog__title {
@@ -1164,7 +1167,7 @@ textarea,
 }
 
 .dialog__body {
-  padding: 0 var(--s5) var(--s4);
+  padding: var(--s1) var(--s5) var(--s4);
   font-size: var(--text-base);
   color: var(--muted);
 
@@ -1182,12 +1185,41 @@ textarea,
   padding: var(--s3) var(--s5) var(--s4);
 }
 
+/* Between a leading button — a Back — and the decision, which keeps to the trailing edge. */
+.dialog__spacer {
+  flex: 1 1 auto;
+}
+
 /* ---------------------------------------------------------------- form controls */
 
 .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* One rhythm for a form's fields, wherever the form is. Dialog bodies are forms, and before this
+   each one either spaced its fields its own way or not at all. */
+.field + .field,
+.field + .toggle,
+.toggle + .field {
+  margin-top: var(--s3);
+}
+
+/* A checkbox and the sentence that says what it does. The sentence is the label, so clicking it
+   toggles the box. */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.toggle input {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--brand);
 }
 
 .field__label {
@@ -1201,6 +1233,10 @@ textarea,
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   background: var(--bg);
+
+  /* What the user typed is the most important text in a form, so it is ink rather than whatever
+     the surrounding prose is — a dialog body's text is muted, and a field must not inherit that. */
+  color: var(--ink);
   font-size: var(--text-base);
 }
 

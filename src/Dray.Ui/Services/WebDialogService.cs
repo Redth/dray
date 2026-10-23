@@ -12,33 +12,32 @@ namespace Dray.Ui.Services;
 /// </summary>
 public sealed class WebDialogService
 {
-    TaskCompletionSource<string?>? _pending;
-
-    public DialogRequest? Request { get; private set; }
+    public DialogSession? Session { get; private set; }
 
     public event Action? Changed;
 
-    public Task<string?> ShowAsync(DialogRequest request)
+    public Task<string?> ShowAsync(DialogRequest request, CancellationToken ct = default)
     {
         // A second dialog while one is open would orphan the first task forever. Dismissing the
         // first is the honest answer — it is no longer on screen.
-        _pending?.TrySetResult(null);
+        Session?.Dismiss();
 
-        Request = request;
-        _pending = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = new DialogSession(request);
+        session.Closed += _ => OnClosed(session);
+
+        if (ct.CanBeCanceled) ct.Register(session.Dismiss);
+
+        Session = session;
         Changed?.Invoke();
 
-        return _pending.Task;
+        return session.Completion;
     }
 
-    /// <param name="buttonId">The button pressed, or null for a dismissal.</param>
-    public void Close(string? buttonId)
+    void OnClosed(DialogSession session)
     {
-        var pending = _pending;
-        _pending = null;
-        Request = null;
-        Changed?.Invoke();
+        if (!ReferenceEquals(Session, session)) return;
 
-        pending?.TrySetResult(buttonId);
+        Session = null;
+        Changed?.Invoke();
     }
 }

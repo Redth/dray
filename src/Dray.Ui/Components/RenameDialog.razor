@@ -1,89 +1,71 @@
-@* Rename one container.
+@* Rename one container. A dialog body: the title and buttons are the platform's.
 
    Validated while typing rather than on submit: the engine's own rule is knowable locally, and a
    round trip that ends in a 500 tells the user nothing they can act on. *@
+@inherits DialogBody
+@inject EngineManager Engine
 
-<Dialog Title="@($"Rename {Container.Name}")" Open="Open" OpenChanged="OpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="rename-input">Name</label>
-            <input id="rename-input" class="input" @bind="_name" @bind:event="oninput"
-                   autocomplete="off" spellcheck="false"
-                   @onkeydown="OnKeyDown" />
-        </div>
+<div class="field">
+    <label class="field__label" for="rename-input">Name</label>
+    <input id="rename-input" class="input" @bind="_name" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" disabled="@_saving" />
+</div>
 
-        @if (_problem is { } problem)
-        {
-            <p class="rename__problem">@problem</p>
-        }
-        else
-        {
-            <p class="rename__hint muted">
-                Renaming does not restart the container. Anything referring to it by its old name —
-                a compose file, another container's link — keeps the old name until you change it too.
-            </p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => OpenChanged.InvokeAsync(false)" />
-        <Button Label="Rename" Variant="ButtonVariant.Primary" Disabled="@(!CanSubmit)" OnClick="SubmitAsync" />
-    </Footer>
-</Dialog>
+@if (_problem is { } problem)
+{
+    <p class="rename__problem" role="alert">@problem</p>
+}
+else
+{
+    <p class="rename__hint muted">
+        Renaming does not restart the container. Anything referring to it by its old name —
+        a compose file, another container's link — keeps the old name until you change it too.
+    </p>
+}
 
 @code {
     [Parameter, EditorRequired] public ContainerSummary Container { get; set; } = default!;
 
-    [Parameter] public bool Open { get; set; }
-
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
-
-    /// <summary>Given the new name. Returns null on success, or a sentence for the user.</summary>
-    [Parameter, EditorRequired] public Func<string, Task<string?>> OnRename { get; set; } = default!;
+    public static DialogRequest Request(ContainerSummary container) => new(
+        $"Rename {container.Name}",
+        typeof(RenameDialog),
+        new Dictionary<string, object?> { [nameof(Container)] = container },
+        Buttons: [DialogButton.Cancel(), DialogButton.Confirm("rename", "Rename")],
+        Size: DialogSize.Small);
 
     string _name = "";
     string? _problem;
-    string? _openedFor;
     bool _saving;
 
-    bool CanSubmit => !_saving && ContainerName.IsValid(_name) && _name.Trim() != Container.Name;
+    bool CanSubmit => ContainerName.IsValid(_name) && _name.Trim() != Container.Name;
 
-    protected override void OnParametersSet()
-    {
-        // Reset each time the dialog opens for a different container, not on every render — the
-        // field would otherwise fight the user's typing.
-        var key = Open ? Container.Id : null;
-        if (key == _openedFor) return;
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(),
+        DialogButton.Confirm("rename", "Rename") with { Enabled = CanSubmit, Busy = _saving },
+    ];
 
-        _openedFor = key;
-        _name = Container.Name;
-        _problem = null;
-    }
+    protected override void OnInitialized() => _name = Container.Name;
 
-    async Task OnKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && CanSubmit) await SubmitAsync();
-    }
-
-    async Task SubmitAsync()
+    protected override async Task<bool> OnPressedAsync(string id)
     {
         var name = _name.Trim();
 
         if (ContainerName.Validate(name) is { } invalid)
         {
             _problem = invalid;
-            return;
+            return false;
         }
 
         _saving = true;
         _problem = null;
+        StateHasChanged();
 
         try
         {
-            _problem = await OnRename(name);
-
-            // The engine accepted it; the rename event updates the store, so nothing is written
-            // here. Closing is the only thing left to do.
-            if (_problem is null) await OpenChanged.InvokeAsync(false);
+            // The rename event updates the store, so nothing is written here on success.
+            _problem = await Engine.RenameAsync(Container.Id, name);
+            return _problem is null;
         }
         finally
         {

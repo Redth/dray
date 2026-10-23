@@ -5,62 +5,73 @@
    engine would follow the reference regardless.
 
    The credential is fetched from the system helper at the moment of the push and never held; see
-   docs/CREDENTIALS.md. Dray does not ask for a password here, because it has nowhere to put one. *@
+   docs/CREDENTIALS.md. Dray does not ask for a password here, because it has nowhere to put one.
+
+   A dialog body: the title and buttons are the platform's. *@
+@inherits DialogBody
 @implements IAsyncDisposable
 @inject EngineManager Engine
 @inject IShellBridge Shell
 @inject RegistryReader Registries
 
-<Dialog Title="Push an image" Open="Open" OpenChanged="OnOpenChanged">
-    <ChildContent>
-        <div class="field">
-            <label class="field__label" for="push-ref">Image</label>
-            <input id="push-ref" class="input mono" placeholder="ghcr.io/owner/app:1.2"
-                   @bind="_reference" @bind:event="oninput" @onkeydown="OnKeyDown"
-                   autocomplete="off" spellcheck="false" disabled="@_pushing" />
-        </div>
+<div class="field">
+    <label class="field__label" for="push-ref">Image</label>
+    <input id="push-ref" class="input mono" placeholder="ghcr.io/owner/app:1.2"
+           @bind="_reference" @bind:event="oninput" @bind:after="RefreshSignInAsync"
+           autocomplete="off" spellcheck="false" disabled="@_pushing" />
+</div>
 
-        @if (_error is { } error)
+@if (_error is { } error)
+{
+    <p class="push__error">@error</p>
+}
+else if (!_pushing && _layers.Count == 0)
+{
+    <p class="push__hint muted">
+        Pushing to <span class="mono">@Destination</span>@(_signedInAs is { } who
+            ? $" as {who}." : ", which you are not signed in to — the registry will decide.")
+        @if (_signedInAs is null)
         {
-            <p class="push__error">@error</p>
+            <span> Sign in on the Registries page first if it is private.</span>
         }
-        else if (!_pushing && _layers.Count == 0)
-        {
-            <p class="push__hint muted">
-                Pushing to <span class="mono">@Destination</span>@(_signedInAs is { } who
-                    ? $" as {who}." : ", which you are not signed in to — the registry will decide.")
-                @if (_signedInAs is null)
-                {
-                    <span> Sign in on the Registries page first if it is private.</span>
-                }
-            </p>
-        }
+    </p>
+}
 
-        @if (_layers.Count > 0)
-        {
-            <LayerProgress Layers="Ordered" />
-        }
+@if (_layers.Count > 0)
+{
+    <LayerProgress Layers="Ordered" />
+}
 
-        @if (_done is { } done)
-        {
-            <p class="push__done">@done</p>
-        }
-    </ChildContent>
-    <Footer>
-        <Button Label="@(_pushing ? "Cancel" : "Close")" Variant="ButtonVariant.Ghost" OnClick="CloseAsync" />
-        <Button Label="@(_pushing ? "Pushing…" : "Push")" Variant="ButtonVariant.Primary"
-                Disabled="@(_pushing || string.IsNullOrWhiteSpace(_reference))"
-                Busy="_pushing" OnClick="StartAsync" />
-    </Footer>
-</Dialog>
+@if (_done is { } done)
+{
+    <p class="push__done">@done</p>
+}
 
 @code {
-    [Parameter] public bool Open { get; set; }
-
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
-
     /// <summary>The image to push, pre-filled from the row this was opened on.</summary>
     [Parameter] public string? Reference { get; set; }
+
+    public static DialogRequest Request(string? reference = null) => new(
+        "Push an image",
+        typeof(PushDialog),
+        reference is null ? null : new Dictionary<string, object?> { [nameof(Reference)] = reference },
+        Buttons: [DialogButton.Cancel("Close"), DialogButton.Confirm("push", "Push")]);
+
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(_pushing ? "Cancel" : "Close"),
+        DialogButton.Confirm("push", _pushing ? "Pushing…" : "Push") with
+        {
+            Enabled = !string.IsNullOrWhiteSpace(_reference),
+            Busy = _pushing,
+        },
+    ];
+
+    protected override async Task<bool> OnPressedAsync(string id)
+    {
+        await StartAsync();
+        return false;
+    }
 
     string _reference = "";
     string? _error;
@@ -78,11 +89,11 @@
     string Destination => ImageTag.Parse(_reference.Trim()).Registry is { } r
         && r == ImageTag.RegistryEntryDockerHub ? "Docker Hub" : ImageTag.Parse(_reference.Trim()).Registry;
 
-    protected override async Task OnParametersSetAsync()
+    protected override async Task OnInitializedAsync()
     {
-        if (Reference is { Length: > 0 } reference && _reference.Length == 0) _reference = reference;
+        if (Reference is { Length: > 0 } reference) _reference = reference;
 
-        if (Open) await RefreshSignInAsync();
+        await RefreshSignInAsync();
     }
 
     /// <summary>
@@ -110,11 +121,6 @@
         => string.Equals(a.TrimEnd('/'), b.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
            || a.Contains(b, StringComparison.OrdinalIgnoreCase);
 
-    async Task OnKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && !_pushing && !string.IsNullOrWhiteSpace(_reference)) await StartAsync();
-    }
-
     async Task StartAsync()
     {
         var reference = _reference.Trim();
@@ -126,7 +132,8 @@
         _layers.Clear();
         _order.Clear();
 
-        _cts = new CancellationTokenSource();
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(Session.Closing);
+        StateHasChanged();
 
         try
         {
@@ -161,6 +168,8 @@
         }
         catch (OperationCanceledException)
         {
+            // Cancelling stops Dray reading the stream; the engine finishes what it started. Saying
+            // otherwise would be a lie, and a half-pushed image is not a state Dray can create.
             _done = "Push cancelled.";
         }
         catch (Exception ex)
@@ -173,20 +182,6 @@
             _cts?.Dispose();
             _cts = null;
         }
-    }
-
-    async Task CloseAsync()
-    {
-        // Cancelling stops Dray reading the stream; the engine finishes what it started. Saying
-        // otherwise would be a lie, and a half-pushed image is not a state Dray can create.
-        if (_cts is { } cts) await cts.CancelAsync();
-
-        await OpenChanged.InvokeAsync(false);
-    }
-
-    async Task OnOpenChanged(bool open)
-    {
-        if (!open) await CloseAsync();
     }
 
     public async ValueTask DisposeAsync()

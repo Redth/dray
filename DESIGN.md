@@ -348,9 +348,12 @@ native menu**, not a div. Every list screen uses this one component. There is no
 
 **StatePill.** §2.4, and it is the only thing allowed to render container state.
 
-**Dialog.** The native `<dialog>` element, one shared component, with focus trap, restore, `Escape`,
-and backdrop built in. **There is no per-page dialog CSS.** Native OS dialogs are used for anything
-touching the file system, and for destructive confirmation on macOS (`NSAlert` as a sheet).
+**Dialog.** A native frame around a Blazor body (§2.4b): an `NSPanel` sheet on macOS, the native
+`<dialog>` element in a browser, with focus trap, restore, `Escape` and backdrop from the platform.
+A body is a `DialogBody` that declares its title and buttons — which follow the form as it is
+filled in — and is opened through the shell, never placed in a page. **There is no per-page dialog
+CSS.** Native OS dialogs are used for anything touching the file system, and for destructive
+confirmation on macOS (`NSAlert` as a sheet).
 
 **LogView.** Virtualized, follow-tail with auto-detach on scroll-up, timestamps toggle, wrap toggle,
 level and text filter, per-service colour keys for aggregated stack logs, copy and save-to-file.

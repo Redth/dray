@@ -680,30 +680,55 @@ public sealed class EngineManager : IAsyncDisposable
         await Task.WhenAll(targets.Select(host => ProbeAsync(host, ct))).ConfigureAwait(false);
     }
 
-    async Task ProbeAsync(DockerHost host, CancellationToken ct)
+    /// <summary>
+    /// Connect to an endpoint once and report what answered, without adding it anywhere.
+    /// <para>
+    /// What the add-a-host flow uses before it writes a context: a host that is saved and then
+    /// found not to work is a broken entry in the picker the user has to go and remove.
+    /// </para>
+    /// </summary>
+    /// <returns>The engine's capabilities, or a sentence saying why it did not answer.</returns>
+    public async Task<(RuntimeCapabilities? Capabilities, string? Problem)> TestAsync(
+        DockerEndpoint endpoint, CancellationToken ct = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(ProbeTimeout);
 
-        DockerHost result;
-        await using var runtime = _factory.Create(host.Endpoint);
+        await using var runtime = _factory.Create(endpoint);
 
         try
         {
-            var capabilities = await runtime.ConnectAsync(timeout.Token).ConfigureAwait(false);
-            result = host with { State = HostConnectionState.Connected, StateDetail = null, Capabilities = capabilities };
+            return (await runtime.ConnectAsync(timeout.Token).ConfigureAwait(false), null);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return (null, "Timed out reaching the host.");
+        }
+        catch (Exception ex)
+        {
+            return (null, RuntimeEventPump.Describe(ex));
+        }
+    }
+
+    async Task ProbeAsync(DockerHost host, CancellationToken ct)
+    {
+        DockerHost result;
+
+        try
+        {
+            var (capabilities, problem) = await TestAsync(host.Endpoint, ct).ConfigureAwait(false);
+
+            result = capabilities is not null
+                ? host with { State = HostConnectionState.Connected, StateDetail = null, Capabilities = capabilities }
+                : host with { State = HostConnectionState.Unreachable, StateDetail = problem };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return;
-        }
-        catch (OperationCanceledException)
-        {
-            result = host with { State = HostConnectionState.Unreachable, StateDetail = "Timed out reaching the host." };
-        }
-        catch (Exception ex)
-        {
-            result = host with { State = HostConnectionState.Unreachable, StateDetail = RuntimeEventPump.Describe(ex) };
         }
 
         // The selection may have moved while the probe was in flight; do not overwrite the live

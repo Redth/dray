@@ -1,7 +1,7 @@
 .track + .track {
     margin-top: var(--s5);
     padding-top: var(--s5);
-    border-top: var(--border-width) solid var(--border);
+    border-top: 1px solid var(--line);
 }
 
 .track__title {
@@ -10,7 +10,7 @@
     gap: var(--s2);
     margin: 0 0 var(--s2);
     font-size: var(--text-md);
-    font-weight: var(--weight-medium);
+    font-weight: var(--text-md-weight);
 }
 
 .track__done,
@@ -36,7 +36,7 @@
 }
 
 .track__steptitle {
-    font-weight: var(--weight-medium);
+    font-weight: var(--text-md-weight);
 }
 
 .track__why {
@@ -49,9 +49,9 @@
    places DESIGN.md 2.6 keeps selection on, because the range is the unit of interest. */
 .track__cmd {
     padding: var(--s2) var(--s3);
-    background: var(--surface-sunken);
-    border: var(--border-width) solid var(--border);
-    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
     overflow-x: auto;
     user-select: text;
 }

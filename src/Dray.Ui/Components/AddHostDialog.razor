@@ -1,0 +1,715 @@
+@* Adding a host: choose an engine, get it running, connect.
+
+   Two halves with two different jobs. For an engine on this machine Dray's part is to show what to
+   run and then look again — discovery already finds every one of these once it is up, and PRODUCT.md
+   keeps installing an engine the user's own step. For an engine elsewhere there is nothing to
+   discover, so Dray tests the connection and then records it as a Docker context, which is what
+   the docker command reads too. Either way Dray stores nothing of its own (docs/CREDENTIALS.md).
+
+   A dialog body: the title and the button row are the platform's, and change with each step
+   through the session rather than being drawn here. docs/NATIVE-SHELL.md section 4. *@
+@inherits DialogBody
+@inject EngineManager Engine
+@inject DockerCliContext Cli
+@inject IDockerConfigSource ConfigSource
+@inject IShellBridge Shell
+
+@if (_guide is null)
+{
+    <p class="addhost__lede">
+        Dray drives the engine you run, wherever it runs. Pick yours — or the one you
+        want — and Dray shows what it takes to get it connected.
+    </p>
+
+    <h3 class="addhost__group">On this @MachineWord</h3>
+    <div class="addhost__tiles">
+        @foreach (var guide in _guides.Where(EngineGuides.IsLocal))
+        {
+            @Tile(guide)
+        }
+    </div>
+
+    <h3 class="addhost__group">Somewhere else</h3>
+    <div class="addhost__tiles">
+        @foreach (var guide in _guides.Where(g => !EngineGuides.IsLocal(g)))
+        {
+            @Tile(guide)
+        }
+    </div>
+}
+else
+{
+    var guide = _guide;
+    var status = Status(guide);
+
+    <div class="guide__head">
+        <EngineGlyph Icon="guide.Icon" Large="true" Active="@(status.State == GuideState.Connected)" />
+        <p class="guide__summary">@guide.Summary</p>
+    </div>
+
+    @if (status.Host is { } existing && guide.Kind is GuideKind.Local or GuideKind.Minikube)
+    {
+        <div class="callout callout--ok" role="status">
+            <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+            <span>
+                @guide.Name is already a host, as <strong>@existing.Name</strong>.
+                @(status.State == GuideState.NotAnswering
+                    ? "It did not answer when Dray last asked — the steps below get it running again."
+                    : "There is nothing to add.")
+            </span>
+        </div>
+    }
+
+    @switch (guide.Kind)
+    {
+        case GuideKind.Ssh:
+            @SshForm
+            break;
+
+        case GuideKind.Tcp:
+            @TcpForm
+            break;
+
+        default:
+            <ol class="steps">
+                @for (var i = 0; i < guide.Steps.Count; i++)
+                {
+                    var step = guide.Steps[i];
+                    var done = StepDone(guide, status, i);
+
+                    <li class="step @(done ? "is-done" : null)" @key="step.Title">
+                        <span class="step__marker" aria-hidden="true">
+                            @if (done)
+                            {
+                                <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+                            }
+                            else
+                            {
+                                @(i + 1)
+                            }
+                        </span>
+                        <div class="step__body">
+                            <div class="step__title">
+                                @step.Title
+                                @if (done)
+                                {
+                                    <span class="visually-hidden"> — done</span>
+                                }
+                            </div>
+                            <p class="step__why">@step.Body</p>
+
+                            @if (step.Command is { } command)
+                            {
+                                <CopyCommand Command="@command" />
+                            }
+
+                            @if (step.Link is { } link)
+                            {
+                                <div class="step__link">
+                                    <Button Label="@(step.LinkLabel ?? "Open")" Icon="IconRef.External"
+                                            Variant="ButtonVariant.Ghost"
+                                            OnClick="() => Shell.OpenExternalAsync(link)" />
+                                </div>
+                            }
+                        </div>
+                    </li>
+                }
+            </ol>
+
+            @if (guide.Note is { } note)
+            {
+                <p class="note muted"><Icon Name="IconRef.Info" Size="IconSize.Sm" /><span>@note</span></p>
+            }
+            break;
+    }
+
+    @if (_outcome is { } outcome)
+    {
+        <div class="callout @(outcome.Ok ? "callout--ok" : "callout--bad")" role="status">
+            <Icon Name="@(outcome.Ok ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+            <span>@outcome.Text</span>
+        </div>
+    }
+}
+
+@code {
+    /// <summary>Open straight into one guide, by id — the Hosts page's own suggestions use this.</summary>
+    [Parameter] public string? StartWith { get; set; }
+
+    IReadOnlyList<EngineGuide> _guides = [];
+    EngineGuide? _guide;
+    EngineGuideProbe? _probe;
+
+    bool _working;
+
+    /// <summary>The button whose work is in flight, so only that one shows as busy.</summary>
+    string? _busy;
+
+    /// <summary>What the last press found, said in a sentence. Cleared when the step changes.</summary>
+    (bool Ok, string Text)? _outcome;
+
+    // SSH and TCP form state. Plain fields, validated as they are typed so the button row knows
+    // whether Add can be pressed.
+    string _target = "";
+    string _port = "";
+    string _name = "";
+    bool _nameEdited;
+    bool _tls = true;
+    string _ca = "";
+    string _cert = "";
+    string _key = "";
+
+    /// <summary>The engine that answered the last test, and the endpoint it answered on.</summary>
+    (string Endpoint, RuntimeCapabilities Caps)? _tested;
+
+    /// <summary>The request that opens this flow — from the Hosts page, or straight into one guide.</summary>
+    public static DialogRequest Request(string? startWith = null) => new(
+        "Add a host",
+        typeof(AddHostDialog),
+        startWith is null ? null : new Dictionary<string, object?> { [nameof(StartWith)] = startWith },
+        Buttons: [DialogButton.Cancel()],
+        Size: DialogSize.Large);
+
+    protected override string Title => _guide switch
+    {
+        null => "Add a host",
+        { Kind: GuideKind.Ssh } => "Connect over SSH",
+        { Kind: GuideKind.Tcp } => "Connect over TCP",
+        { } g => $"Set up {g.Name}",
+    };
+
+    static string MachineWord => EngineGuides.Current switch
+    {
+        GuidePlatform.MacOS => "Mac",
+        GuidePlatform.Windows => "PC",
+        _ => "machine",
+    };
+
+    protected override void OnInitialized()
+    {
+        _probe = new EngineGuideProbe(ConfigSource);
+        _guides = EngineGuides.For(EngineGuides.Current, AppleAvailability());
+
+        // Each opening is a new body, so it starts fresh — from the guide the caller asked for.
+        _guide = StartWith is { } id ? _guides.FirstOrDefault(g => g.Id == id) : null;
+    }
+
+    /// <summary>
+    /// The button row for the step on screen. Back sits at the leading edge on every step after the
+    /// first; the commit button is whatever finishes this step — look again, use what was found,
+    /// connect, or add.
+    /// </summary>
+    protected override IReadOnlyList<DialogButton> Buttons
+    {
+        get
+        {
+            if (_guide is not { } guide) return [DialogButton.Cancel()];
+
+            List<DialogButton> row = [DialogButton.Back("All engines") with { Enabled = !_working }, DialogButton.Cancel()];
+            var status = Status(guide);
+
+            switch (guide.Kind)
+            {
+                case GuideKind.Ssh:
+                case GuideKind.Tcp:
+                    var ready = FormProblem() is null && !_working;
+                    row.Add(new DialogButton("test", "Test connection") { Enabled = ready, Busy = _busy == "test" });
+                    row.Add(DialogButton.Confirm("add", "Add host") with { Enabled = ready, Busy = _busy == "add" });
+                    break;
+
+                case GuideKind.Minikube when status.Host is null:
+                    row.Add(DialogButton.Confirm("minikube", "Connect to minikube") with { Enabled = !_working, Busy = _busy == "minikube" });
+                    break;
+
+                case GuideKind.Local when status.Host is null && _probe!.AddableSocketPath(guide) is not null:
+                    row.Add(DialogButton.Confirm("socket", "Add as a host") with { Enabled = !_working, Busy = _busy == "socket" });
+                    break;
+
+                default:
+                    if (status.Host is { } host)
+                    {
+                        row.Add(new DialogButton("look", "Look again") { Enabled = !_working, Busy = _busy == "look" });
+                        row.Add(DialogButton.Confirm("use", $"Use {host.Name}") with { Enabled = !_working });
+                    }
+                    else
+                    {
+                        row.Add(DialogButton.Confirm("look", "Look again") with { Enabled = !_working, Busy = _busy == "look" });
+                    }
+                    break;
+            }
+
+            return row;
+        }
+    }
+
+    protected override async Task<bool> OnPressedAsync(string id)
+    {
+        if (_guide is not { } guide) return true;
+
+        if (id == "back")
+        {
+            BackToChooser();
+            StateHasChanged();
+            return false;
+        }
+
+        _busy = id;
+        _working = true;
+        StateHasChanged();
+
+        try
+        {
+            switch (id)
+            {
+                case "use" when Status(guide).Host is { } host:
+                    await Engine.SelectAsync(host.Id);
+                    return true;
+
+                case "look":
+                    await LookAgainAsync(guide);
+                    return false;
+
+                case "test":
+                    await TestAsync();
+                    return false;
+
+                case "add":
+                    return await AddRemoteAsync();
+
+                case "minikube":
+                    return await ConnectMinikubeAsync();
+
+                case "socket" when _probe!.AddableSocketPath(guide) is { } socket:
+                    return await AddSocketAsync(guide, socket);
+
+                default:
+                    return false;
+            }
+        }
+        finally
+        {
+            _busy = null;
+            _working = false;
+            StateHasChanged();
+        }
+    }
+
+    AppleEngineAvailability AppleAvailability() => AppleEngine.Check(
+        installed: Engine.Hosts.Any(h => h.Origin == HostOrigin.AppleContainer),
+        isMacOS: OperatingSystem.IsMacOS(),
+        isAppleSilicon: System.Runtime.InteropServices.RuntimeInformation.OSArchitecture
+            is System.Runtime.InteropServices.Architecture.Arm64,
+        macOSMajor: Environment.OSVersion.Version.Major);
+
+    GuideStatus Status(EngineGuide guide) => guide.Kind is GuideKind.Ssh or GuideKind.Tcp
+        ? GuideStatus.Absent
+        : _probe!.Check(guide, Engine.Hosts);
+
+    /// <summary>
+    /// Whether a step can be shown as done, from evidence. Installing is done once anything of the
+    /// engine is on disk; starting it is done once its socket is live. A step Dray cannot measure
+    /// — minikube's cluster being started — is never ticked on a guess.
+    /// </summary>
+    static bool StepDone(EngineGuide guide, GuideStatus status, int index)
+    {
+        if (status.State is GuideState.Absent) return false;
+
+        if (index == 0) return true;
+
+        // minikube's middle step is a cluster Dray cannot see; only a host proves it happened.
+        return guide.Kind == GuideKind.Minikube
+            ? status.Host is not null
+            : status.State is GuideState.Listening or GuideState.Listed or GuideState.Connected;
+    }
+
+    RenderFragment Tile(EngineGuide guide) => __builder =>
+    {
+        var status = Status(guide);
+        var unavailable = guide.Unavailable is not null;
+
+        <button type="button" class="tile" disabled="@unavailable" @key="guide.Id"
+                @onclick="() => Choose(guide)">
+            <EngineGlyph Icon="guide.Icon" Active="@(status.State == GuideState.Connected)" />
+            <span class="tile__text">
+                <span class="tile__name">@guide.Name</span>
+                <span class="tile__tag">@(guide.Unavailable ?? guide.Tagline)</span>
+            </span>
+            <span class="tile__state"><GuideStatePill State="status.State" /></span>
+        </button>
+    };
+
+    RenderFragment SshForm => __builder =>
+    {
+        var targetProblem = _target.Length > 0 ? ContextSpec.ValidateSshTarget(_target) : null;
+        var portProblem = ContextSpec.ValidatePort(_port, out _);
+        var nameProblem = _name.Length > 0 ? ContextSpec.ValidateName(_name) : null;
+
+        <div class="form">
+            <div class="field">
+                <label class="field__label" for="ssh-target">Machine</label>
+                <input id="ssh-target" class="input mono" placeholder="me@nas.local" autocomplete="off"
+                       spellcheck="false" autocapitalize="off" value="@_target" @oninput="OnTargetInput" />
+                <span class="field__hint @(targetProblem is null ? null : "is-bad")">
+                    @(targetProblem ?? "What you would type after ssh. An alias from your ssh config works too.")
+                </span>
+            </div>
+
+            <div class="form__row">
+                <div class="field form__narrow">
+                    <label class="field__label" for="ssh-port">Port</label>
+                    <input id="ssh-port" class="input mono" placeholder="22" inputmode="numeric" autocomplete="off"
+                           @bind="_port" @bind:event="oninput" @bind:after="Untest" />
+                    @if (portProblem is not null)
+                    {
+                        <span class="field__hint is-bad">@portProblem</span>
+                    }
+                </div>
+                <div class="field form__wide">
+                    <label class="field__label" for="ssh-name">Name in Dray</label>
+                    <input id="ssh-name" class="input" placeholder="nas" autocomplete="off" spellcheck="false"
+                           value="@_name" @oninput="OnNameInput" />
+                    <span class="field__hint @(nameProblem is null ? null : "is-bad")">
+                        @(nameProblem ?? "Also the Docker context's name, so docker --context uses it.")
+                    </span>
+                </div>
+            </div>
+
+            <div class="needs">
+                <div class="needs__title">What the machine needs</div>
+                <ul class="needs__list">
+                    <li>
+                        <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+                        <span>
+                            <strong>Key-based login.</strong> Dray cannot answer a password prompt, so ssh has
+                            to get in without one. This copies your public key across:
+                        </span>
+                    </li>
+                </ul>
+                <CopyCommand Command="@($"ssh-copy-id {(_target.Length > 0 && targetProblem is null ? _target.Trim() : "me@nas.local")}")" />
+                <ul class="needs__list">
+                    <li>
+                        <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+                        <span>
+                            <strong>Docker installed there</strong>, and your user able to run it — in the
+                            <span class="mono">docker</span> group, or rootless.
+                        </span>
+                    </li>
+                </ul>
+            </div>
+
+            @Tested
+        </div>
+    };
+
+    RenderFragment TcpForm => __builder =>
+    {
+        var hostProblem = _target.Length > 0 ? ContextSpec.ValidateTcpHost(_target) : null;
+        var portProblem = ContextSpec.ValidatePort(_port, out _);
+        var nameProblem = _name.Length > 0 ? ContextSpec.ValidateName(_name) : null;
+
+        <div class="form">
+            <div class="form__row">
+                <div class="field form__wide">
+                    <label class="field__label" for="tcp-host">Address</label>
+                    <input id="tcp-host" class="input mono" placeholder="10.0.0.4" autocomplete="off"
+                           spellcheck="false" autocapitalize="off" value="@_target" @oninput="OnTargetInput" />
+                    @if (hostProblem is not null)
+                    {
+                        <span class="field__hint is-bad">@hostProblem</span>
+                    }
+                </div>
+                <div class="field form__narrow">
+                    <label class="field__label" for="tcp-port">Port</label>
+                    <input id="tcp-port" class="input mono" placeholder="@(_tls ? "2376" : "2375")" inputmode="numeric"
+                           autocomplete="off" @bind="_port" @bind:event="oninput" @bind:after="Untest" />
+                    @if (portProblem is not null)
+                    {
+                        <span class="field__hint is-bad">@portProblem</span>
+                    }
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="tcp-name">Name in Dray</label>
+                <input id="tcp-name" class="input" placeholder="build-box" autocomplete="off" spellcheck="false"
+                       value="@_name" @oninput="OnNameInput" />
+                @if (nameProblem is not null)
+                {
+                    <span class="field__hint is-bad">@nameProblem</span>
+                }
+            </div>
+
+            <label class="check">
+                <input type="checkbox" @bind="_tls" @bind:after="Untest" />
+                <span>Use TLS with a client certificate</span>
+            </label>
+
+            @if (_tls)
+            {
+                <div class="certs">
+                    @Cert("CA certificate", "ca.pem", _ca, v => _ca = v)
+                    @Cert("Client certificate", "cert.pem", _cert, v => _cert = v)
+                    @Cert("Client key", "key.pem", _key, v => _key = v)
+                    <p class="field__hint">
+                        The docker command copies these into its own context store; Dray keeps no copy.
+                    </p>
+                </div>
+            }
+            else
+            {
+                <div class="callout callout--bad" role="note">
+                    <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                    <span>
+                        Without TLS, anyone who can reach this port can run anything on that machine as
+                        root. Use it only on a network you trust completely.
+                    </span>
+                </div>
+            }
+
+            @Tested
+        </div>
+    };
+
+    RenderFragment Cert(string label, string example, string value, Action<string> set) => __builder =>
+    {
+        var problem = ContextSpec.ValidatePath(value);
+        var id = "tcp-" + example.Replace(".", "-");
+
+        <div class="field">
+            <label class="field__label" for="@id">@label</label>
+            <div class="certs__row">
+                <input id="@id" class="input mono" placeholder="@($"~/.docker/certs/{example}")" autocomplete="off"
+                       spellcheck="false" value="@value"
+                       @oninput="e => { set(e.Value?.ToString() ?? string.Empty); Untest(); }" />
+                <Button Label="Choose…" Variant="ButtonVariant.Secondary"
+                        OnClick="() => PickAsync(label, set)" />
+            </div>
+            @if (problem is not null)
+            {
+                <span class="field__hint is-bad">@problem</span>
+            }
+        </div>
+    };
+
+    /// <summary>What the last test found — the engine that answered, described as the list will describe it.</summary>
+    RenderFragment Tested => __builder =>
+    {
+        if (_tested is not { } tested || _outcome is not null) return;
+
+        <div class="callout callout--ok" role="status">
+            <Icon Name="IconRef.Check" Size="IconSize.Sm" />
+            <span>@Answered(tested.Caps)</span>
+        </div>
+    };
+
+    static string Answered(RuntimeCapabilities caps)
+    {
+        var sentence = $"{HostFacts.Flavor(caps.Flavor)} {caps.EngineVersion} answered";
+
+        if (HostFacts.ContainerOsLabel(caps.ContainerOs) is { } os) sentence += $", running {os.ToLowerInvariant()}";
+        if (HostFacts.Machine(caps) is { } machine) sentence += $", on {machine}";
+
+        return sentence + ".";
+    }
+
+    void Choose(EngineGuide guide)
+    {
+        _outcome = null;
+        _tested = null;
+        _guide = guide;
+
+        if (guide.Kind == GuideKind.Tcp) _tls = true;
+    }
+
+    /// <summary>
+    /// Back to the start, with the form cleared: an SSH address left behind is not a TCP address,
+    /// and carrying it across shows an error the user did not cause.
+    /// </summary>
+    void BackToChooser() => Reset();
+
+    void Reset()
+    {
+        _guide = null;
+        _outcome = null;
+        _tested = null;
+        _target = _port = _name = _ca = _cert = _key = "";
+        _nameEdited = false;
+        _tls = true;
+    }
+
+    void OnTargetInput(ChangeEventArgs e)
+    {
+        _target = e.Value?.ToString() ?? string.Empty;
+
+        // The name follows the machine until the user types one of their own.
+        if (!_nameEdited) _name = _target.Trim().Length == 0 ? "" : ContextSpec.SuggestName(_target);
+
+        Untest();
+    }
+
+    void OnNameInput(ChangeEventArgs e)
+    {
+        _name = e.Value?.ToString() ?? string.Empty;
+        _nameEdited = _name.Length > 0;
+    }
+
+    /// <summary>Anything that changes where Dray would connect makes the last test's answer stale.</summary>
+    void Untest()
+    {
+        _tested = null;
+        _outcome = null;
+    }
+
+    async Task PickAsync(string label, Action<string> set)
+    {
+        if (await Shell.PickFileAsync(new FilePickerOptions($"Choose the {label.ToLowerInvariant()}", Extensions: ["pem", "crt", "key"])) is { } path)
+        {
+            set(path);
+            Untest();
+        }
+    }
+
+    /// <summary>The first thing stopping the form from being submitted, or null.</summary>
+    string? FormProblem()
+    {
+        if (_guide is not { Kind: GuideKind.Ssh or GuideKind.Tcp } guide) return null;
+
+        var target = guide.Kind == GuideKind.Ssh ? ContextSpec.ValidateSshTarget(_target) : ContextSpec.ValidateTcpHost(_target);
+
+        return target
+            ?? ContextSpec.ValidatePort(_port, out _)
+            ?? ContextSpec.ValidateName(_name)
+            ?? (guide.Kind == GuideKind.Tcp && _tls
+                ? ContextSpec.ValidatePath(_ca) ?? ContextSpec.ValidatePath(_cert) ?? ContextSpec.ValidatePath(_key)
+                : null);
+    }
+
+    /// <summary>Where the form points, as a context endpoint and as the endpoint Dray connects to.</summary>
+    (string Endpoint, string Spec, DockerEndpoint? Parsed) Target()
+    {
+        ContextSpec.ValidatePort(_port, out var port);
+
+        if (_guide?.Kind == GuideKind.Ssh)
+        {
+            var ssh = ContextSpec.SshEndpoint(_target, port);
+            return (ssh, ContextSpec.Docker(ssh), DockerEndpoint.Parse(ssh));
+        }
+
+        var tcp = ContextSpec.TcpEndpoint(_target, port ?? (_tls ? 2376 : 2375));
+        var tls = _tls ? new EndpointTls(Blank(_ca), Blank(_cert), Blank(_key), SkipVerify: false) : null;
+
+        return (tcp,
+            _tls ? ContextSpec.Docker(tcp, _ca.Trim(), _cert.Trim(), _key.Trim()) : ContextSpec.Docker(tcp),
+            DockerEndpoint.Parse(tcp, tls));
+
+        static string? Blank(string value) => value.Trim() is { Length: > 0 } v ? v : null;
+    }
+
+    async Task<bool> TestAsync()
+    {
+        var (endpoint, _, parsed) = Target();
+        if (parsed is null)
+        {
+            _outcome = (false, "Dray could not make an address out of that. Check the machine and port.");
+            return false;
+        }
+
+        _outcome = null;
+        _tested = null;
+
+        var (caps, problem) = await Engine.TestAsync(parsed, Session.Closing);
+
+        if (caps is null)
+        {
+            _outcome = (false, problem ?? "The engine did not answer.");
+            return false;
+        }
+
+        _tested = (endpoint, caps);
+        return true;
+    }
+
+    /// <summary>
+    /// Test, then save. A host is never written that has not just answered: a broken entry in the
+    /// picker is something the user then has to go and remove.
+    /// </summary>
+    async Task<bool> AddRemoteAsync()
+    {
+        var (endpoint, spec, _) = Target();
+
+        if (_tested?.Endpoint != endpoint && !await TestAsync()) return false;
+
+        return await CreateAndUseAsync(_name.Trim(), $"{DockerCliContext.AddedBy} — {endpoint}", spec);
+    }
+
+    async Task<bool> ConnectMinikubeAsync()
+    {
+        _outcome = null;
+
+        var (spec, problem) = await new MinikubeDockerEnv().ReadAsync(Session.Closing);
+
+        if (spec is null)
+        {
+            _outcome = (false, problem ?? "minikube did not say where its engine is.");
+            return false;
+        }
+
+        return await CreateAndUseAsync(MinikubeDockerEnv.ContextName, $"{DockerCliContext.AddedBy} — minikube's engine", spec);
+    }
+
+    Task<bool> AddSocketAsync(EngineGuide guide, string socket)
+        => CreateAndUseAsync(DockerCliContext.ContextPrefix + guide.Id, $"{DockerCliContext.AddedBy} — {guide.Name}", ContextSpec.Docker("unix://" + socket));
+
+    /// <summary>Record the host as a context, find it, and switch to it. True when the dialog's work is done.</summary>
+    async Task<bool> CreateAndUseAsync(string name, string description, string spec)
+    {
+        _outcome = null;
+
+        if (await Cli.CreateContextAsync(name, description, spec) is { } refused)
+        {
+            _outcome = (false, refused);
+            return false;
+        }
+
+        // Discovery reads contexts, so looking again is what makes it a host.
+        await Engine.InitializeAsync();
+
+        if (Engine.Hosts.All(h => h.Id != name))
+        {
+            _outcome = (false, $"The context was created, but Dray did not find it afterwards. Check docker context ls for {name}.");
+            return false;
+        }
+
+        await Engine.SelectAsync(name);
+        return true;
+    }
+
+    async Task LookAgainAsync(EngineGuide guide)
+    {
+        _outcome = null;
+
+        await Engine.InitializeAsync();
+        await Engine.ProbeOthersAsync();
+
+        var status = Status(guide);
+
+        _outcome = status.State switch
+        {
+            GuideState.Connected => (true, $"Found it — {status.Host!.Name} is answering."),
+            GuideState.Listed or GuideState.Listening => (true, $"Found {guide.Name}."),
+            GuideState.NotAnswering => (false, $"{status.Host!.Name} is listed, and did not answer: {status.Host.StateDetail ?? "no reason given"}"),
+            _ => (false, NotFoundYet(guide, status.State)),
+        };
+    }
+
+    /// <summary>Names what Dray looked for, so the user can tell whether it is the thing they started.</summary>
+    static string NotFoundYet(EngineGuide guide, GuideState state)
+    {
+        var where = guide.Sockets.FirstOrDefault() ?? guide.Pipes.FirstOrDefault() ?? guide.Executables.FirstOrDefault();
+        var installed = state == GuideState.Installed ? $"{guide.Name} is installed, but its engine is not running yet. " : "";
+
+        return where is null
+            ? $"{installed}Dray did not find {guide.Name} yet."
+            : $"{installed}Dray looked for {where} and it is not there yet — it appears once the engine has started.";
+    }
+}

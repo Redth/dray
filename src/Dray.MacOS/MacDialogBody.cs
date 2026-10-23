@@ -2,13 +2,16 @@ using AppKit;
 using CoreGraphics;
 using Dray.Core.Shell;
 using Dray.Ui.Services;
+using Foundation;
 using Microsoft.Maui.Platform;
 using Microsoft.Maui.Platforms.MacOS.Controls;
+using WebKit;
 
 namespace Dray.MacOS;
 
 /// <summary>
-/// The web half of a native dialog: a <c>BlazorWebView</c> sized to fit inside an alert.
+/// The web half of a native dialog: a <c>BlazorWebView</c> that sits between AppKit's title and
+/// AppKit's buttons.
 /// <para>
 /// A second WebView rather than a second app. It is built from the same service provider as the
 /// window behind it, so the component inside talks to the same <c>EngineManager</c> and the same
@@ -22,13 +25,13 @@ public sealed class MacDialogBody : IDisposable
 
     public NSView View { get; }
 
-    public MacDialogBody(IServiceProvider services, DialogRequest request, CGSize size)
+    public MacDialogBody(IServiceProvider services, DialogSession session, CGSize size)
     {
         _services = services;
 
-        // Set before the view is created: the surface reads it as it mounts, and a request arriving
+        // Set before the view is created: the surface reads it as it mounts, and a session arriving
         // afterwards would render an empty dialog for a frame.
-        services.GetRequiredService<NativeDialogState>().Set(request);
+        services.GetRequiredService<NativeDialogState>().Set(session);
 
         _webView = new MacOSBlazorWebView
         {
@@ -51,8 +54,12 @@ public sealed class MacDialogBody : IDisposable
 
         View = (NSView)_webView.ToPlatform(context);
 
-        // An alert lays its accessory view out from the frame it already has, so the size has to be
-        // on the NSView and not only on the MAUI element.
+        // Transparent, as the main window's is: the sheet's own background is the platform's
+        // window colour, and an opaque WebView would paint a white slab over it in dark mode.
+        if (View is WKWebView webView)
+            webView.SetValueForKey(NSObject.FromObject(false), new NSString("drawsBackground"));
+
+        View.TranslatesAutoresizingMaskIntoConstraints = false;
         View.SetFrameSize(size);
     }
 

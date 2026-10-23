@@ -1,189 +1,82 @@
 @page "/hosts"
-@implements IDisposable
 @inject EngineManager Engine
 @inject IShellBridge Shell
 
-<PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
-
 <EngineScope>
+    @* Inside the scope: the subtitle counts hosts, and a value computed above the tag is never
+       recomputed when one is added or removed. *@
+    <PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
     <div class="page">
         @if (Engine.HasNoHosts)
         {
-            <NoEngine OnRetry="Rediscover" />
+            <NoEngine OnRetry="Rediscover" OnAdd="() => OpenAdd()" />
         }
         else
         {
-            <p class="muted" style="max-width: 72ch; margin-bottom: var(--s4)">
-                Every host works the same behind this picker — a local socket, a WSL2 distro, or SSH
-                to a machine elsewhere. Only the selected host streams events; the rest are checked
-                when you open this page. Engines differ in what they can do, and the panel below
-                says what the selected one supports rather than leaving you to find out by
-                pressing something.
-            </p>
+            @* A list and the one host it has selected, side by side when there is room and stacked
+               when there is not. Sized by the content area rather than the window, so a wide
+               window with a wide sidebar stacks too — the failure the old six-column table had. *@
+            <div class="hosts">
+                <div class="hosts__grid">
+                    <nav class="card hostlist" aria-label="Engines">
+                        <div class="hostlist__head">
+                            <span class="hostlist__title">Engines</span>
+                            <span class="hostlist__count">@Engine.Hosts.Count</span>
+                        </div>
 
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr><th></th><th>Host</th><th>State</th><th>Endpoint</th><th>Engine</th><th>Source</th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var host in Engine.Hosts)
-                        {
-                            <tr @key="host.Id"
-                                class="@(host.IsStale ? "is-stale" : null)"
-                                aria-selected="@((Engine.Selected?.Id == host.Id).ToString().ToLowerInvariant())"
-                                @onclick="() => Select(host)">
-                                <td style="width: 1%">
-                                    @if (Engine.Selected?.Id == host.Id)
-                                    {
-                                        <Icon Name="IconRef.Check" Size="IconSize.Sm" Label="Selected" />
-                                    }
-                                </td>
-                                <td>@host.Name</td>
-                                <td><HostState Host="host" /></td>
-                                <td class="mono muted">@host.Endpoint.Display</td>
-                                <td>
-                                    @if (host.Capabilities.EngineVersion is { } version)
-                                    {
-                                        <span>@host.Capabilities.Flavor @version</span>
-                                        @if (host.Capabilities.IsRootless)
-                                        {
-                                            <span class="muted"> · rootless</span>
-                                        }
-                                    }
-                                    else
-                                    {
-                                        <span class="muted">—</span>
-                                    }
-                                </td>
-                                <td class="muted">@Source(host)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+                        <ul class="hostlist__items">
+                            @foreach (var host in Engine.Hosts)
+                            {
+                                var selected = Engine.Selected?.Id == host.Id;
 
-            @* The case discovery cannot cover: a Mac that could run Apple's engine and has not got
-               it. Gated on the machine actually being able to run it — pointing someone at a
-               download that will not start is worse than saying nothing. *@
-            @if (AppleEngine.Explain(AppleAvailability) is { } suggestion)
-            {
-                <div class="panel hosts__suggest">
-                    <div class="panel__body hosts__servicebody">
-                        <Icon Name="IconRef.Info" Size="IconSize.Sm" />
-                        <p class="muted hosts__note">@suggestion</p>
+                                <li @key="host.Id">
+                                    @* The picker is the switch: choosing a host here is choosing
+                                       the engine every page shows, as it is in the sidebar. *@
+                                    <button type="button"
+                                            class="hostitem @(selected ? "is-selected" : null) @(host.IsStale ? "is-stale" : null)"
+                                            aria-current="@(selected ? "true" : null)"
+                                            title="@host.Endpoint.Display"
+                                            @onclick="() => Select(host)">
+                                        <EngineGlyph Icon="HostFacts.Icon(host)" Active="selected" />
+                                        <span class="hostitem__text">
+                                            <span class="hostitem__name">@host.Name</span>
+                                            <span class="hostitem__sub">@HostFacts.Summary(host)</span>
+                                        </span>
+                                        <HostState Host="host" />
+                                    </button>
+                                </li>
+                            }
+                        </ul>
 
-                        <span class="hosts__spacer"></span>
+                        <button type="button" class="hostlist__add" @onclick="() => OpenAdd()">
+                            <Icon Name="IconRef.Plus" Size="IconSize.Sm" />
+                            <span>Add a host…</span>
+                        </button>
+                    </nav>
 
+                    <div class="hosts__detail">
+                        @* The case discovery cannot cover: a Mac that could run Apple's engine and
+                           has not got it. Gated on the machine actually being able to run it —
+                           pointing someone at a download that will not start is worse than saying
+                           nothing. *@
                         @if (AppleAvailability == AppleEngineAvailability.Available)
                         {
-                            @* Apple's own signed installer, opened in the user's browser rather
-                               than in Dray's WebView — a download is the browser's job. *@
-                            <Button Label="Get it from Apple" Icon="IconRef.External"
-                                    Variant="ButtonVariant.Secondary"
-                                    OnClick="() => Shell.OpenExternalAsync(AppleEngine.Downloads)" />
+                            <div class="hosts__suggest">
+                                <EngineGlyph Icon="IconRef.Container" />
+                                <p class="hosts__suggesttext">@AppleEngine.Explain(AppleAvailability)</p>
+                                <Button Label="Set it up…" Variant="ButtonVariant.Secondary"
+                                        OnClick="@(() => OpenAdd("apple-container"))" />
+                            </div>
+                        }
+
+                        @if (Engine.Selected is { } current)
+                        {
+                            <HostDetail Host="current" />
                         }
                     </div>
                 </div>
-            }
-
-            @if (_error is { } problem)
-            {
-                <div class="banner" role="alert">
-                    <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
-                    <span>@problem</span>
-                    <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true"
-                            Variant="ButtonVariant.Ghost" OnClick="() => _error = null" />
-                </div>
-            }
-
-            @* An engine whose service runs on this machine can be started and stopped from here.
-               Apple's container is the case: its CLI answers --version whether or not the API
-               server behind it is up, so an engine that looks installed can fail every call — and
-               the fix is one command nobody has a reason to know. *@
-            @if (Engine.CanControlService)
-            {
-                <div class="panel hosts__service">
-                    <div class="panel__head">
-                        <span class="panel__title">Engine service</span>
-
-                        @if (_service is { } state)
-                        {
-                            <StatePill Status="ServiceStatus(state)" />
-                        }
-                    </div>
-
-                    <div class="panel__body hosts__servicebody">
-                        <p class="muted hosts__note">
-                            @(_service?.Detail ?? "Checking the service…")
-                            @if (_service?.Version is { Length: > 0 } version)
-                            {
-                                <span class="mono"> · @version</span>
-                            }
-                        </p>
-
-                        <span class="hosts__spacer"></span>
-
-                        @if (_service is { Running: false })
-                        {
-                            <Button Label="Start service" Icon="IconRef.Play" Variant="ButtonVariant.Primary"
-                                    Busy="_working" Disabled="_working" OnClick="StartServiceAsync" />
-                        }
-                        else if (_service is { Running: true })
-                        {
-                            <Button Label="Stop service" Icon="IconRef.Stop" Variant="ButtonVariant.Secondary"
-                                    Danger="true" Busy="_working" Disabled="_working"
-                                    OnClick="StopServiceAsync" />
-                        }
-                    </div>
-                </div>
-            }
-
-            @if (Engine.Selected is { Capabilities.Flavor: not EngineFlavor.Unknown } selected)
-            {
-                <div class="panel" style="margin-top: var(--s4)">
-                    <div class="panel__head"><span class="panel__title">What @selected.Name supports</span></div>
-                    <div class="panel__body">
-                        @* Which kind of container this engine runs is the first thing to say about
-                           it on Windows, and it cannot be read off the endpoint: Docker Desktop,
-                           a native dockerd and podman's machine all answer on the same pipe name,
-                           and only one of the three runs Windows containers. *@
-                        @if (selected.Capabilities.ContainerOs is not ContainerOs.Unknown)
-                        {
-                            <p class="hosts__mode">
-                                Runs <strong>@ContainerOsLabel(selected.Capabilities.ContainerOs)</strong>
-                                @if (selected.Capabilities.DefaultIsolation is { Length: > 0 } isolation)
-                                {
-                                    <span class="muted"> · @isolation isolation by default</span>
-                                }
-                            </p>
-                        }
-
-                        <div class="caps">
-                            <Capability Name="Event stream" Supported="selected.Capabilities.SupportsEvents"
-                                        Absent="Dray checks this engine every couple of seconds instead, so a change can be that late — and something that appears and disappears between checks is never seen." />
-                            <Capability Name="Container stats" Supported="selected.Capabilities.SupportsStats"
-                                        Absent="CPU and memory columns stay empty on this engine." />
-                            <Capability Name="Shell" Supported="selected.Capabilities.SupportsShell"
-                                        Absent="The Terminal tab is hidden. Use the engine's own exec command in a terminal." />
-                            <Capability Name="Pause and resume" Supported="selected.Capabilities.SupportsPause"
-                                        Absent="Those buttons are hidden. Stop and start are unaffected." />
-                            <Capability Name="Rename" Supported="selected.Capabilities.SupportsRename"
-                                        Absent="This engine identifies a container by its name, so renaming means recreating it." />
-                            <Capability Name="Volumes" Supported="selected.Capabilities.SupportsVolumes"
-                                        Absent="Containers mount host directories directly instead." />
-                            <Capability Name="Networks" Supported="selected.Capabilities.SupportsNetworks"
-                                        Absent="Networks are attached at creation and cannot be managed afterwards." />
-                            <Capability Name="Compose" Supported="selected.Capabilities.SupportsCompose"
-                                        Absent="The Stacks page has nothing to read on this engine." />
-                            <Capability Name="BuildKit" Supported="selected.Capabilities.SupportsBuildKit"
-                                        Absent="Builds fall back to the legacy builder." />
-                        </div>
-                    </div>
-                </div>
-
-                <CliTarget Host="selected" />
-            }
+            </div>
         }
 
         @* Outside the branch above, and deliberately: a machine with nothing to connect to is the
@@ -200,7 +93,11 @@
     PageChrome Chrome => new(
         "Hosts",
         Subtitle: Engine.HasNoHosts ? null : $"{Engine.Hosts.Count} known",
-        Actions: [ChromeAction.Secondary("refresh", "Look again", IconRef.Refresh)]);
+        Actions:
+        [
+            ChromeAction.Primary("add", "Add host", IconRef.Plus),
+            ChromeAction.Secondary("refresh", "Look again", IconRef.Refresh),
+        ]);
 
     /// <summary>
     /// Whether Apple's engine is worth mentioning. Discovery finds it on PATH, so both ways of
@@ -215,37 +112,6 @@
             is System.Runtime.InteropServices.Architecture.Arm64,
         macOSMajor: Environment.OSVersion.Version.Major);
 
-    /// <summary>
-    /// What to call an engine's containers. Spelled out rather than shown as "linux"/"windows",
-    /// because the question a user is answering here is "is this the mode I meant to be in".
-    /// </summary>
-    static string ContainerOsLabel(ContainerOs os) => os switch
-    {
-        ContainerOs.Windows => "Windows containers",
-        ContainerOs.Linux => "Linux containers",
-        _ => "containers of an unreported kind",
-    };
-
-    EngineServiceState? _service;
-    bool _working;
-
-    /// <summary>Which host the service state belongs to, so it is not shown for a different one.</summary>
-    string? _serviceFor;
-
-    protected override void OnInitialized() => Engine.Changed += OnEngineChanged;
-
-    /// <summary>
-    /// Re-check when the selection changes, and only then. Changed also fires for every container
-    /// event on the selected host, and asking the engine about its service each time would be a
-    /// process launched per event — the polling this design exists to avoid.
-    /// </summary>
-    void OnEngineChanged()
-    {
-        if (_serviceFor == Engine.Selected?.Id) return;
-
-        _ = InvokeAsync(RefreshServiceAsync);
-    }
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -253,85 +119,14 @@
         // Checked when the page opens rather than on a timer: probing a remote host costs a
         // connection, and doing it for hosts nobody is looking at is the polling this design avoids.
         await Engine.ProbeOthersAsync();
-        await RefreshServiceAsync();
     }
-
-    async Task RefreshServiceAsync()
-    {
-        _serviceFor = Engine.Selected?.Id;
-
-        if (Engine.ServiceStatusAsync() is not { } pending)
-        {
-            // The engine has no service Dray can see. Cleared rather than left showing the last
-            // engine's answer.
-            _service = null;
-            StateHasChanged();
-            return;
-        }
-
-        _service = await pending;
-        StateHasChanged();
-    }
-
-    public void Dispose() => Engine.Changed -= OnEngineChanged;
 
     /// <summary>
-    /// The service's state in the app's own vocabulary, so it reads as every other state does —
-    /// tint, glyph and word (DESIGN.md 2.4).
+    /// Through the shell, so it is a native sheet on macOS and a &lt;dialog&gt; in a browser. The
+    /// flow selects the host it adds, and the page follows the engine, so there is nothing to read
+    /// back from it.
     /// </summary>
-    static ContainerStatus ServiceStatus(EngineServiceState state) => state.Running
-        ? new ContainerStatus(StateTone.Ok, "●", "Running")
-        : new ContainerStatus(StateTone.Danger, "■", "Stopped");
-
-    async Task StartServiceAsync()
-    {
-        _working = true;
-
-        try
-        {
-            _error = await Engine.StartServiceAsync();
-            await RefreshServiceAsync();
-        }
-        finally
-        {
-            _working = false;
-        }
-    }
-
-    async Task StopServiceAsync()
-    {
-        // Everything running under it stops with it, so this is confirmed like any other stop.
-        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
-            "Stop the engine service?",
-            "Every container it is running stops with it. Nothing is deleted, and starting the "
-            + "service again brings the containers back to whatever state they were left in.",
-            "Stop service"));
-
-        if (answer != ConfirmResult.Confirm) return;
-
-        _working = true;
-
-        try
-        {
-            _error = await Engine.StopServiceAsync();
-            await RefreshServiceAsync();
-        }
-        finally
-        {
-            _working = false;
-        }
-    }
-
-    string? _error;
-
-    static string Source(DockerHost host) => host.Origin switch
-    {
-        HostOrigin.DockerContext => "docker context",
-        HostOrigin.Environment => "DOCKER_HOST",
-        HostOrigin.WslDistro => "WSL2",
-        HostOrigin.AppleContainer => "Apple container",
-        _ => "found on this machine",
-    };
+    Task OpenAdd(string? guide = null) => Shell.ShowDialogAsync(AddHostDialog.Request(guide));
 
     async Task Select(DockerHost host) => await Engine.SelectAsync(host.Id);
 
@@ -339,9 +134,16 @@
 
     async Task HandleAction(string id)
     {
-        if (id != "refresh") return;
+        switch (id)
+        {
+            case "add":
+                await OpenAdd();
+                break;
 
-        await Engine.InitializeAsync();
-        await Engine.ProbeOthersAsync();
+            case "refresh":
+                await Engine.InitializeAsync();
+                await Engine.ProbeOthersAsync();
+                break;
+        }
     }
 }

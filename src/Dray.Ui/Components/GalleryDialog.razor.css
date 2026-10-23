@@ -1,0 +1,10 @@
+.gal-dlg__hint {
+    margin: var(--s2) 0 var(--s3);
+    font-size: var(--text-sm);
+}
+
+.gal-dlg__problem {
+    margin: 0 0 var(--s3);
+    color: var(--danger);
+    font-size: var(--text-sm);
+}
