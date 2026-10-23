@@ -24,6 +24,21 @@
         }
     </div>
 
+    @if (Effect is { } effect)
+    {
+        @* What Deploy will do, by service — compose's own definition of changed, read from the
+           hash it stamps on every container. The question someone asks before pressing Deploy. *@
+        <div class="deploy__effect" role="status">
+            <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+            <span>@effect</span>
+        </div>
+    }
+
+    @if (Request.Warnings.Count > 0)
+    {
+        <ComposeProblemList Problems="Request.Warnings" />
+    }
+
     <fieldset class="deploy__options">
         <legend class="field__label">Options</legend>
 
@@ -71,6 +86,55 @@
     ];
 
     string? _command;
+
+    /// <summary>
+    /// One sentence on what the chosen options will do to this stack, or null when the drift is not
+    /// known. Pulling changes the answer in a way nothing here can know before the pull, and says so.
+    /// </summary>
+    string? Effect
+    {
+        get
+        {
+            if (Request.Drift is not { } drift) return null;
+
+            var changed = Names(drift, ServiceDrift.Changed);
+            var created = Names(drift, ServiceDrift.NotCreated);
+            var removed = Request.Options.RemoveOrphans ? Names(drift, ServiceDrift.Removed) : [];
+            var kept = Names(drift, ServiceDrift.Unchanged);
+
+            if (Request.Options.ForceRecreate)
+            {
+                return created.Count > 0
+                    ? $"Recreates every service, and creates {List(created)}."
+                    : "Recreates every service, changed or not.";
+            }
+
+            var parts = new List<string>();
+            if (changed.Count > 0) parts.Add($"recreates {List(changed)}, edited since it was deployed");
+            if (created.Count > 0) parts.Add($"creates {List(created)}");
+            if (removed.Count > 0) parts.Add($"removes {List(removed)}, no longer in the file");
+
+            var pulled = Request.Options.Pull ? " Anything whose image the pull moves is recreated too." : "";
+
+            if (parts.Count == 0)
+                return $"Nothing in the files has changed since this was deployed, so nothing is recreated.{pulled}";
+
+            var sentence = string.Join("; ", parts);
+            var rest = kept.Count > 0 ? $" Leaves {List(kept)} running." : "";
+
+            return $"{char.ToUpperInvariant(sentence[0])}{sentence[1..]}.{rest}{pulled}";
+        }
+    }
+
+    static List<string> Names(IReadOnlyDictionary<string, ServiceDrift> drift, ServiceDrift kind)
+        => [.. drift.Where(d => d.Value == kind).Select(d => d.Key).Order(StringComparer.OrdinalIgnoreCase)];
+
+    static string List(IReadOnlyList<string> names) => names.Count switch
+    {
+        1 => names[0],
+        2 => $"{names[0]} and {names[1]}",
+        _ => $"{string.Join(", ", names.Take(names.Count - 1))} and {names[^1]}",
+    };
 
     protected override Task OnInitializedAsync() => DescribeAsync();
 

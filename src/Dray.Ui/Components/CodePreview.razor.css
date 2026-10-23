@@ -1,0 +1,7 @@
+.preview {
+    height: 100%;
+    min-height: 14rem;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+}

@@ -11,6 +11,12 @@ public sealed class DeployRequest(Func<DeployOptions, Task<string?>> describe)
     public DeployOptions Options { get; set; } = DeployOptions.OnlyChanged;
 
     public Func<DeployOptions, Task<string?>> Describe { get; } = describe;
+
+    /// <summary>Compose's warnings about the files, which do not stop a deploy but are worth reading first.</summary>
+    public IReadOnlyList<ComposeProblem> Warnings { get; init; } = [];
+
+    /// <summary>Per service, what the files say compared with what is running. Null when unknown.</summary>
+    public IReadOnlyDictionary<string, ServiceDrift>? Drift { get; init; }
 }
 
 /// <summary>
@@ -22,7 +28,11 @@ public sealed class DeployRequest(Func<DeployOptions, Task<string?>> describe)
 /// reason <see cref="PruneService"/> exists too.
 /// </para>
 /// </summary>
-public sealed class StackActionService(EngineManager engine, StackOperations operations, IShellBridge shell)
+public sealed class StackActionService(
+    EngineManager engine,
+    StackOperations operations,
+    IShellBridge shell,
+    Microsoft.AspNetCore.Components.NavigationManager nav)
 {
     // ---------------------------------------------------------------- what is offered
 
@@ -43,7 +53,7 @@ public sealed class StackActionService(EngineManager engine, StackOperations ope
         var files = stack.Provenance != StackProvenance.Observed;
         var name = stack.Name;
 
-        var deploy = new RowAction("deploy", $"Deploy {name}…", IconRef.Play, "Deploy — create what is missing and apply what changed", Disabled: busy);
+        var deploy = new RowAction("deploy", $"Deploy {name}…", IconRef.Push, "Deploy — create what is missing and apply what changed", Disabled: busy);
         var start = new RowAction("start", $"Start {name}", IconRef.Play, "Start the stack's containers", Disabled: busy);
         var stop = new RowAction("stop", $"Stop {name}", IconRef.Stop, "Stop every container, keeping them", Disabled: busy);
         var restart = new RowAction("restart", $"Restart {name}", IconRef.Restart, "Restart every container", Disabled: busy);
@@ -201,9 +211,43 @@ public sealed class StackActionService(EngineManager engine, StackOperations ope
         return Start(stack, label, StackCommands.For(chosen, stack, service: service.Name));
     }
 
+    /// <summary>
+    /// Deploy, after compose has looked at the files.
+    /// <para>
+    /// Checked before the dialog rather than left to <c>up</c>: a file compose refuses is caught
+    /// here, with its problems listed and a way to the line, instead of as a failed run halfway
+    /// down an output panel. What compose merely warns about is shown in the dialog and does not
+    /// stop anything — it is compose's call that those are not errors, not Dray's.
+    /// </para>
+    /// </summary>
     async Task<string?> DeployAsync(StackSummary stack)
     {
-        var request = new DeployRequest(options => engine.DescribeComposeAsync(stack, StackCommands.For(StackVerb.Deploy, stack, options)[0]));
+        var config = await engine.ValidateComposeAsync(stack);
+
+        if (!config.IsValid)
+        {
+            var open = await shell.ShowDialogAsync(new DialogRequest(
+                $"{stack.Name} cannot be deployed yet",
+                typeof(ComposeProblemList),
+                new Dictionary<string, object?>
+                {
+                    [nameof(ComposeProblemList.Problems)] = config.Problems,
+                    [nameof(ComposeProblemList.Note)] = "Compose refused the files, so Deploy would fail before it changed anything. Fix these and deploy again.",
+                },
+                [DialogButton.Cancel("Close"), DialogButton.Confirm("open", "Open compose file")],
+                Subtitle: "What docker compose config reported"));
+
+            if (open == "open") nav.NavigateTo($"/stacks/{Uri.EscapeDataString(stack.Name)}?tab=compose");
+            return null;
+        }
+
+        var drift = await engine.DriftAsync(stack);
+
+        var request = new DeployRequest(options => engine.DescribeComposeAsync(stack, StackCommands.For(StackVerb.Deploy, stack, options)[0]))
+        {
+            Warnings = [.. config.Problems.Where(p => p.Severity == ProblemSeverity.Warning)],
+            Drift = drift,
+        };
 
         var choice = await shell.ShowDialogAsync(new DialogRequest(
             $"Deploy {stack.Name}",

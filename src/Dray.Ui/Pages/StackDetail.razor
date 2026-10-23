@@ -96,6 +96,14 @@
                             </div>
                         }
 
+                        @if (DriftSummary is { } drifted)
+                        {
+                            <div class="note stack__drift" role="status">
+                                <Icon Name="IconRef.Info" Size="IconSize.Sm" />
+                                <span>@drifted</span>
+                            </div>
+                        }
+
                         <table class="table">
                             <thead>
                                 <tr>
@@ -114,7 +122,13 @@
                                            started, behind a profile, or scaled to zero. Listed so
                                            the stack on screen is the stack in the file. *@
                                         <tr @key="service.Name">
-                                            <td>@service.Name</td>
+                                            <td>
+                                                @service.Name
+                                                @if (DriftPill(service.Name) is { } drift)
+                                                {
+                                                    <StatePill Status="drift" />
+                                                }
+                                            </td>
                                             <td><StatePill Status="service.Status" /></td>
                                             <td class="muted">No container</td>
                                             <td class="muted">—</td>
@@ -138,6 +152,11 @@
                                                 @if (service.IsScaled)
                                                 {
                                                     <span class="muted"> · @replica.Compose?.Replica</span>
+                                                }
+
+                                                @if (index == 0 && DriftPill(service.Name) is { } drift)
+                                                {
+                                                    <StatePill Status="drift" />
                                                 }
                                             </td>
                                             <td><StatePill Status="replica.Status" /></td>
@@ -192,7 +211,7 @@
                 else if (_file is not null)
                 {
                     <StackCompose Stack="current" WorkingDirectory="@WorkingDirectory"
-                                  OnClose="BackToServices" OnSaved="LoadComposeFile" />
+                                  OnClose="BackToServices" OnSaved="OnComposeSavedAsync" />
                 }
                 else
                 {
@@ -215,6 +234,13 @@
         + "do not exist here.";
 
     [Parameter] public string Name { get; set; } = "";
+
+    /// <summary><c>?tab=compose</c> opens on the files — where a refused Deploy sends you.</summary>
+    [SupplyParameterFromQuery(Name = "tab")] public string? InitialTab { get; set; }
+
+    /// <summary>What Deploy would change per service, or null when unknown. See <see cref="StackDrift"/>.</summary>
+    IReadOnlyDictionary<string, ServiceDrift>? _drift;
+    CancellationTokenSource? _driftCts;
 
     string StackName => Uri.UnescapeDataString(Name);
 
@@ -311,8 +337,18 @@
         }
     }
 
+    string? _tabFor;
+
     protected override void OnParametersSet()
     {
+        // Followed separately from the stack: a refused Deploy sends you here from this very page,
+        // and the same component instance gets only the query changed.
+        if (InitialTab != _tabFor)
+        {
+            _tabFor = InitialTab;
+            if (InitialTab is "compose") _tab = "Compose file";
+        }
+
         if (_readFor == StackName) return;
 
         _readFor = StackName;
@@ -320,7 +356,68 @@
         _fileError = null;
 
         LoadComposeFile();
+        _ = RefreshDriftAsync();
     }
+
+    /// <summary>Saving changed the file: re-read it for the graph, and ask compose what it now differs by.</summary>
+    async Task OnComposeSavedAsync()
+    {
+        LoadComposeFile();
+        await RefreshDriftAsync();
+    }
+
+    async Task RefreshDriftAsync()
+    {
+        _driftCts?.Cancel();
+        var cts = _driftCts = new CancellationTokenSource();
+
+        if (Stack is not { } stack || stack.Provenance == StackProvenance.Observed)
+        {
+            _drift = null;
+            return;
+        }
+
+        try
+        {
+            var drift = await Engine.DriftAsync(stack, cts.Token);
+            if (cts.IsCancellationRequested) return;
+
+            _drift = drift;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>The services Deploy would touch, for the banner over the services.</summary>
+    string? DriftSummary
+    {
+        get
+        {
+            if (_drift is not { } drift || Stack is not { IsDown: false }) return null;
+
+            var changed = drift.Where(d => d.Value == ServiceDrift.Changed).Select(d => d.Key).Order().ToList();
+            var created = drift.Where(d => d.Value == ServiceDrift.NotCreated).Select(d => d.Key).Order().ToList();
+            var removed = drift.Where(d => d.Value == ServiceDrift.Removed).Select(d => d.Key).Order().ToList();
+
+            var parts = new List<string>();
+            if (changed.Count > 0) parts.Add($"recreate {string.Join(", ", changed)}");
+            if (created.Count > 0) parts.Add($"create {string.Join(", ", created)}");
+            if (removed.Count > 0) parts.Add($"remove {string.Join(", ", removed)}");
+
+            return parts.Count == 0 ? null : $"The files have changed since this stack was deployed. Deploy will {string.Join("; ", parts)}.";
+        }
+    }
+
+    /// <summary>A service's drift, as a pill — glyph, word and tint — or null when there is nothing to say.</summary>
+    ContainerStatus? DriftPill(string service) => _drift?.GetValueOrDefault(service) switch
+    {
+        ServiceDrift.Changed => new ContainerStatus(StateTone.Warn, "✎", "Edited", "not deployed"),
+        ServiceDrift.NotCreated when Stack is { IsDown: false } => new ContainerStatus(StateTone.Neutral, "+", "Not created"),
+        ServiceDrift.Removed => new ContainerStatus(StateTone.Neutral, "−", "Not in the file"),
+        _ => null,
+    };
 
     /// <summary>
     /// Read the compose file off this machine.
@@ -355,8 +452,12 @@
     void OnOperationChanged(StackOperation operation)
     {
         // Start and end change which actions are enabled; the lines are the log's to draw.
-        if (operation.Stack == StackName && (operation.Lines.Count <= 1 || !operation.IsRunning))
-            InvokeAsync(StateHasChanged);
+        if (operation.Stack != StackName) return;
+
+        // A finished deploy is the moment the files and the containers agree again.
+        if (!operation.IsRunning) _ = RefreshDriftAsync();
+
+        if (operation.Lines.Count <= 1 || !operation.IsRunning) InvokeAsync(StateHasChanged);
     }
 
     async Task RunAsync(StackSummary stack, string action)
@@ -447,5 +548,9 @@
         }
     }
 
-    public void Dispose() => Operations.Changed -= OnOperationChanged;
+    public void Dispose()
+    {
+        Operations.Changed -= OnOperationChanged;
+        _driftCts?.Cancel();
+    }
 }

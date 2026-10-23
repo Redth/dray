@@ -178,3 +178,10 @@
     min-width: 0;
     overflow-wrap: anywhere;
 }
+
+/* Who said so, when it was Dray rather than compose. Compose's verdict is the authority; Dray's
+   findings are advice and say so. */
+.sc__source {
+    margin-left: var(--s2);
+    font-size: var(--text-xs);
+}

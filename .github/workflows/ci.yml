@@ -48,6 +48,9 @@ jobs:
       - name: Vendored monaco-yaml and Compose schema are current
         run: node build/vendor-monaco-yaml.mjs --check
 
+      - name: Vendored composerize is current
+        run: node build/vendor-composerize.mjs --check
+
   build:
     name: Build (${{ matrix.name }})
     needs: design

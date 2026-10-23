@@ -6,6 +6,7 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject IPlatformTheme Theme
+@inject IShellBridge Shell
 
 <div class="editor">
     <div class="editor__bar chrome">
@@ -32,6 +33,10 @@
         {
             <Button Label="Revert" Icon="IconRef.Refresh" Variant="ButtonVariant.Ghost"
                     Disabled="@(!IsDirty || _saving)" OnClick="RevertAsync" />
+
+            <Button Label="Review" Icon="IconRef.Inspect" Variant="ButtonVariant.Ghost"
+                    Tooltip="See exactly what saving will change, side by side"
+                    Disabled="@(!IsDirty || _saving)" OnClick="ReviewAsync" />
 
             <Button Label="@(_saving ? "Saving…" : "Save")" Icon="IconRef.Save" Variant="ButtonVariant.Primary"
                     Disabled="@(!IsDirty || _saving)" OnClick="SaveAsync" />
@@ -151,6 +156,18 @@
         await _module.InvokeVoidAsync("editor.problems", _editor, Problems);
     }
 
+    /// <summary>The text as it is in the editor now, saved or not.</summary>
+    public async Task<string?> GetTextAsync()
+        => _editor is null || _module is null ? null : await _module.InvokeAsync<string>("editor.getValue", _editor);
+
+    /// <summary>Insert lines before a 1-based line, as one undoable edit. Leaves the file unsaved.</summary>
+    public async Task InsertAsync(int beforeLine, string text)
+    {
+        if (_editor is null || _module is null) return;
+
+        await _module.InvokeVoidAsync("editor.insert", _editor, beforeLine, text);
+    }
+
     /// <summary>Move the cursor to a place in the file and show it.</summary>
     public async Task RevealAsync(int line, int column)
     {
@@ -245,6 +262,38 @@
         {
             _saving = false;
         }
+    }
+
+    /// <summary>
+    /// Show what a save would write, against what is on disk, and save from there if wanted.
+    /// <para>
+    /// A button rather than a step every save goes through: most saves are one value someone just
+    /// typed and can see, and a dialog in front of each would be the kind of friction that gets a
+    /// setting to turn it off. When the edit is bigger than a glance — a quick action's splice, a
+    /// paste from somewhere — this is one click away.
+    /// </para>
+    /// </summary>
+    async Task ReviewAsync()
+    {
+        if (_editor is null || _module is null) return;
+
+        var original = await _module.InvokeAsync<string>("editor.getClean", _editor);
+        var modified = await _module.InvokeAsync<string>("editor.getValue", _editor);
+
+        var choice = await Shell.ShowDialogAsync(new DialogRequest(
+            $"Changes to {FileName}",
+            typeof(DiffView),
+            new Dictionary<string, object?>
+            {
+                [nameof(DiffView.Original)] = original,
+                [nameof(DiffView.Modified)] = modified,
+                [nameof(DiffView.Language)] = File.Language,
+            },
+            ReadOnly ? null : [DialogButton.Cancel("Keep editing"), DialogButton.Confirm("save", "Save")],
+            Subtitle: "On disk, then what saving writes",
+            Size: DialogSize.Large));
+
+        if (choice == "save") await SaveAsync();
     }
 
     async Task RevertAsync()

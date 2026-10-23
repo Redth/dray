@@ -98,3 +98,14 @@
     -webkit-user-select: text;
     padding-top: 3px;
 }
+
+.deploy__effect {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+}

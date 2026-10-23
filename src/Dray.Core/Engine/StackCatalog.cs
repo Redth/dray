@@ -40,6 +40,16 @@ public sealed class StackCatalog : IDisposable
     /// <summary>The list may have changed: a folder appeared, a file was edited, the registry moved.</summary>
     public event Action? Changed;
 
+    /// <summary>
+    /// Scan again now rather than when the watcher next fires — after Dray itself has written a
+    /// stack, so the page that opens next finds it.
+    /// </summary>
+    public void Refresh()
+    {
+        Rescan();
+        Changed?.Invoke();
+    }
+
     /// <summary>The stacks on <paramref name="host"/>, given its containers.</summary>
     public IReadOnlyList<StackSummary> For(string? host, IEnumerable<ContainerSummary> containers)
     {

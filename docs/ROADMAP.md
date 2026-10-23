@@ -756,6 +756,34 @@ Not done here: a Build action outside the Deploy dialog's option, and the Window
 **Exit:** a comment survives every edit Dray makes · an invalid file is caught before Deploy, not by
 it · a deployed stack shows which services the edit will recreate.
 
+**Progress:** done, driven end to end in a browser against Docker Desktop in both themes. **All
+three exit criteria met.**
+
+- **New stack** from a template, an image, a `docker run` line (composerize, vendored — Dockge's
+  choice of library) or running containers. From containers, the inspect record is the source with
+  the image's own defaults subtracted: copying `NGINX_VERSION` into a compose file would pin it and
+  override the next image's value. A new runtime call, `GetImageDefaultsAsync`, answers that, and
+  answers "unknown" on an engine that cannot say — in which case everything is kept and the dialog
+  says so. Existing volumes and networks come across as `external`, so the data is reused rather
+  than recreated empty. A secret goes to `.env` and the file says `${NAME}`. The generated file was
+  checked with `docker compose config`.
+- **Drift is compose's own definition.** `compose config --hash` equals the
+  `com.docker.compose.config-hash` label for an unedited service, and differs for exactly the
+  edited one — measured. The Services tab marks the edited service, says what Deploy will do, and
+  the Deploy dialog says it again for the options chosen.
+- **Deploy asks compose first.** A file compose refuses never reaches `up`: its problems are listed
+  with a way to the line.
+- **Quick actions are insertions** — add a service, port or variable — computed against the
+  editor's unsaved text and landing in it unsaved, selected, one undo. They decline rather than
+  reformat when a block is written inline. Review shows any edit in Monaco's diff editor before
+  saving.
+- **Dray's lint**: a port another container already publishes, an unpinned image, the engine's
+  socket mounted, a relative path on a remote engine. Advice, labelled as Dray's, never part of
+  compose's verdict.
+
+Not done: a profile picker, and the hash of bind-mounted config files, which compose's own hash
+does not cover — an edited `nginx.conf` still needs "Recreate everything".
+
 ### 10.3 — Inspect and operate
 
 - **Overview:** published ports as links, the project's networks, volumes and images, combined

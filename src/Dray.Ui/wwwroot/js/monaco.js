@@ -185,6 +185,13 @@ function defineTheme(monaco) {
       'editorSuggestWidget.background': surface,
       'editorSuggestWidget.border': line,
       'editorSuggestWidget.selectedBackground': brand && `${brand}22`,
+
+      // The review diff in the app's own ok and danger hues, at a strength that tints the text
+      // rather than drowning it — Monaco's defaults are a saturated green and red.
+      'diffEditor.insertedLineBackground': tokenColor('ok') && `${tokenColor('ok')}1f`,
+      'diffEditor.insertedTextBackground': tokenColor('ok') && `${tokenColor('ok')}33`,
+      'diffEditor.removedLineBackground': tokenColor('danger') && `${tokenColor('danger')}1f`,
+      'diffEditor.removedTextBackground': tokenColor('danger') && `${tokenColor('danger')}33`,
     }),
   });
 
@@ -260,6 +267,11 @@ export const editor = {
 
   getValue(state) {
     return state?.instance?.getValue() ?? '';
+  },
+
+  /** The text as last loaded or saved — what is on disk, as far as this editor knows. */
+  getClean(state) {
+    return state?.clean ?? '';
   },
 
   /** Called after a successful save: the current text becomes the new clean baseline. */
@@ -366,6 +378,40 @@ export const editor = {
     })));
   },
 
+  /**
+   * Insert lines before a 1-based line, as one undoable edit — how Dray's quick actions change a
+   * file. An edit rather than a replacement, so the undo stack, the cursor and every other line are
+   * left exactly as they were; the inserted lines are selected so it is obvious what arrived.
+   */
+  insert(state, line, text) {
+    const model = state?.instance?.getModel();
+    if (!model) return;
+
+    const monaco = state.monaco;
+    const last = model.getLineCount();
+    let range;
+    let insert = text;
+
+    if (line <= last) {
+      range = new monaco.Range(line, 1, line, 1);
+    } else {
+      // Past the end of a file with no trailing newline: start a line of our own first.
+      const column = model.getLineMaxColumn(last);
+      range = new monaco.Range(last, column, last, column);
+      if (model.getLineContent(last).length > 0) insert = model.getEOL() + text;
+    }
+
+    state.instance.pushUndoStop();
+    state.instance.executeEdits('dray', [{ range, text: insert, forceMoveMarkers: true }]);
+    state.instance.pushUndoStop();
+
+    const added = text.split('\n').length - 1;
+    const first = Math.min(line, model.getLineCount());
+    state.instance.setSelection(new monaco.Range(first, 1, first + Math.max(added - 1, 0), model.getLineMaxColumn(first + Math.max(added - 1, 0))));
+    state.instance.revealLinesInCenterIfOutsideViewport(first, first + added);
+    state.instance.focus();
+  },
+
   /** Put the cursor on a line and bring it into view — following a problem from the list. */
   reveal(state, line, column) {
     if (!state?.instance) return;
@@ -385,5 +431,48 @@ export const editor = {
     // Created explicitly, so not disposed with the editor. Left behind, it would hold the URI and
     // its markers for the life of the page.
     state?.model?.dispose();
+  },
+};
+
+/**
+ * Monaco's own diff editor, read-only: what is on disk against what is about to replace it.
+ *
+ * Side by side when there is room and inline when there is not — Monaco decides, by the width it
+ * is given. The models are created here and disposed with the editor, since a diff editor does not
+ * own the models it is handed.
+ */
+export const diff = {
+  async create(el, { original, modified, language }) {
+    const monaco = await loadMonaco();
+    defineTheme(monaco);
+
+    const models = {
+      original: monaco.editor.createModel(original, language),
+      modified: monaco.editor.createModel(modified, language),
+    };
+
+    const instance = monaco.editor.createDiffEditor(el, {
+      readOnly: true,
+      originalEditable: false,
+      automaticLayout: true,
+      renderSideBySide: true,
+      useInlineViewWhenSpaceIsLimited: true,
+      renderOverviewRuler: true,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      fontSize: 12,
+      fontFamily: monoFontStack(),
+      lineHeight: 1.6,
+      scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+    });
+
+    instance.setModel(models);
+    return { instance, models };
+  },
+
+  dispose(state) {
+    state?.instance?.dispose();
+    state?.models?.original?.dispose();
+    state?.models?.modified?.dispose();
   },
 };

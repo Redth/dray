@@ -271,6 +271,54 @@
     }
 
     /// <summary>
+    /// Write a new stack into the stacks folder and open it in the editor.
+    /// <para>
+    /// The stacks folder is where it goes, so it has to have been chosen first — the card at the
+    /// top of the page is how, and it is what this says rather than picking a folder silently.
+    /// </para>
+    /// </summary>
+    async Task NewStackAsync()
+    {
+        if (Engine.Catalog is not { } catalog) return;
+
+        if (catalog.Registry.StacksFolder is not { } folder)
+        {
+            Notify("Choose where stacks live first — a new stack is written into that folder.", ok: false);
+            return;
+        }
+
+        var request = new NewStackRequest { StacksFolder = folder, Existing = [.. Engine.Stacks.Select(s => s.Name)] };
+
+        var choice = await Shell.ShowDialogAsync(new DialogRequest(
+            "New stack",
+            typeof(NewStackDialog),
+            new Dictionary<string, object?> { [nameof(NewStackDialog.Request)] = request },
+            [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
+            Subtitle: $"In {Display(folder)}",
+            Size: DialogSize.Large));
+
+        if (choice != "create") return;
+
+        if (!request.IsComplete || request.Result is not { } result)
+        {
+            Notify(request.NameProblem ?? request.SourceProblem ?? "Nothing was created: the stack needs a name and a compose file.", ok: false);
+            return;
+        }
+
+        var (_, problem) = StackCreation.Create(folder, request.Name, result);
+
+        if (problem is not null)
+        {
+            Notify(problem, ok: false);
+            return;
+        }
+
+        // Now, not when the watcher next fires: the page about to open has to find it.
+        catalog.Refresh();
+        Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(request.Name)}?tab=compose");
+    }
+
+    /// <summary>
     /// Add one existing compose project from outside the stacks folder. Its files stay where they
     /// are, and Dray will never delete them — that is what makes it adopted rather than managed.
     /// </summary>
@@ -512,7 +560,8 @@
                 Search: new ChromeSearch("Filter stacks", _search),
                 Actions:
                 [
-                    ChromeAction.Secondary("adopt", "Add folder", IconRef.Plus),
+                    ChromeAction.Primary("new", "New stack", IconRef.Plus),
+                    ChromeAction.Secondary("adopt", "Add folder", IconRef.Folder),
                     ChromeAction.Secondary("logs", "Aggregated logs", IconRef.Logs),
                 ]);
         }
@@ -520,6 +569,7 @@
 
     async Task HandleAction(string id)
     {
+        if (id == "new") await NewStackAsync();
         if (id == "adopt") await AdoptAsync();
 
         if (id == "logs" && Engine.Stacks.FirstOrDefault(s => !s.IsDown) is { } first)

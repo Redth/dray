@@ -191,6 +191,31 @@ public sealed class ComposeCli(
     }
 
     /// <summary>
+    /// Compose's hash of each service's configuration as the files say it now —
+    /// <c>compose config --hash '*'</c>. Null when compose refused the files: a stack it cannot parse
+    /// has no "now" to compare with.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, string>?> HashesAsync(
+        ComposeCommand command,
+        ComposeTarget target,
+        string project,
+        IReadOnlyList<string> files,
+        string? workingDirectory,
+        CancellationToken ct = default)
+    {
+        var output = new System.Text.StringBuilder();
+        int? exitCode = null;
+
+        await foreach (var line in RunAsync(command, target, project, files, ["config", "--hash", "*"], workingDirectory, ct).ConfigureAwait(false))
+        {
+            if (line.IsExit) exitCode = line.ExitCode;
+            else if (!line.IsError) output.AppendLine(line.Text);
+        }
+
+        return exitCode == 0 ? Model.StackDrift.ParseHashes(output.ToString()) : null;
+    }
+
+    /// <summary>
     /// One invocation as a person would type it: the program, then every argument, quoting the ones
     /// a shell would split. For display — the run itself never goes through a shell.
     /// </summary>

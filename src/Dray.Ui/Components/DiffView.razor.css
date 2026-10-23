@@ -1,0 +1,8 @@
+/* Monaco measures its host, so the host needs a definite height from here rather than its content. */
+.diffview {
+    height: min(60vh, 36rem);
+    min-height: 16rem;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+}

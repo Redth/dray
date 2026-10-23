@@ -109,6 +109,15 @@ public enum MountKind
     Other,
 }
 
+/// <summary>What an image's own configuration sets — the values a container inherits unless told otherwise.</summary>
+public sealed record ImageDefaults(
+    IReadOnlyList<EnvVar> Environment,
+    IReadOnlyDictionary<string, string> Labels,
+    IReadOnlyList<string> Command,
+    IReadOnlyList<string> Entrypoint,
+    string? WorkingDirectory,
+    string? User);
+
 /// <summary>One mount on a container.</summary>
 /// <param name="Source">Volume name for a volume, host path for a bind, empty for tmpfs.</param>
 /// <param name="Destination">Path inside the container.</param>

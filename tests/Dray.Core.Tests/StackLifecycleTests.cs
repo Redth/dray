@@ -305,3 +305,57 @@ public class StackOperationsTests
         Assert.Same(first, operations.For("web"));
     }
 }
+
+public class StackDriftTests
+{
+    // Captured from compose 5.4.0: `config --hash '*'` before and after editing worker's command.
+    const string Before = "web bf6121f23746cbb8aa6e190dbdd370ed3928bc89066e458132ea9a62bcbc8edd\nworker b9e27cb1fb16e9fb483e685400e257fa56f11aa94948ba27d83c99fc1671d5a3\n";
+    const string After = "web bf6121f23746cbb8aa6e190dbdd370ed3928bc89066e458132ea9a62bcbc8edd\nworker 110bd8d8f056a5bf557d71f9553f96e6976f2503f733958234641e754d4a8bb2\n";
+
+    static StackSummary Running(params (string Service, string? Hash)[] services) => StackDiscovery.From(
+    [
+        .. services.Select(s => new ContainerSummary
+        {
+            Id = s.Service, Name = "p-" + s.Service + "-1", Image = "x", State = DockerState.Running,
+            Compose = new ComposeMembership("p", s.Service, ConfigHash: s.Hash),
+        }),
+    ]).Single();
+
+    static readonly IReadOnlyDictionary<string, string> Deployed = StackDrift.ParseHashes(Before);
+
+    [Fact]
+    public void AnUneditedFileIsUnchanged()
+    {
+        var drift = StackDrift.Compare(Running(("web", Deployed["web"]), ("worker", Deployed["worker"])), Deployed);
+
+        Assert.All(drift.Values, d => Assert.Equal(ServiceDrift.Unchanged, d));
+    }
+
+    [Fact]
+    public void OnlyTheEditedServiceHasChanged()
+    {
+        var drift = StackDrift.Compare(Running(("web", Deployed["web"]), ("worker", Deployed["worker"])), StackDrift.ParseHashes(After));
+
+        Assert.Equal(ServiceDrift.Unchanged, drift["web"]);
+        Assert.Equal(ServiceDrift.Changed, drift["worker"]);
+    }
+
+    [Fact]
+    public void NewAndRemovedServicesAreNamedAsSuch()
+    {
+        var drift = StackDrift.Compare(
+            Running(("web", Deployed["web"]), ("legacy", "0000000000000000000000000000000000000000000000000000000000000000")),
+            Deployed);
+
+        Assert.Equal(ServiceDrift.NotCreated, drift["worker"]);
+        Assert.Equal(ServiceDrift.Removed, drift["legacy"]);
+    }
+
+    [Fact]
+    public void NoHashOnTheContainerIsUnknownNotChanged()
+        => Assert.Equal(ServiceDrift.Unknown, StackDrift.Compare(Running(("web", null)), Deployed)["web"]);
+
+    [Fact]
+    public void WarningsAndBlankLinesAreNotServices()
+        => Assert.Equal(["web"], StackDrift.ParseHashes("\nweb bf6121f23746cbb8aa6e190dbdd370ed3928bc89066e458132ea9a62bcbc8edd\nWARN something odd\n").Keys);
+}

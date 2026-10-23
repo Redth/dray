@@ -424,6 +424,9 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public Task<IReadOnlyList<ImageLayer>> GetImageHistoryAsync(string imageId, CancellationToken ct = default)
         => DockerImages.HistoryAsync(Client, imageId, ct);
 
+    public Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
+        => DockerImages.DefaultsAsync(Client, image, ct);
+
     public Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default)
         => DockerImages.RemoveAsync(Client, imageId, force, ct);
 

@@ -8,6 +8,13 @@ public static class ComposeLabels
     public const string ConfigFiles = "com.docker.compose.project.config_files";
     public const string WorkingDirectory = "com.docker.compose.project.working_dir";
     public const string ContainerNumber = "com.docker.compose.container-number";
+
+    /// <summary>
+    /// Compose's hash of the service's configuration when the container was created. Measured
+    /// equal to what <c>compose config --hash</c> prints for an unedited file, which is what makes
+    /// "edited, not deployed" a comparison rather than a guess.
+    /// </summary>
+    public const string ConfigHash = "com.docker.compose.config-hash";
 }
 
 /// <summary>
@@ -27,7 +34,8 @@ public sealed record ComposeMembership(
     string? Service = null,
     IReadOnlyList<string>? ConfigFiles = null,
     string? WorkingDirectory = null,
-    int Replica = 1)
+    int Replica = 1,
+    string? ConfigHash = null)
 {
     public IReadOnlyList<string> Files => ConfigFiles ?? [];
 
@@ -50,7 +58,8 @@ public sealed record ComposeMembership(
             ],
 
             labels.GetValueOrDefault(ComposeLabels.WorkingDirectory),
-            int.TryParse(labels.GetValueOrDefault(ComposeLabels.ContainerNumber), out var n) ? n : 1);
+            int.TryParse(labels.GetValueOrDefault(ComposeLabels.ContainerNumber), out var n) ? n : 1,
+            labels.GetValueOrDefault(ComposeLabels.ConfigHash));
     }
 }
 

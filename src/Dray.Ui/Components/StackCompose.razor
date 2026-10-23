@@ -44,6 +44,12 @@
             </button>
         </div>
 
+        @if (_active != Effective && _writable.GetValueOrDefault(_active))
+        {
+            <OverflowMenu Actions="AddActions" Label="Add to this compose file" TriggerText="Add"
+                          TriggerIcon="IconRef.Plus" TriggerClass="btn--ghost" OnAction="AddAsync" />
+        }
+
         <span class="sc__verdict sc__verdict--@VerdictTone" role="status" title="@VerdictDetail">
             <Icon Name="VerdictIcon" Size="IconSize.Sm" />
             <span>@VerdictText</span>
@@ -52,6 +58,15 @@
         <Button Label="Check" Icon="IconRef.Refresh" Variant="ButtonVariant.Ghost" Busy="_checking"
                 Disabled="_checking" OnClick="CheckAsync" />
     </div>
+
+    @if (_notice is { } notice)
+    {
+        <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
+            <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+            <span>@notice</span>
+            <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost" OnClick="() => _notice = null" />
+        </div>
+    }
 
     <div class="sc__main">
         <div class="sc__left">
@@ -83,10 +98,10 @@
                             Annotations="_annotations" Problems="EditorProblems" />
             }
 
-            @if (_placed.Count > 0)
+            @if (_placed.Count + _lint.Count > 0)
             {
-                <ul class="sc__problems" aria-label="What compose reported">
-                    @foreach (var placed in _placed.OrderBy(p => p.Problem.Severity).ThenBy(p => p.FileIndex ?? int.MaxValue).ThenBy(p => p.Range?.Line ?? 0))
+                <ul class="sc__problems" aria-label="What compose and Dray reported">
+                    @foreach (var placed in _placed.Concat(_lint).OrderBy(p => p.Problem.Severity).ThenBy(p => p.FileIndex ?? int.MaxValue).ThenBy(p => p.Range?.Line ?? 0))
                     {
                         var captured = placed;
                         var error = placed.Problem.Severity == ProblemSeverity.Error;
@@ -103,7 +118,13 @@
                                     @Where(placed)
                                 </span>
 
-                                <span class="sc__message">@placed.Problem.Message</span>
+                                <span class="sc__message">
+                                    @placed.Problem.Message
+                                    @if (_lint.Contains(placed))
+                                    {
+                                        <span class="sc__source muted">Dray</span>
+                                    }
+                                </span>
                             </button>
                         </li>
                     }
@@ -144,6 +165,12 @@
 
     ComposeConfig? _config;
     IReadOnlyList<PlacedProblem> _placed = [];
+
+    /// <summary>Dray's own findings (<see cref="ComposeLint"/>), kept apart from compose's verdict.</summary>
+    IReadOnlyList<PlacedProblem> _lint = [];
+
+    string? _notice;
+    bool _noticeOk;
     bool _checking;
     CancellationTokenSource? _checkCts;
 
@@ -246,6 +273,28 @@
         _placed = _config is null
             ? []
             : _config.Place([.. _files.Select((f, i) => (f.Path, _documents[i]))]);
+
+        Lint();
+    }
+
+    /// <summary>
+    /// Dray's checks over each file as saved — what the engine already publishes, where the engine
+    /// is — placed like compose's problems but never counted in its verdict.
+    /// </summary>
+    void Lint()
+    {
+        var published = Engine.Store.Containers
+            .Where(c => c.Stack != Stack.Name && c.State == DockerState.Running)
+            .SelectMany(c => c.Ports.Select(p => new PublishedPort(p.HostPort, p.Protocol, c.Stack is { } stack ? $"{c.Name} ({stack})" : c.Name)))
+            .ToList();
+
+        var context = new LintContext(published, Engine.Selected?.Endpoint.IsRemote == true);
+
+        _lint =
+        [
+            .. _documents.SelectMany((document, index) => ComposeLint.Check(document, context)
+                .Select(f => new PlacedProblem(new ComposeProblem(f.Message, ProblemSeverity.Warning, _files[index].Path), index, f.Range))),
+        ];
     }
 
     /// <summary>The placed problems in the file on screen, as the editor draws them.</summary>
@@ -253,10 +302,94 @@
     [
         .. _placed
             .Where(p => p.FileIndex == _active && p.Range is not null)
-            .Select(p => ToEditor(p.Problem, p.Range!)),
+            .Select(p => ToEditor(p.Problem, p.Range!, "compose")),
+        .. _lint
+            .Where(p => p.FileIndex == _active && p.Range is not null)
+            .Select(p => ToEditor(p.Problem, p.Range!, "dray")),
     ];
 
-    static EditorProblem ToEditor(ComposeProblem problem, YamlRange range)
+    // ---------------------------------------------------------------- quick edits
+
+    IReadOnlyList<RowAction> AddActions =>
+    [
+        new("service", "Service…", IconRef.Container, "Add a service from an image"),
+        new("port", "Port…", IconRef.Port, "Publish a port on one of the services", Disabled: ServicesInEditor.Count == 0),
+        new("variable", "Variable…", IconRef.Settings, "Set an environment variable on one of the services", Disabled: ServicesInEditor.Count == 0),
+    ];
+
+    /// <summary>The services of the file on screen, as last saved — the choices for Port and Variable.</summary>
+    IReadOnlyList<string> ServicesInEditor => _active >= 0 && _active < _documents.Count
+        ? [.. _documents[_active].Services.Select(s => s.Name)]
+        : [];
+
+    /// <summary>
+    /// Add a service, port or variable to the file on screen, as an insertion into the editor.
+    /// <para>
+    /// Into the editor, not onto disk: the edit arrives unsaved and selected, so the next thing is
+    /// to read it — and Review shows exactly what saving would change. It is computed against the
+    /// editor's text as it is now, so an unsaved edit already there is built on rather than lost.
+    /// </para>
+    /// </summary>
+    async Task AddAsync(string kind)
+    {
+        if (_editor is null || await _editor.GetTextAsync() is not { } text) return;
+
+        var services = ComposeDocument.Parse(text).Services.Select(s => s.Name).ToList();
+
+        var request = new QuickEditRequest
+        {
+            Kind = kind switch { "port" => QuickEditKind.Port, "variable" => QuickEditKind.Variable, _ => QuickEditKind.Service },
+            Services = services,
+            Service = services.FirstOrDefault() ?? "",
+        };
+
+        var title = request.Kind switch
+        {
+            QuickEditKind.Service => "Add a service",
+            QuickEditKind.Port => "Publish a port",
+            _ => "Set a variable",
+        };
+
+        var choice = await Shell.ShowDialogAsync(new DialogRequest(
+            title,
+            typeof(QuickEditDialog),
+            new Dictionary<string, object?> { [nameof(QuickEditDialog.Request)] = request },
+            [DialogButton.Cancel(), DialogButton.Confirm("add", "Add")],
+            Subtitle: System.IO.Path.GetFileName(Active?.Path),
+            Size: DialogSize.Small));
+
+        if (choice != "add") return;
+
+        if (!request.IsComplete)
+        {
+            Report(request.Problem ?? "Nothing was added: a field it needs was left empty.", ok: false);
+            return;
+        }
+
+        var result = request.Kind switch
+        {
+            QuickEditKind.Service => ComposeEdits.AddService(text, request.Name.Trim(), request.Image.Trim(), request.Port.Length > 0 ? [request.Port.Trim()] : null),
+            QuickEditKind.Port => ComposeEdits.AddPort(text, request.Service, request.Port.Trim()),
+            _ => ComposeEdits.AddEnvironment(text, request.Service, request.Key.Trim(), request.Value),
+        };
+
+        if (result.Splice is not { } splice)
+        {
+            Report(result.Declined!, ok: false);
+            return;
+        }
+
+        await _editor.InsertAsync(splice.BeforeLine, splice.Text);
+        Report("Added to the editor and not saved yet — Review shows exactly what saving will change.", ok: true);
+    }
+
+    void Report(string message, bool ok)
+    {
+        _notice = message;
+        _noticeOk = ok;
+    }
+
+    static EditorProblem ToEditor(ComposeProblem problem, YamlRange range, string source)
     {
         // A zero-width range draws nothing. Widen it to the rest of the line's first word so the
         // squiggle is visible; Monaco clamps an end past the line to the line's end.
@@ -266,7 +399,7 @@
             range.Line, range.Column, range.EndLine, endColumn,
             problem.Message,
             problem.Severity == ProblemSeverity.Error ? "error" : "warning",
-            "compose");
+            source);
     }
 
     string Where(PlacedProblem placed)

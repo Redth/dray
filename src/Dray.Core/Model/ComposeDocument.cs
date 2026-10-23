@@ -13,6 +13,13 @@ public sealed record YamlRange(int Line, int Column, int EndLine, int EndColumn)
         (int)start.Line, (int)start.Column, (int)end.Line, (int)end.Column);
 }
 
+/// <summary>
+/// One entry under a service key, and where it is written.
+/// </summary>
+/// <param name="Value">The scalar, for a short-syntax entry; null for a mapping.</param>
+/// <param name="Fields">A long-syntax entry's scalar fields — <c>published</c>, <c>source</c>.</param>
+public sealed record YamlItem(string? Value, YamlRange Range, IReadOnlyDictionary<string, string> Fields);
+
 /// <summary>Why a YAML file does not parse, and where.</summary>
 public sealed record YamlSyntaxError(string Message, YamlRange Range);
 
@@ -158,6 +165,74 @@ public sealed class ComposeDocument
         }
 
         return new YamlLocation(found!, Exact: true);
+    }
+
+    /// <summary>
+    /// What a service says under one key, item by item, with where each item is — the
+    /// <c>ports</c> list, the <c>volumes</c> list, the <c>image</c> scalar.
+    /// <para>
+    /// A scalar value is one item; a sequence is one per entry; a mapping (environment written as
+    /// a map) is one per pair, as <c>KEY=value</c>. Long-syntax entries keep their fields, so a
+    /// port written as <c>published: 8080</c> is as readable as one written <c>"8080:80"</c>.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<YamlItem> ItemsOf(string service, string key)
+    {
+        if (_root is null || Child(_root, "services") is not YamlMappingNode services) return [];
+        if (Child(services, service) is not YamlMappingNode body || Child(body, key) is not { } value) return [];
+
+        return value switch
+        {
+            YamlScalarNode scalar => [Item(scalar)],
+            YamlSequenceNode list => [.. list.Children.Select(Item)],
+            YamlMappingNode map => [.. map.Children.Select(kv => new YamlItem(
+                $"{(kv.Key as YamlScalarNode)?.Value}={(kv.Value as YamlScalarNode)?.Value}",
+                YamlRange.Of(kv.Key.Start, kv.Value.End),
+                Fields: new Dictionary<string, string>()))],
+            _ => [],
+        };
+    }
+
+    static YamlItem Item(YamlNode node) => node switch
+    {
+        YamlScalarNode scalar => new YamlItem(scalar.Value, YamlRange.Of(scalar), new Dictionary<string, string>()),
+        YamlMappingNode map => new YamlItem(
+            null,
+            YamlRange.Of(map),
+            map.Children
+                .Where(kv => kv.Key is YamlScalarNode { Value: not null } && kv.Value is YamlScalarNode)
+                .ToDictionary(kv => ((YamlScalarNode)kv.Key).Value!, kv => ((YamlScalarNode)kv.Value).Value ?? "", StringComparer.Ordinal)),
+        _ => new YamlItem(null, YamlRange.Of(node), new Dictionary<string, string>()),
+    };
+
+    /// <summary>
+    /// The raw node for a path, for the editing helpers in this assembly — positions, styles and
+    /// children, which a splice needs and nothing outside should.
+    /// </summary>
+    internal YamlNode? NodeAt(params string[] path)
+    {
+        YamlNode? node = _root;
+
+        foreach (var segment in path)
+        {
+            if (node is not YamlMappingNode mapping) return null;
+            node = Child(mapping, segment);
+        }
+
+        return node;
+    }
+
+    /// <summary>The key node for the last segment of a path — where a key is written.</summary>
+    internal YamlScalarNode? KeyAt(params string[] path)
+    {
+        if (path.Length == 0 || NodeAt(path[..^1]) is not YamlMappingNode parent) return null;
+
+        foreach (var (k, _) in parent.Children)
+        {
+            if (k is YamlScalarNode { Value: { } name } scalar && name == path[^1]) return scalar;
+        }
+
+        return null;
     }
 
     static List<ComposeServiceEntry> ReadServices(YamlMappingNode root)

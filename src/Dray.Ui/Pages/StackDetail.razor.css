@@ -1,1 +1,10 @@
 /* The Compose tab is laid out by StackCompose; this page only hands it the card's body. */
+
+/* What the files would change, above the services it is about. */
+.stack__drift {
+    margin: 0;
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    font-size: var(--text-sm);
+}

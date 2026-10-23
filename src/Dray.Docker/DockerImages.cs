@@ -87,6 +87,36 @@ public static class DockerImages
         }
     }
 
+    public static async Task<ImageDefaults?> DefaultsAsync(DockerClient client, string image, CancellationToken ct = default)
+    {
+        try
+        {
+            var inspect = await client.Images.InspectImageAsync(image, ct).ConfigureAwait(false);
+            var config = inspect.Config;
+
+            if (config is null) return null;
+
+            return new ImageDefaults(
+                [
+                    .. (config.Env ?? []).Select(e => e.IndexOf('=') is var i and > 0
+                        ? new EnvVar(e[..i], e[(i + 1)..])
+                        : new EnvVar(e, "")),
+                ],
+                config.Labels is { Count: > 0 } labels
+                    ? new Dictionary<string, string>(labels, StringComparer.Ordinal)
+                    : new Dictionary<string, string>(StringComparer.Ordinal),
+                [.. config.Cmd ?? []],
+                [.. config.Entrypoint ?? []],
+                string.IsNullOrEmpty(config.WorkingDir) ? null : config.WorkingDir,
+                string.IsNullOrEmpty(config.User) ? null : config.User);
+        }
+        catch (DockerApiException ex) when ((int)ex.StatusCode == 404)
+        {
+            // Not here — pulled by digest and since removed, or never pulled to this engine.
+            return null;
+        }
+    }
+
     public static async Task RemoveAsync(
         DockerClient client, string imageId, bool force, CancellationToken ct = default)
     {

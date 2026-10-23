@@ -15,10 +15,22 @@
 {
     @if (Trigger)
     {
-        <button type="button" class="btn @TriggerClass btn--icon"
-                popovertarget="@_id" aria-label="@Label" title="@Label" @ref="_trigger">
-            <Icon Name="IconRef.More" Size="IconSize.Md" />
-        </button>
+        @if (TriggerText is { } text)
+        {
+            @* A menu with a name of its own — "Add" — rather than the anonymous ⋯ for the rest. *@
+            <button type="button" class="btn @TriggerClass"
+                    popovertarget="@_id" aria-label="@Label" title="@Label" @ref="_trigger">
+                <Icon Name="@(TriggerIcon ?? IconRef.ChevronDown)" Size="IconSize.Sm" />
+                <span>@text</span>
+            </button>
+        }
+        else
+        {
+            <button type="button" class="btn @TriggerClass btn--icon"
+                    popovertarget="@_id" aria-label="@Label" title="@Label" @ref="_trigger">
+                <Icon Name="IconRef.More" Size="IconSize.Md" />
+            </button>
+        }
     }
 
     <div class="menu" id="@_id" popover="auto" @ref="_panel">
@@ -46,6 +58,11 @@
 
     /// <summary>Weight of the trigger. Ghost where it sits among other quiet controls.</summary>
     [Parameter] public string TriggerClass { get; set; } = "btn--secondary";
+
+    /// <summary>A label for the trigger, which then reads as a named menu instead of a ⋯.</summary>
+    [Parameter] public string? TriggerText { get; set; }
+
+    [Parameter] public IconRef? TriggerIcon { get; set; }
 
     /// <summary>
     /// Whether this draws its own ⋯. False where something else does — the data grid draws the

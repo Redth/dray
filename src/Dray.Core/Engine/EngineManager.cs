@@ -458,6 +458,22 @@ public sealed class EngineManager : IAsyncDisposable
             : ([], null);
 
     /// <summary>
+    /// What Deploy would change, service by service — see <see cref="StackDrift"/>. Null when there
+    /// is nothing to compare: no compose, no files here, or files compose refuses.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, ServiceDrift>?> DriftAsync(StackSummary stack, CancellationToken ct = default)
+    {
+        if (await _compose.DetectAsync(ct).ConfigureAwait(false) is not { } command) return null;
+        if (Selected is not { } host || ComposeTarget.For(host, command) is not { } target) return null;
+
+        var (files, directory) = Locate(stack);
+        if (files.Count == 0) return null;
+
+        var hashes = await _compose.HashesAsync(command, target, stack.Name, files, directory, ct).ConfigureAwait(false);
+        return hashes is null ? null : StackDrift.Compare(stack, hashes);
+    }
+
+    /// <summary>
     /// The command line a compose run would use, for showing before it runs. Null when compose is
     /// not installed or cannot reach the selected host — there is then no command to show.
     /// </summary>
@@ -508,6 +524,14 @@ public sealed class EngineManager : IAsyncDisposable
         if (_runtime is not { } runtime) return [];
 
         return await runtime.GetImageHistoryAsync(imageId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>What an image sets on its own, or null when the engine cannot say.</summary>
+    public async Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return null;
+
+        return await runtime.GetImageDefaultsAsync(image, ct).ConfigureAwait(false);
     }
 
     /// <returns>Null on success, or a sentence explaining what went wrong.</returns>
