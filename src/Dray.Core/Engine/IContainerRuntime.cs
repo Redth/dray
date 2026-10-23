@@ -182,6 +182,18 @@ public interface IContainerRuntime : IAsyncDisposable
     Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
         => Task.FromResult<ImageDefaults?>(null);
 
+    /// <summary>
+    /// Whether <paramref name="reference"/>'s tag has moved at its registry since this engine
+    /// pulled it. Asked of the engine, which already has the registry's address and its network
+    /// path; the credential, when there is one, is for a private registry.
+    /// <para>
+    /// Defaulted to unknown: an engine that cannot ask is an engine whose images are not
+    /// "up to date", they are unchecked.
+    /// </para>
+    /// </summary>
+    Task<ImageUpdate> CheckImageUpdateAsync(string reference, RegistryCredential? credential, CancellationToken ct = default)
+        => Task.FromResult(ImageUpdate.Unknown("This engine cannot ask a registry about its images."));
+
     /// <summary>Delete an image. <paramref name="force"/> removes it even when a container uses it.</summary>
     Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default);
 

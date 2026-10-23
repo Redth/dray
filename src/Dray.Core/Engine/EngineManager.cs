@@ -526,6 +526,24 @@ public sealed class EngineManager : IAsyncDisposable
         return await runtime.GetImageHistoryAsync(imageId, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Whether an image's tag has moved at its registry. Asked anonymously first, and with the
+    /// stored credential only when the registry refuses — fetching a credential can mean the system
+    /// asking for permission, and a public image should never cause that.
+    /// </summary>
+    public async Task<ImageUpdate> CheckImageUpdateAsync(string reference, RegistryReader registries, CancellationToken ct = default)
+    {
+        if (_runtime is not { } runtime) return ImageUpdate.Unknown("Not connected to an engine.");
+
+        var anonymous = await runtime.CheckImageUpdateAsync(reference, null, ct).ConfigureAwait(false);
+        if (!anonymous.NeedsCredential) return anonymous;
+
+        var credential = await registries.FindForAsync(ImageTag.Parse(reference).Registry, ct).ConfigureAwait(false);
+        return credential is null
+            ? anonymous with { Detail = "The registry would not answer without signing in. Sign in on the Registries page to check it." }
+            : await runtime.CheckImageUpdateAsync(reference, credential, ct).ConfigureAwait(false);
+    }
+
     /// <summary>What an image sets on its own, or null when the engine cannot say.</summary>
     public async Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
     {

@@ -801,6 +801,29 @@ three exit criteria met.**
   boot.
 - **History** of the operations Dray ran: command, exit code, duration.
 
+**Progress:** done, driven live against Docker Desktop in both themes.
+
+- **Overview** is the stack's first tab: `x-dray` links and icon (http and https only; the icon a
+  local file inlined, never fetched), every published port as a link — at this machine for a local
+  engine, at its host for a remote one — combined CPU and memory from the stats stream, and the
+  project's own networks and volumes by compose's labels.
+- **Image updates** are asked of the engine (`/distribution/{name}/json`), which has the registry's
+  address and its network path. Measured: the registry digest equals the local `RepoDigests` entry
+  while the tag stands still. Anonymous first, the stored credential only when refused — fetching
+  one can prompt — and every unknown says why: built here, pinned, private and signed out. Checked
+  when the stack is opened and on demand. A multi-platform index moves when any platform is
+  rebuilt, so the pill says "tag has moved", never "newer version".
+- **Logs follow the stack**: a replica scaled up, or restarted, while the page is open is picked up
+  from the event stream and read from where it began — verified by scaling a service from a
+  terminal with the page open.
+- **History** is a tab: each operation's outcome, duration and commands, copyable.
+- **A store bug it surfaced:** a container first seen at `create` kept no ports after starting,
+  because `start` was patched in place and ports are bound at start. It now fetches once in that
+  case — which also fixes the ports column on the Containers page.
+
+Not done: the optional daily update check, and moving the aggregated view onto the shared
+`LogView` — it still has its own renderer, now with the follow behaviour it lacked.
+
 ### 10.4 — Remote hosts
 
 - **SSH runs compose on the host** (`ssh host docker compose …`), and reads and writes the files

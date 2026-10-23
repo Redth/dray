@@ -427,6 +427,11 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
     public Task<ImageDefaults?> GetImageDefaultsAsync(string image, CancellationToken ct = default)
         => DockerImages.DefaultsAsync(Client, image, ct);
 
+    public Task<ImageUpdate> CheckImageUpdateAsync(string reference, RegistryCredential? credential, CancellationToken ct = default)
+        => _raw is { } raw
+            ? DockerImages.CheckUpdateAsync(Client, raw, reference, credential, ct)
+            : Task.FromResult(ImageUpdate.Unknown("Not connected to an engine."));
+
     public Task RemoveImageAsync(string imageId, bool force = false, CancellationToken ct = default)
         => DockerImages.RemoveAsync(Client, imageId, force, ct);
 

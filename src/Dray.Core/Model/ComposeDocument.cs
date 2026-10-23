@@ -74,6 +74,54 @@ public sealed class ComposeDocument
     }
 
     /// <summary>
+    /// Links the file names for the stack under <c>x-dray: urls:</c> — the admin page, the docs —
+    /// each a URL or a <c>{ title, url }</c> pair. Only http and https: a link in a file someone
+    /// else wrote is not a way to run something on this machine.
+    /// <code>
+    /// x-dray:
+    ///   urls:
+    ///     - http://localhost:8080
+    ///     - { title: Grafana, url: "http://localhost:3000" }
+    ///   icon: ./icon.svg
+    /// </code>
+    /// <para>
+    /// An <c>x-</c> key because compose ignores those by design; the file still runs unchanged
+    /// anywhere else.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<(string Title, string Url)> DrayLinks
+    {
+        get
+        {
+            if (_root is null || Child(_root, "x-dray") is not YamlMappingNode dray || Child(dray, "urls") is not YamlSequenceNode urls) return [];
+
+            var links = new List<(string, string)>();
+
+            foreach (var item in urls.Children)
+            {
+                var (title, url) = item switch
+                {
+                    YamlScalarNode { Value: { } value } => (value, value),
+                    YamlMappingNode map when Child(map, "url") is YamlScalarNode { Value: { } value } =>
+                        (Child(map, "title") is YamlScalarNode { Value: { Length: > 0 } named } ? named : value, value),
+                    _ => (null, null),
+                };
+
+                if (url is not null && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+                    links.Add((title!, uri.ToString()));
+            }
+
+            return links;
+        }
+    }
+
+    /// <summary>A path to an image for the stack, from <c>x-dray: icon:</c>, relative to the file.</summary>
+    public string? DrayIcon => _root is not null && Child(_root, "x-dray") is YamlMappingNode dray
+        && Child(dray, "icon") is YamlScalarNode { Value: { Length: > 0 } icon }
+            ? icon
+            : null;
+
+    /// <summary>
     /// The top-level <c>name:</c>, as written. May contain <c>${VAR}</c>, which only compose can
     /// resolve — callers that need the project name should treat such a value as unknown.
     /// </summary>

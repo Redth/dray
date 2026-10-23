@@ -112,6 +112,26 @@ public class ComposeDocumentTests
     }
 
     [Fact]
+    public void DrayLinksAreHttpOnlyAndTitledWhenAsked()
+    {
+        const string yaml = """
+            x-dray:
+              urls:
+                - http://localhost:8080
+                - { title: Grafana, url: "https://grafana.local/" }
+                - javascript:alert(1)
+                - file:///etc/passwd
+              icon: ./icon.svg
+            services: {}
+            """;
+
+        var document = ComposeDocument.Parse(yaml);
+
+        Assert.Equal([("http://localhost:8080", "http://localhost:8080/"), ("Grafana", "https://grafana.local/")], document.DrayLinks);
+        Assert.Equal("./icon.svg", document.DrayIcon);
+    }
+
+    [Fact]
     public void NothingAtAllIsEmpty()
     {
         Assert.Same(ComposeDocument.Empty, ComposeDocument.Parse(null));

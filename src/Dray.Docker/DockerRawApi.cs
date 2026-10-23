@@ -165,6 +165,17 @@ public sealed class DockerRawApi : IDisposable
         }
     }
 
+    /// <summary>GET a path with extra headers, and return the status with the body rather than throwing on one.</summary>
+    public async Task<(System.Net.HttpStatusCode Status, string Body)> GetWithStatusAsync(
+        string path, IReadOnlyDictionary<string, string>? headers, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, _prefix + path);
+        foreach (var (key, value) in headers ?? new Dictionary<string, string>()) request.Headers.TryAddWithoutValidation(key, value);
+
+        using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+    }
+
     public async Task<string> GetStringAsync(string path, CancellationToken ct = default)
     {
         using var response = await _http.GetAsync(_prefix + path, ct).ConfigureAwait(false);

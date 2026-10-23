@@ -63,7 +63,7 @@
                 }
             </div>
 
-            @if (_notice is { } topNotice && _tab != "Services")
+            @if (_notice is { } topNotice && _tab is not "Services")
             {
                 <div class="banner @(_noticeOk ? "banner--ok" : null)" role="status">
                     <Icon Name="@(_noticeOk ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
@@ -81,6 +81,18 @@
                     <div class="page">
                         <EmptyState Icon="IconRef.Stack" Title="That stack is not here"
                                     Body="It belongs to a different host than the one selected, or Dray was told to forget it and nothing of it is running." />
+                    </div>
+                }
+                else if (_tab == "Overview")
+                {
+                    <div class="page page--flush">
+                        <StackOverview Stack="current" />
+                    </div>
+                }
+                else if (_tab == "History")
+                {
+                    <div class="page page--flush">
+                        <StackHistoryView Stack="current" />
                     </div>
                 }
                 else if (_tab == "Services")
@@ -253,7 +265,7 @@
 </EngineScope>
 
 @code {
-    static readonly string[] Tabs = ["Services", "Dependencies", "Compose file"];
+    static readonly string[] Tabs = ["Overview", "Services", "Dependencies", "Compose file", "History"];
 
     const string ComposeFileExplanation =
         "The engine did not record which file this stack came from, or the file is on the machine "
@@ -335,7 +347,7 @@
 
     StackSummary? Stack => Engine.Stacks.FirstOrDefault(s => s.Name == StackName);
 
-    string _tab = "Services";
+    string _tab = "Overview";
 
     /// <summary>
     /// The first compose file, for the dependency graph. The Compose tab reads every file itself;
