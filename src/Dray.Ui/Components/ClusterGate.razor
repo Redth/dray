@@ -7,7 +7,19 @@
 @inject NavigationManager Nav
 @inject IShellBridge Shell
 
-@if (Clusters.Selected is null)
+@if (!Clusters.Enabled)
+{
+    @* Reached by a link or the palette's history: the pages are not in the sidebar while it is off,
+       so say so rather than showing a page with nothing to show. *@
+    <EmptyState Icon="IconRef.Cluster"
+                Title="Kubernetes is turned off"
+                Body="Dray is not reading your kubeconfig or connecting to a cluster. Turn it on in Settings to see your cluster here.">
+        <Actions>
+            <Button Label="Open Settings" Icon="IconRef.Settings" OnClick="@(() => Nav.NavigateTo(NavigationManifest.SettingsRoute))" />
+        </Actions>
+    </EmptyState>
+}
+else if (Clusters.Selected is null)
 {
     var remote = Clusters.Contexts.Count(c => !c.IsLocal);
 

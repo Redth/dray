@@ -1,3 +1,4 @@
+using Dray.Core.Settings;
 using Dray.Core.Kubernetes;
 using Dray.Core.Navigation;
 using Dray.Core.Shell;
@@ -21,6 +22,7 @@ public sealed class WinSidebar : IDisposable
     readonly IShellState _shell;
     readonly IPlatformTheme _theme;
     readonly ClusterManager _clusters;
+    readonly DraySettings _settings;
     readonly List<Entry> _items = [];
     readonly bool _debug;
     bool _hasCluster;
@@ -30,6 +32,7 @@ public sealed class WinSidebar : IDisposable
         IShellState shell,
         IPlatformTheme theme,
         ClusterManager clusters,
+        DraySettings settings,
         bool debug)
     {
         _nav = nav;
@@ -38,12 +41,14 @@ public sealed class WinSidebar : IDisposable
 
         _debug = debug;
         _clusters = clusters;
+        _settings = settings;
         _hasCluster = clusters.LocalContexts.Count > 0;
 
         // The engine picker is not in here: it is in the title bar (WinEnginePicker), so every item
         // in the pane is a place to go.
         Fill();
         _clusters.Changed += OnClustersChanged;
+        _settings.Changed += OnSettingsChanged;
 
         // ItemInvoked rather than SelectionChanged: it fires for the user and not for the
         // programmatic selection below, so following the router never asks the router to navigate.
@@ -62,7 +67,7 @@ public sealed class WinSidebar : IDisposable
         _nav.MenuItems.Clear();
         _items.Clear();
 
-        foreach (var node in NavigationManifest.Visible(_debug, _hasCluster))
+        foreach (var node in NavigationManifest.Visible(_debug, _hasCluster, _settings.HiddenRoutes))
         {
             if (node.IsGroup)
             {
@@ -90,6 +95,13 @@ public sealed class WinSidebar : IDisposable
         });
     }
 
+    /// <summary>A page turned off in Settings leaves the pane at once.</summary>
+    void OnSettingsChanged() => _nav.DispatcherQueue.TryEnqueue(() =>
+    {
+        Fill();
+        Select(_shell.Route);
+    });
+
     Xaml.Controls.NavigationViewItem Build(NavNode node)
     {
         if (node.IsGroup)
@@ -115,6 +127,13 @@ public sealed class WinSidebar : IDisposable
 
     void OnItemInvoked(Xaml.Controls.NavigationView sender, Xaml.Controls.NavigationViewItemInvokedEventArgs e)
     {
+        // The pane's own Settings item, at its foot where every Windows app keeps it.
+        if (e.IsSettingsInvoked)
+        {
+            _shell.RequestNavigation(NavigationManifest.SettingsRoute);
+            return;
+        }
+
         if (e.InvokedItemContainer?.Tag is string route) _shell.RequestNavigation(route);
     }
 
@@ -129,7 +148,13 @@ public sealed class WinSidebar : IDisposable
     /// </para>
     /// </summary>
     void Select(string route)
-    {
+    {        if (string.Equals(route, NavigationManifest.SettingsRoute, StringComparison.OrdinalIgnoreCase))
+        {
+            _nav.SelectedItem = _nav.SettingsItem;
+            return;
+        }
+
+
         var match = _items.FirstOrDefault(i => string.Equals(i.Route, route, StringComparison.OrdinalIgnoreCase))
             ?? _items
                 .Where(i => i.Route != NavigationManifest.HomeRoute
@@ -156,5 +181,6 @@ public sealed class WinSidebar : IDisposable
         _shell.RouteChanged -= OnRouteChanged;
         _theme.Changed -= OnThemeChanged;
         _clusters.Changed -= OnClustersChanged;
+        _settings.Changed -= OnSettingsChanged;
     }
 }

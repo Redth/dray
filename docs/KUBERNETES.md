@@ -122,6 +122,13 @@ or not, so its pages can say why not. `NavNode.RequiresCluster` sits beside `Deb
 refills its sidebar only when the group comes or goes, not on every watch event. With no cluster at
 all, the Hosts page's Kubernetes section is where making one starts.
 
+**It can be turned off.** Settings has a Kubernetes switch, and a switch per page. Off, Dray does
+not read the kubeconfig or connect to a cluster at all — no watches running for someone who has a
+kubeconfig and does not want a second thing watching it — and nothing about Kubernetes is in the
+window: not the sidebar group, not the Hosts page's section, not the row of node containers, which
+go back to being containers in the list. A page turned off leaves the sidebar and the palette and
+still opens from a link. Both apply as they are changed, on every head, without a restart.
+
 | Page | Leads with | Actions |
 |---|---|---|
 | **Workloads** | Deployments, StatefulSets, DaemonSets and Jobs, each with ready x/y and its worst pod's state; pods nested beneath | Scale, restart, delete |

@@ -1,3 +1,4 @@
+using Dray.Core.Settings;
 using Dray.Core.Kubernetes;
 using Dray.Kubernetes;
 using Dray.Core.Engine;
@@ -46,6 +47,9 @@ builder.Services.AddSingleton<StackCatalog>();
 builder.Services.AddSingleton<EngineManager>();
 // The local cluster beside the engine (docs/KUBERNETES.md): its own manager, its own store,
 // its own remembered choice — the engine picker and the cluster picker are separate.
+// What the user chose in Settings, read once and followed live by whatever it governs.
+builder.Services.AddSingleton<ISettingsStore, FileSettingsStore>();
+builder.Services.AddSingleton<DraySettings>();
 builder.Services.AddSingleton<KubeconfigReader>();
 builder.Services.AddSingleton<ClusterSelectionStore>();
 builder.Services.AddSingleton<IClusterClientFactory, KubeClusterClientFactory>();

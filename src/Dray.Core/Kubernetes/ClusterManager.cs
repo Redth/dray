@@ -54,12 +54,56 @@ public sealed class ClusterManager : IAsyncDisposable
     IClusterClient? _client;
     CancellationTokenSource? _watching;
 
-    public ClusterManager(KubeconfigReader reader, IClusterClientFactory factory, ClusterSelectionStore? selection = null)
+    readonly Settings.DraySettings? _settings;
+
+    /// <param name="settings">
+    /// Whether Kubernetes support is on. Off, nothing is read and nothing is connected — and turning
+    /// it on or off in Settings takes effect at once rather than on the next launch.
+    /// </param>
+    public ClusterManager(KubeconfigReader reader, IClusterClientFactory factory, ClusterSelectionStore? selection = null, Settings.DraySettings? settings = null)
     {
         _reader = reader;
         _factory = factory;
         _selection = selection;
+        _settings = settings;
         Store.Changed += _ => Changed?.Invoke();
+
+        if (settings is not null)
+        {
+            _enabled = settings.KubernetesEnabled;
+            settings.Changed += OnSettingsChanged;
+        }
+    }
+
+    bool _enabled = true;
+
+    /// <summary>Kubernetes support is on in Settings. Off, there are no contexts and no cluster, so nothing about it is shown.</summary>
+    public bool Enabled => _enabled;
+
+    void OnSettingsChanged()
+    {
+        if (_settings is null || _settings.KubernetesEnabled == _enabled) return;
+        _enabled = _settings.KubernetesEnabled;
+
+        _ = _enabled ? InitializeAsync() : TurnOffAsync();
+    }
+
+    /// <summary>Let go of everything: the watches, the forwards, the client, and the list of contexts.</summary>
+    async Task TurnOffAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            await DisconnectAsync();
+            Selected = null;
+            _contexts = [];
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        Changed?.Invoke();
     }
 
     public ClusterStore Store { get; } = new();
@@ -97,6 +141,8 @@ public sealed class ClusterManager : IAsyncDisposable
     /// </summary>
     public async Task InitializeAsync(CancellationToken ct = default)
     {
+        if (!_enabled) return;
+
         _contexts = [.. _reader.Read()];
         Changed?.Invoke();
 
@@ -121,6 +167,8 @@ public sealed class ClusterManager : IAsyncDisposable
     /// <summary>Read the kubeconfig again — after a cluster was created, deleted, or set up from a terminal.</summary>
     public async Task RefreshAsync(CancellationToken ct = default)
     {
+        if (!_enabled) return;
+
         var previous = Selected?.Name;
         var fresh = _reader.Read();
 
@@ -323,6 +371,7 @@ public sealed class ClusterManager : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (_settings is not null) _settings.Changed -= OnSettingsChanged;
         await DisconnectAsync();
         _gate.Dispose();
     }

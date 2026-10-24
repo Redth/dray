@@ -322,7 +322,7 @@ public class ClusterManagerTests
 {
     const string Home = "/home/u";
 
-    static KubeconfigReader Reader() => new(new FakeConfigSource().WithFile($"{Home}/.kube/config", """
+    internal static KubeconfigReader Reader() => new(new FakeConfigSource().WithFile($"{Home}/.kube/config", """
         current-context: staging
         clusters:
         - name: kind
@@ -387,7 +387,7 @@ public class ClusterManagerTests
         Assert.Equal("web", Assert.Single(manager.Store.Pods).Name);
     }
 
-    sealed class FakeFactory : IClusterClientFactory
+    internal sealed class FakeFactory : IClusterClientFactory
     {
         public List<string> Created { get; } = [];
 
@@ -400,7 +400,7 @@ public class ClusterManagerTests
         }
     }
 
-    sealed class FakeClient(Exception? fail) : IClusterClient
+    internal sealed class FakeClient(Exception? fail) : IClusterClient
     {
         public Task<ClusterCapabilities> ConnectAsync(CancellationToken ct = default)
             => fail is null ? Task.FromResult(new ClusterCapabilities { ServerVersion = "v1.37.0" }) : Task.FromException<ClusterCapabilities>(fail);

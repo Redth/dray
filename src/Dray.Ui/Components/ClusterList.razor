@@ -15,6 +15,10 @@
 
 @* Always here, even with no cluster: with none, the Kubernetes group is not in the sidebar, and this
    is where making one starts. *@
+@* Not shown at all while Kubernetes is off in Settings: the point of turning it off is that it is
+   not in the window. *@
+@if (Clusters.Enabled)
+{
 <section class="card clusters" aria-labelledby="clusters-title">
     <header class="clusters__head">
         <h2 id="clusters-title" class="clusters__title">Kubernetes</h2>
@@ -118,6 +122,7 @@
         <p class="clusters__problem" role="alert">@problem</p>
     }
 </section>
+}
 
 @code {
     protected override void OnInitialized()

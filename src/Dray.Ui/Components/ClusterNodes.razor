@@ -8,7 +8,7 @@
 @inject ClusterManager Clusters
 @inject NavigationManager Nav
 
-@if (Groups.Count > 0)
+@if (Clusters.Enabled && Groups.Count > 0)
 {
     <ul class="cnodes" aria-label="Kubernetes clusters on this engine">
         @foreach (var group in Groups)

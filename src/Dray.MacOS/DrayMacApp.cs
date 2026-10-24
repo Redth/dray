@@ -1,3 +1,4 @@
+using Dray.Core.Settings;
 using Dray.Core.Kubernetes;
 using System.Collections.ObjectModel;
 using AppKit;
@@ -104,8 +105,9 @@ public sealed class DrayMacApp : Application
         // The Kubernetes group is in the list only while the kubeconfig has a local cluster. The
         // handler follows this collection, not a new one, so the rows are replaced in place.
         var clusters = _services.GetRequiredService<ClusterManager>();
+        var settings = _services.GetRequiredService<DraySettings>();
         _hasCluster = clusters.LocalContexts.Count > 0;
-        Fill(_sidebar, _hasCluster);
+        Fill(_sidebar, _hasCluster, settings.HiddenRoutes);
         MacOSFlyoutPage.SetSidebarItems(flyout, _sidebar);
 
         clusters.Changed += () =>
@@ -117,10 +119,17 @@ public sealed class DrayMacApp : Application
 
             NSApplication.SharedApplication.BeginInvokeOnMainThread(() =>
             {
-                Fill(_sidebar, has);
+                Fill(_sidebar, has, settings.HiddenRoutes);
                 SelectRoute(flyout, _shell.Route);
             });
         };
+
+        // A page turned off in Settings leaves the sidebar at once.
+        settings.Changed += () => NSApplication.SharedApplication.BeginInvokeOnMainThread(() =>
+        {
+            Fill(_sidebar, _hasCluster, settings.HiddenRoutes);
+            SelectRoute(flyout, _shell.Route);
+        });
 
         // The engine picker is not in here: it is the toolbar's leading item, above this list
         // (MacToolbarProjector), so every row of the sidebar is a place to go.
@@ -154,10 +163,10 @@ public sealed class DrayMacApp : Application
 
     bool _hasCluster;
 
-    static void Fill(ObservableCollection<MacOSSidebarItem> rows, bool hasCluster)
+    static void Fill(ObservableCollection<MacOSSidebarItem> rows, bool hasCluster, IReadOnlyCollection<string> hidden)
     {
         rows.Clear();
-        foreach (var node in NavigationManifest.Visible(IsDebug, hasCluster)) rows.Add(ToSidebarItem(node));
+        foreach (var node in NavigationManifest.Visible(IsDebug, hasCluster, hidden)) rows.Add(ToSidebarItem(node));
     }
 
     static bool IsDebug =>
@@ -190,7 +199,7 @@ public sealed class DrayMacApp : Application
 
         appMenu.InsertItem(NSMenuItem.SeparatorItem, index++);
 
-        var settings = new MenuTarget(() => _shell.RequestNavigation("/settings"));
+        var settings = new MenuTarget(() => _shell.RequestNavigation(NavigationManifest.SettingsRoute));
         _menuTargets.Add(settings);
 
         var item = new NSMenuItem("Settings…", new ObjCRuntime.Selector("invoke:"), ",") { Target = settings };

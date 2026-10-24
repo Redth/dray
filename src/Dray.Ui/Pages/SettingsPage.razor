@@ -1,0 +1,81 @@
+@page "/settings"
+@implements IDisposable
+@inject DraySettings Settings
+@inject ClusterManager Clusters
+
+<PageChromeScope Chrome="Chrome" />
+
+<div class="page settings">
+    <section class="card settings__section" aria-labelledby="settings-k8s">
+        <header class="settings__head">
+            <Icon Name="IconRef.Cluster" Size="IconSize.Md" />
+            <h2 id="settings-k8s" class="settings__title">Kubernetes</h2>
+        </header>
+
+        <div class="settings__body">
+            <label class="toggle settings__toggle">
+                @* Named by its title alone, described by the sentence under it: a screen reader reads
+                   the name on every focus, and the sentence once. *@
+                <input type="checkbox" role="switch" checked="@Settings.KubernetesEnabled"
+                       aria-label="Show Kubernetes" aria-describedby="settings-k8s-hint"
+                       @onchange="e => Settings.SetKubernetes(e.Value is true)" />
+                <span class="settings__label">
+                    <span>Show Kubernetes</span>
+                    <span id="settings-k8s-hint" class="settings__hint muted">
+                        The local cluster beside your engine — Workloads, Pods, Services and Events in the
+                        sidebar, and the clusters on the Hosts page. Off, Dray does not read your kubeconfig
+                        or connect to a cluster at all.
+                    </span>
+                </span>
+            </label>
+
+            @* One by one, for someone who wants pods and not the rest. Disabled rather than hidden
+               while Kubernetes is off, so turning it back on finds the choices where they were left. *@
+            <fieldset class="settings__pages" disabled="@(!Settings.KubernetesEnabled)">
+                <legend class="settings__legend">In the sidebar</legend>
+                @foreach (var entry in NavigationManifest.KubernetesPages)
+                {
+                    var route = entry.Route!;
+                    <label class="toggle settings__toggle settings__toggle--page">
+                        <input type="checkbox" role="switch" checked="@Settings.IsShown(route)"
+                               @onchange="e => Settings.SetShown(route, e.Value is true)" />
+                        <Icon Name="entry.Icon ?? IconRef.Cluster" Size="IconSize.Sm" />
+                        <span>@entry.Title</span>
+                    </label>
+                }
+                @if (NavigationManifest.KubernetesPages.All(p => !Settings.IsShown(p.Route!)))
+                {
+                    <p class="settings__hint muted">With every page off, the Kubernetes group leaves the sidebar too.</p>
+                }
+            </fieldset>
+
+            @if (Settings.KubernetesEnabled && Clusters.LocalContexts.Count == 0)
+            {
+                <p class="settings__hint muted">
+                    No cluster on this machine yet, so the group is not in the sidebar. The Hosts page lists
+                    what your kubeconfig names and can create a kind cluster.
+                </p>
+            }
+        </div>
+    </section>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Settings.Changed += OnChanged;
+        Clusters.Changed += OnChanged;
+    }
+
+    void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    // A heading for the page and nothing to do from the toolbar: every setting applies as it is
+    // changed, so there is no Save to press and nothing to forget to press.
+    static PageChrome Chrome => new("Settings");
+
+    public void Dispose()
+    {
+        Settings.Changed -= OnChanged;
+        Clusters.Changed -= OnChanged;
+    }
+}

@@ -26,6 +26,13 @@
     color: var(--brand);
 }
 
+/* Pushed to the bottom of the sidebar by the list above taking the rest. */
+.sidebar__foot {
+    margin-top: auto;
+    padding: var(--s2) var(--s2) var(--s3);
+    border-top: 1px solid var(--line);
+}
+
 .sidebar__list {
     display: flex;
     flex-direction: column;
