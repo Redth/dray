@@ -435,7 +435,15 @@
 
             var placed = config.Place([(compose, ComposeDocument.Parse(_text))]);
             _compose = [.. placed.Where(p => p.Range is not null).Select(p => ComposeMarks.ToEditor(p.Problem, p.Range!, "compose"))];
-            _unplaced = [.. placed.Where(p => p.Range is null).Select(p => p.Problem.Message)];
+            // An unset variable is already said beside its reference, where it is — "→ empty", with
+            // what compose will do in the hover. Compose's own sentence about it, with no line to
+            // put it on, would only say it again under the file.
+            _unplaced =
+            [
+                .. placed
+                    .Where(p => p.Range is null && !UnsetVariable().IsMatch(p.Problem.Message))
+                    .Select(p => p.Problem.Message),
+            ];
             Merge();
         }
         catch (OperationCanceledException)
@@ -574,6 +582,11 @@
                 return (ComposeAuthoring.Blank(), null);
         }
     }
+
+    // A plain Regex: the generator does not see code a .razor file becomes.
+    static readonly System.Text.RegularExpressions.Regex UnsetVariablePattern = new(@"^The ""[^""]+"" variable is not set\.", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    static System.Text.RegularExpressions.Regex UnsetVariable() => UnsetVariablePattern;
 
     static string Display(string path)
     {

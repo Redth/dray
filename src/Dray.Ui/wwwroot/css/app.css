@@ -1173,13 +1173,18 @@ textarea,
 }
 
 .dialog--window .dialog__body {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
 
+/* What the subtitle leaves, rather than 100% of the body: the subtitle is in the body here, and a
+   full-height content under it ran off the bottom by the subtitle's height. */
 .dialog--window .dlgcontent {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* Under the title, in the body rather than the head: it is a sentence about the content, and the
