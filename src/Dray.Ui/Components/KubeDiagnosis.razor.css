@@ -40,3 +40,8 @@
     flex: 1 1 auto;
     user-select: text;
 }
+
+.kdiag__failed {
+    color: var(--danger-ink);
+    font-size: var(--text-sm);
+}

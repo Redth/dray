@@ -36,6 +36,8 @@
             </div>
         }
 
+        <ClusterNodes />
+
         @if (Engine.HasNoHosts)
         {
             <NoEngine />
@@ -216,7 +218,9 @@
     {
         get
         {
-            IEnumerable<ContainerSummary> q = Engine.Store.Containers;
+            // A local cluster's nodes are listed above, under their cluster, not among the user's
+            // own containers (docs/KUBERNETES.md §4).
+            IEnumerable<ContainerSummary> q = Engine.Store.Containers.Where(c => c.ClusterNode is null);
 
             q = _stateFilter switch
             {

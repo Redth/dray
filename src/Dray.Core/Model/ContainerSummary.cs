@@ -14,6 +14,24 @@ public sealed record PortBinding(int HostPort, int ContainerPort, string Protoco
 /// opened Dray to ask — state, health, ports, and how long it has been that way. Everything else
 /// lives behind the detail pane's Inspect tab (PRODUCT.md: "answer the question in the first screen").
 /// </summary>
+/// <summary>A container that is a node of a local Kubernetes cluster: which tool, which cluster, which role.</summary>
+public sealed record ClusterNodeRef(string Tool, string Cluster, string? Role)
+{
+    /// <summary>
+    /// From the labels each tool puts on its node containers. Measured for kind
+    /// (<c>io.x-k8s.kind.cluster</c>, <c>io.x-k8s.kind.role</c>); k3d's and minikube's are their
+    /// documented ones and have not been run here.
+    /// </summary>
+    public static ClusterNodeRef? From(IReadOnlyDictionary<string, string>? labels)
+    {
+        if (labels is null) return null;
+        if (labels.TryGetValue("io.x-k8s.kind.cluster", out var kind)) return new("kind", kind, labels.GetValueOrDefault("io.x-k8s.kind.role"));
+        if (labels.TryGetValue("k3d.cluster", out var k3d)) return new("k3d", k3d, labels.GetValueOrDefault("k3d.role"));
+        if (labels.TryGetValue("name.minikube.sigs.k8s.io", out var minikube)) return new("minikube", minikube, null);
+        return null;
+    }
+}
+
 public sealed record ContainerSummary
 {
     public required string Id { get; init; }
@@ -45,6 +63,14 @@ public sealed record ContainerSummary
 
     /// <summary>Compose project name. The list's Stack column, and the most-used part of <see cref="Compose"/>.</summary>
     public string? Stack => Compose?.Project;
+
+    /// <summary>
+    /// The Kubernetes node this container is, when a local-cluster tool made it — read from the
+    /// labels that tool puts on its nodes. A container the user did not knowingly create and cannot
+    /// explain, so the Containers page shows it under its cluster rather than in the plain list
+    /// (docs/KUBERNETES.md §4).
+    /// </summary>
+    public ClusterNodeRef? ClusterNode { get; init; }
 
     /// <summary>
     /// The resolved image id — the digest of what actually ran, which is not the same thing as the
@@ -130,5 +156,6 @@ public sealed record ContainerSummary
         && Compose?.Project == other.Compose?.Project
         && Compose?.Service == other.Compose?.Service
         && Compose?.Replica == other.Compose?.Replica
+        && ClusterNode == other.ClusterNode
         && Ports.SequenceEqual(other.Ports);
 }

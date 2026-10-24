@@ -7,15 +7,35 @@
    here. *@
 @implements IDisposable
 @inject ClusterManager Clusters
+@inject EngineManager Engine
+@inject KindCli Kind
+@inject IShellBridge Shell
 @inject NavigationManager Nav
 
-@if (Clusters.Contexts.Count > 0)
-{
-    <section class="card clusters" aria-labelledby="clusters-title">
-        <header class="clusters__head">
-            <h2 id="clusters-title" class="clusters__title">Kubernetes</h2>
+@* Always here, even with no cluster: with none, the Kubernetes group is not in the sidebar, and this
+   is where making one starts. *@
+<section class="card clusters" aria-labelledby="clusters-title">
+    <header class="clusters__head">
+        <h2 id="clusters-title" class="clusters__title">Kubernetes</h2>
+        @if (Clusters.Contexts.Count > 0)
+        {
             <span class="muted">@Clusters.LocalContexts.Count on this machine · @(Clusters.Contexts.Count - Clusters.LocalContexts.Count) elsewhere</span>
-        </header>
+        }
+        <span class="clusters__spacer"></span>
+        <Button Label="Create a kind cluster…" Icon="IconRef.Plus" Variant="ButtonVariant.Secondary"
+                OnClick="() => CreateKindDialog.ShowAsync(Shell)" />
+    </header>
+
+    @if (Clusters.Contexts.Count == 0)
+    {
+        <p class="clusters__empty muted">
+            No kubeconfig context names a cluster. Docker Desktop, OrbStack and Rancher Desktop each have
+            a Kubernetes switch in their settings — Dray does not flip it for them — or a kind cluster runs
+            as containers on the engine you already have.
+        </p>
+    }
+    else
+    {
 
         <ul class="clusters__list">
             @foreach (var context in Clusters.Contexts)
@@ -34,29 +54,54 @@
                         <span class="clusters__why">@Why(context)</span>
                     </span>
 
-                    @if (context.IsLocal)
-                    {
-                        @if (selected)
+                    <span class="clusters__actions">
+                        @if (context.IsLocal)
                         {
-                            <StatePill Status="State(context)" />
+                            @if (selected)
+                            {
+                                <StatePill Status="State(context)" />
+                            }
+                            else
+                            {
+                                <Button Label="Show" Variant="ButtonVariant.Secondary" OnClick="() => ShowAsync(context)" />
+                            }
+
+                            @* Only for a kind cluster measured on this engine — its node containers are
+                               here and serve this context — because that is the one Dray can delete
+                               with certainty about what goes. *@
+                            @if (KindClusterOf(context) is { } kindName)
+                            {
+                                <Button Label="Delete" Icon="IconRef.Trash" IconOnly="true" Variant="ButtonVariant.Ghost" Danger="true"
+                                        Tooltip="@($"Delete the kind cluster {kindName}")" OnClick="() => DeleteAsync(context, kindName)" />
+                            }
                         }
                         else
                         {
-                            <Button Label="Show" Variant="ButtonVariant.Secondary" OnClick="() => ShowAsync(context)" />
+                            <span class="muted clusters__remote">Not connected</span>
                         }
-                    }
-                    else
-                    {
-                        <span class="muted clusters__remote">Not connected</span>
-                    }
+                    </span>
                 </li>
             }
         </ul>
-    </section>
-}
+    }
+
+    @if (_working is { } working)
+    {
+        <p class="clusters__working muted" role="status">@working</p>
+    }
+
+    @if (_problem is { } problem)
+    {
+        <p class="clusters__problem" role="alert">@problem</p>
+    }
+</section>
 
 @code {
-    protected override void OnInitialized() => Clusters.Changed += OnChanged;
+    protected override void OnInitialized()
+    {
+        Clusters.Changed += OnChanged;
+        Engine.Changed += OnChanged;
+    }
 
     void OnChanged() => _ = InvokeAsync(StateHasChanged);
 
@@ -76,10 +121,53 @@
         _ => new(StateTone.Neutral, "○", "Not connected"),
     };
 
+    string? _working;
+    string? _problem;
+
+    /// <summary>The kind cluster behind a context, when its nodes are containers on the connected engine.</summary>
+    string? KindClusterOf(KubeContext context)
+        => ClusterPairing.NodesOf(context, Engine.Store.Containers).FirstOrDefault()?.ClusterNode is { Tool: "kind" } node ? node.Cluster : null;
+
+    async Task DeleteAsync(KubeContext context, string kindName)
+    {
+        var nodes = ClusterPairing.NodesOf(context, Engine.Store.Containers).Count;
+        var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+            $"Delete the kind cluster {kindName}?",
+            $"{(nodes == 1 ? "Its node container is" : $"Its {nodes} node containers are")} removed, and with it every workload in the cluster and every persistent volume in kind's local-path storage — those live inside the nodes and nowhere else. kind also removes {context.Name} from your kubeconfig.",
+            "Delete cluster",
+            TypeToConfirm: kindName));
+
+        if (answer != ConfirmResult.Confirm || Kind.Find() is not { } kind || Engine.Selected is not { } host) return;
+
+        _problem = null;
+        try
+        {
+            await foreach (var line in Kind.DeleteAsync(kind, kindName, Kind.Environment(host)))
+            {
+                _working = line;
+                StateHasChanged();
+            }
+
+            await Clusters.RefreshAsync();
+        }
+        catch (Exception e)
+        {
+            _problem = e.Message;
+        }
+        finally
+        {
+            _working = null;
+        }
+    }
+
     async Task ShowAsync(KubeContext context)
     {
         if (await Clusters.SelectAsync(context.Name) is null) Nav.NavigateTo("/kubernetes/workloads");
     }
 
-    public void Dispose() => Clusters.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Clusters.Changed -= OnChanged;
+        Engine.Changed -= OnChanged;
+    }
 }

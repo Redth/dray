@@ -5,7 +5,7 @@
 
 .clusters__head {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--s3);
     padding: var(--s4) var(--s4) var(--s2);
 }
@@ -64,5 +64,30 @@
 }
 
 .clusters__remote {
+    font-size: var(--text-sm);
+}
+
+.clusters__spacer {
+    flex: 1 1 auto;
+}
+
+.clusters__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+}
+
+.clusters__empty,
+.clusters__working {
+    padding: 0 var(--s4) var(--s4);
+    max-width: 72ch;
+}
+
+.clusters__problem {
+    margin: 0 var(--s4) var(--s4);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+    background: var(--danger-tint);
+    color: var(--danger-ink);
     font-size: var(--text-sm);
 }

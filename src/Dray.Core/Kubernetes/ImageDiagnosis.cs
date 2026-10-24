@@ -23,7 +23,8 @@ public enum PullCause
 }
 
 /// <param name="Command">The command that fixes it, shown before it is run (docs/KUBERNETES.md §8).</param>
-public sealed record PullDiagnosis(PullCause Cause, string Image, string? Command = null);
+/// <param name="Cluster">The cluster's name as its tool knows it — what <c>kind load --name</c> takes.</param>
+public sealed record PullDiagnosis(PullCause Cause, string Image, string? Command = null, ClusterTool Tool = ClusterTool.Unknown, string? Cluster = null);
 
 /// <summary>
 /// The local-cluster failure Dray can answer precisely, because it sees the engine as well as the
@@ -84,7 +85,7 @@ public static class ImageDiagnosis
             _ => null,
         };
 
-        return new PullDiagnosis(command is null ? PullCause.Unknown : PullCause.NotLoaded, image, command);
+        return new PullDiagnosis(command is null ? PullCause.Unknown : PullCause.NotLoaded, image, command, tool, cluster);
     }
 
     /// <summary>

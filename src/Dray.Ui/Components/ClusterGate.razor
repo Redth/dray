@@ -5,6 +5,7 @@
    Sits inside ClusterScope. *@
 @inject ClusterManager Clusters
 @inject NavigationManager Nav
+@inject IShellBridge Shell
 
 @if (Clusters.Selected is null)
 {
@@ -16,7 +17,9 @@
                     ? $"Your kubeconfig names {remote} cluster{(remote == 1 ? "" : "s")} elsewhere. Dray connects to clusters on this machine — Docker Desktop's, OrbStack's, Rancher Desktop's, or a kind or k3d cluster on your engine."
                     : "There is no kubeconfig context for a cluster here. Docker Desktop, OrbStack and Rancher Desktop each have a Kubernetes switch in their settings, or a kind cluster runs on the engine you already have.")">
         <Actions>
-            <Button Label="Hosts and setup…" Icon="IconRef.Host" OnClick="@(() => Nav.NavigateTo("/hosts"))" />
+            @* The one cluster Dray makes, on the engine the user already has (docs/KUBERNETES.md §7). *@
+            <Button Label="Create a kind cluster…" Icon="IconRef.Plus" Variant="ButtonVariant.Primary"
+                    OnClick="() => CreateKindDialog.ShowAsync(Shell)" />
             <Button Label="Look again" Icon="IconRef.Refresh" Variant="ButtonVariant.Ghost" OnClick="RefreshAsync" />
         </Actions>
     </EmptyState>

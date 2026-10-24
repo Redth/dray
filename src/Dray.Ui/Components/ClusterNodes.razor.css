@@ -1,0 +1,28 @@
+.cnodes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    margin: var(--s3) var(--s4) 0;
+    flex-shrink: 0;
+}
+
+.cnodes__item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+
+.cnodes__text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.cnodes__sub {
+    font-size: var(--text-xs);
+}

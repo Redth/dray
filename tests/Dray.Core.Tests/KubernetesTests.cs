@@ -513,3 +513,80 @@ public class KubeListTests
         Assert.Equal("myapp", Assert.IsType<GridLink>(PodGrid.Row(pod, new OwnerRef(ClusterKind.Deployment, "myapp", "d"), showNamespace: false)["name"]).Sub);
     }
 }
+
+/// <summary>Which engine a cluster is on, measured from its node containers; and kind, found and aimed.</summary>
+public class ClusterBridgeTests
+{
+    static ContainerSummary Node(string name, string cluster, string role, params PortBinding[] ports) => new()
+    {
+        Id = name, Name = name, Image = "kindest/node", State = DockerState.Running, Ports = ports,
+        ClusterNode = new ClusterNodeRef("kind", cluster, role),
+    };
+
+    static KubeContext Context(string name, string server) => new()
+    {
+        Name = name, ClusterName = name, Server = server, SourcePath = "/k", Locality = ClusterLocality.Local,
+    };
+
+    /// <summary>Measured on kind: 127.0.0.1:63628->6443/tcp on the container, https://127.0.0.1:63628 in the kubeconfig.</summary>
+    [Fact]
+    public void AClusterIsPairedWithItsNodeByThePublishedApiPort()
+    {
+        var plane = Node("dray-spike-control-plane", "dray-spike", "control-plane", new PortBinding(63628, 6443));
+        var worker = Node("dray-spike-worker", "dray-spike", "worker");
+        var other = Node("dev-control-plane", "dev", "control-plane", new PortBinding(64522, 6443));
+
+        var spike = Context("kind-dray-spike", "https://127.0.0.1:63628");
+        Assert.Equal(spike, ClusterPairing.ContextFor(plane, [spike, Context("kind-dev", "https://127.0.0.1:64522")]));
+        Assert.Equal(["dray-spike-control-plane", "dray-spike-worker"], ClusterPairing.NodesOf(spike, [worker, other, plane]).Select(n => n.Name));
+    }
+
+    [Fact]
+    public void ANodeServingNoKnownContextIsNotPaired()
+        => Assert.Null(ClusterPairing.ContextFor(Node("x", "x", "control-plane", new PortBinding(1, 6443)), [Context("kind-dev", "https://127.0.0.1:64522")]));
+
+    [Fact]
+    public void NodeContainersAreReadOffTheirLabels()
+    {
+        Assert.Equal(new ClusterNodeRef("kind", "dray-spike", "control-plane"),
+            ClusterNodeRef.From(new Dictionary<string, string> { ["io.x-k8s.kind.cluster"] = "dray-spike", ["io.x-k8s.kind.role"] = "control-plane" }));
+        Assert.Equal("k3d", ClusterNodeRef.From(new Dictionary<string, string> { ["k3d.cluster"] = "dev" })?.Tool);
+        Assert.Null(ClusterNodeRef.From(new Dictionary<string, string> { ["com.docker.compose.project"] = "web" }));
+    }
+
+    [Theory]
+    [InlineData("dev", true)]
+    [InlineData("dray-spike", true)]
+    [InlineData("Dev", false)]
+    [InlineData("-dev", false)]
+    [InlineData("dev_1", false)]
+    [InlineData("", false)]
+    public void KindNamesAreDnsLabels(string name, bool valid) => Assert.Equal(valid, KindCli.IsValidName(name));
+
+    /// <summary>A Finder-launched app's PATH has no /opt/homebrew/bin, which is where brew puts kind.</summary>
+    [Fact]
+    public void KindIsFoundWhereHomebrewPutsItEvenOffPath()
+    {
+        var source = new FakeConfigSource { IsMacOS = true }
+            .WithEnvironment("PATH", "/usr/bin:/bin")
+            .WithEnvironment("HOME", "/Users/u")
+            .WithExecutable("/opt/homebrew/bin/kind");
+
+        var kind = new KindCli(source);
+        Assert.Equal("/opt/homebrew/bin/kind", kind.Find());
+        Assert.Equal("brew install kind", kind.InstallCommand);
+    }
+
+    [Fact]
+    public void KindIsAimedAtTheSelectedEngineAndCanFindDocker()
+    {
+        var source = new FakeConfigSource { IsMacOS = true }.WithEnvironment("PATH", "/usr/bin:/bin").WithEnvironment("HOME", "/Users/u");
+        var host = new DockerHost { Id = "desktop-linux", Name = "desktop-linux", Endpoint = DockerEndpoint.Parse("unix:///Users/u/.docker/run/docker.sock")! };
+
+        var env = new KindCli(source).Environment(host);
+
+        Assert.Equal("unix:///Users/u/.docker/run/docker.sock", env["DOCKER_HOST"]);
+        Assert.StartsWith("/usr/bin:/bin:", env["PATH"]);
+        Assert.Contains("/usr/local/bin", env["PATH"]);
+    }
+}

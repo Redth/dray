@@ -298,7 +298,8 @@ and one item per engine in the sentence `HostSwitcher.Describe` gives it — and
 and builds nothing itself. Before, each head assembled the engine menu on its own from
 `EngineManager`, three copies of one list that had to stay identical. It is not part of
 `PageChrome`, because no page declares it: a page that could omit it could hide which engine the
-user is looking at. The cluster picker joins it in Phase 6.5 (docs/KUBERNETES.md §1).
+user is looking at. The cluster picker is not one of these: it scopes only the Kubernetes pages, so
+it is a filter menu in their `PageChrome` (docs/KUBERNETES.md §1).
 
 **The title is the name alone; the state is the glyph.** The corner is narrow on every head, and
 on macOS a toolbar item that does not fit is not shortened — AppKit moves it into the overflow menu

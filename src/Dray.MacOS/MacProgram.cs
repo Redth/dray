@@ -81,6 +81,7 @@ public static class MacProgram
         builder.Services.AddSingleton<ClusterSelectionStore>();
         builder.Services.AddSingleton<IClusterClientFactory, KubeClusterClientFactory>();
         builder.Services.AddSingleton<ClusterManager>();
+        builder.Services.AddSingleton<KindCli>();
         builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
         builder.Services.AddSingleton<StackOperations>();
         builder.Services.AddSingleton<HostSwitcher>();

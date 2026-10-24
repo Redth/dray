@@ -4,13 +4,14 @@ Dray shows the local Kubernetes cluster beside the Docker engine it runs on, and
 that engine when there is none. This document is the contract for that work: what it is for, what
 it deliberately is not, and the seams it needs.
 
-**Status: K0 partly run.** The spike (§10) ran against a kind cluster — kind 0.33.0, Kubernetes
-1.37.0, on Docker Desktop's engine (29.7.2), macOS, through `KubernetesClient` 21.0.8 in a console
-app. What it measured is stated as measured. What it could not reach — OrbStack, Docker Desktop's
-own Kubernetes, k3d, minikube, Rancher Desktop, exec credential plugins, and anything inside the
-macOS head — is marked *read, not run*, and stays a hypothesis until something executes it. Two
-claims in the first draft of this document were wrong, and both were caught only by running them
-(§10.1).
+**Status: built, and run against kind.** `Dray.Kubernetes`, the four pages, the diagnosis and the
+kind helper are in, and every behaviour below marked *measured* was run — first in the K0 spike
+(§10), then again through the app itself on kind 0.33.0 / Kubernetes 1.37.0 on Docker Desktop's
+engine: the web head in both themes and the macOS head. `Dray.Kubernetes.Tests` holds seven of the
+claims against a live cluster. What has still not been reached — OrbStack, Docker Desktop's own
+Kubernetes, k3d, minikube, Rancher Desktop, exec credential plugins, and the Windows head — is marked
+*read, not run*, and stays a hypothesis until something executes it. Two claims in the first draft
+were wrong, and both were caught only by running them (§10.1).
 
 ---
 
@@ -21,9 +22,11 @@ These are settled. Changing one is a product decision, not an implementation det
 1. **Kubernetes is in v1.** It lands as Phase 6.5 in `docs/ROADMAP.md`, before Ship.
 2. **Two pickers.** A Docker engine and a cluster are independent: someone can be looking at
    containers on `desktop-linux` while their pods run in a kind cluster, or in no cluster at all.
-   The engine picker and the cluster picker are separate controls, side by side in the window's
-   top-left corner (DESIGN.md §5), each a `ChromePicker` drawn by every head. They are *paired*
-   only when the pairing is measured (§4), and pairing sets a default — it never couples the two.
+   The engine picker is the window's top-left control on every page (DESIGN.md §5). The cluster
+   picker is a menu in the Kubernetes pages' toolbar, beside the namespace filter: the engine scopes
+   every page and a cluster only those four, and the strip above the macOS sidebar has room for one
+   control, not two. They are *paired* only when the pairing is measured (§4) — and selecting one
+   never moves the other.
 3. **Local clusters first.** v1 connects only to clusters measured as local (§3). Remote contexts
    are listed with a plain reason and are not connectable. Remote support is Phase 9 material.
 4. **Dray can create a kind cluster** on the engine it is connected to (§7). A kind cluster is a
@@ -96,30 +99,33 @@ All three were measured against kind:
   *Read, not run:* k3d labels with `k3d.cluster`, minikube's docker driver with
   `name.minikube.sigs.k8s.io`.
 
-A pairing sets the cluster picker's default when the engine is selected. It does not move the
-cluster picker afterwards, and selecting a cluster never changes the engine.
+Pairing is what the Containers page and the Hosts page read: it is how Dray knows which node
+containers to show under which cluster, and which kind cluster it may delete (§7.3). Selecting a
+cluster never changes the engine, nor the other way round.
 
 ### Node containers are not the user's containers
 
 A kind node appears on the Containers page as `dray-spike-control-plane`, running a 1.3 GB
 `kindest/node` image the user never pulled by name — a container they did not knowingly create and
-cannot explain, the same problem `docs/ARCHITECTURE.md` §2.8 solves for volume helpers. Node
-containers are grouped under their cluster, out of the plain list, and the group links to the
-cluster. Removing one removes a cluster node, and the confirmation says so; removing the cluster is
-§7's typed action.
+cannot explain, the same problem `docs/ARCHITECTURE.md` §2.8 solves for volume helpers. So node
+containers (`ContainerSummary.ClusterNode`, from the labels above) are out of the plain list and in a
+row per cluster above it — "kind cluster dray-spike · 1 node · running · context kind-dray-spike" —
+that opens the cluster. Removing the cluster is §7.3's typed action.
 
 ---
 
 ## 5. What the user sees
 
-A **Kubernetes** group in the sidebar, present only while a cluster is selected. `NavNode` gains a
-requirement flag alongside `DebugOnly`, and `NavigationManifest.Visible` filters on it, so the
-entries still live once in the manifest and every head picks them up.
+A **Kubernetes** group in the sidebar, present while the kubeconfig has a local cluster — connected
+or not, so its pages can say why not. `NavNode.RequiresCluster` sits beside `DebugOnly`, and
+`NavigationManifest.Visible` filters on it, so the entries live once in the manifest; each head
+refills its sidebar only when the group comes or goes, not on every watch event. With no cluster at
+all, the Hosts page's Kubernetes section is where making one starts.
 
 | Page | Leads with | Actions |
 |---|---|---|
 | **Workloads** | Deployments, StatefulSets, DaemonSets and Jobs, each with ready x/y and its worst pod's state; pods nested beneath | Scale, restart, delete |
-| **Pods** | State and reason, restarts, age, node, ports | Logs, shell, forward a port, delete |
+| **Pods** | State and reason, restarts and when, age; the workload and namespace under the name | Logs, shell, forward a port, delete |
 | **Services** | Type, ports, and how to reach it from this machine | Forward a port, open in browser |
 | **Events** | Warnings first, each linked to its object | — |
 
@@ -132,9 +138,10 @@ behind a toggle. That prefix is reserved for the system by Kubernetes itself, so
 a rule, not a guess. kind also creates `local-path-storage`, which is not `kube-*` and is shown.
 Namespaces are a filter, never a mode — no page goes blank because the wrong one is selected.
 
-### 5.1 Pod state vocabulary — draft
+### 5.1 Pod state vocabulary
 
-This joins DESIGN.md §2.4 when K1 lands. Same rule: tint + glyph + word, greyscale-legible.
+Now binding, in DESIGN.md §2.4 beside the container table. Same rule: tint + glyph + word,
+greyscale-legible, and a test holds every pod state to a glyph of its own.
 
 The input is the STATUS `kubectl get pods` computes — not `status.phase`, which reads `Running` for
 a pod whose only container is crash-looping. Users cross-check against kubectl, so Dray reproduces
@@ -152,20 +159,20 @@ Every other row matches kubectl exactly.
 | Pod | Word | Glyph | Tone |
 |---|---|---|---|
 | `Running`, all containers ready | Running | ● | ok |
-| `Running`, not all ready | Not ready *x/y* | ◐ | warn |
+| `Running`, not all ready | Not ready *x/y* | ◑ | warn |
 | `Pending` | Pending | ○ | neutral |
 | `ContainerCreating`, `PodInitializing`, `Init:n/m` | Starting | ◐ | warn |
-| restarted, and the last exit was a failure | Crash loop · *last reason* | *open* | danger |
-| `ImagePullBackOff`, `ErrImagePull` | Can't pull image | *open* | danger |
+| restarted, and the last exit was a failure | Crash loop · *last reason* | ↯ | danger |
+| `ImagePullBackOff`, `ErrImagePull` | Can't pull image | ⤓ | danger |
 | `Completed` | Completed | ■ | neutral |
 | `Error` or `OOMKilled`, no restarts | Exited *code* · *reason* | ■ | danger |
 | `Terminating` | Terminating | ◌ | warn |
 | `Evicted` | Evicted | ✕ | danger |
 | `Unknown` (node lost) | Node lost | ⚠ | neutral, row dimmed |
 
-Two glyphs are open on purpose. Crash loop is visibly a kind of restarting, but `↻` already means
-Restarting, and §2.4's narrow-width exception relies on every state having a glyph of its own.
-Settling both is a design pass, not a table edit.
+Crash loop is `↯` rather than `↻`, which is Restarting, and Not ready is `◑` rather than Starting's
+`◐`: §2.4's narrow-width exception drops the word and keeps the glyph, so two states sharing one
+would be the same state at that width.
 
 **Kubernetes reports the reason; Dray does not infer it.** Measured: the OOM pod's
 `lastState.terminated` carries `exitCode: 137, reason: OOMKilled`; the failing pod's carries
@@ -303,11 +310,22 @@ Measured: creation took 14 seconds end to end on this machine, CNI and storage c
 Whether the node image was already cached was not recorded, so a first-ever create should be
 expected to take longer by however long 1.3 GB takes to arrive.
 
+Measured again from the app: the dialog created `kind-dev` on Docker Desktop's engine, Dray read
+the new context and connected to it, and `kubectl`'s current-context moved to it, as the dialog
+says it will.
+
 ### 7.3 Deleting it
 
 `kind delete cluster --name <name>`, typed: the user types the cluster's name, and the dialog lists
 what goes with it — every workload, and every persistent volume in kind's local-path storage, which
-lives inside the node container and nowhere else.
+lives inside the node container and nowhere else. Offered only for a kind cluster whose node
+containers are measured on the connected engine (§4), because that is the cluster Dray can be sure
+of the contents of.
+
+Measured from the app: the node container and the context went, and Dray reconnected to the
+cluster that was left. kind also **leaves `kubectl`'s current-context unset** when the deleted
+cluster was current — the next `kubectl` command fails with "current-context is not set" until the
+user picks one. Dray does not pick one for them, for the reason in §6.
 
 Dray offers to create and delete **kind** clusters only. k3d and minikube clusters it finds are
 shown and used; creating them is one more tool's flags to track for no difference the user would
@@ -515,7 +533,6 @@ than in a user's database client.
 
 - **minikube with a VM driver** — Remote by §3's rule. Should a host-only VM network count as
   local, and how is that measured rather than guessed?
-- **Two glyphs** in §5.1.
 - **kind on podman.** kind's podman provider is experimental and opt-in. Offer creation on a podman
   engine, or only on Docker-flavoured ones, until it has been run?
 - **Helm releases as a grouping.** A release is the closest thing to a stack, and Helm labels what

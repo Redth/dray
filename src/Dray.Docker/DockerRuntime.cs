@@ -207,6 +207,7 @@ public sealed class DockerRuntime(DockerEndpoint endpoint) : IContainerRuntime
         Compose = ComposeMembership.From(c.Labels is { Count: > 0 } labels
             ? new Dictionary<string, string>(labels, StringComparer.Ordinal)
             : null),
+        ClusterNode = ClusterNodeRef.From(c.Labels is { Count: > 0 } nodeLabels ? new Dictionary<string, string>(nodeLabels, StringComparer.Ordinal) : null),
     };
 
     /// <summary>

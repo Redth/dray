@@ -400,14 +400,14 @@ only — are in [`docs/KUBERNETES.md`](KUBERNETES.md).
 - `Dray.Kubernetes` behind an `IClusterClient` seam in Core; `ClusterStore` fed by list-then-watch
   reflectors that relist by diffing on 410
 - Workloads, Pods, Services and Events pages; the pod state vocabulary joins DESIGN.md §2.4
-- Logs (previous instance first after a restart), shell, port forwarding bound to loopback
+- Logs (the previous instance offered once a replacement runs), shell, port forwarding bound to loopback
 - Scale, restart, delete — typed where it destroys something a controller will not recreate
 - Node containers grouped under their cluster on the Containers page
 - Create and delete a kind cluster on the selected engine: kind detected (Homebrew's path
   included) or its install command shown, creation streamed, the current-context switch and the
   1.3 GB node image stated before anything runs, deletion typed
-- `ImagePullBackOff` on an image built here, diagnosed from the engine's image list and the node's
-  `status.images`, with the load command shown before it runs
+- `ImagePullBackOff` on an image built here, diagnosed from the pod's pull error and the engine's
+  image list, with the load command shown before it runs
 
 **Demo:** build `myapp:dev` in Dray, apply a manifest to a kind cluster from a terminal, and watch
 the pod go to Can't pull image. Dray says the image is on the engine but not in the cluster and
@@ -416,6 +416,38 @@ and open it.
 **Exit:** a pod deleted from a terminal changes its row with no refresh · a forced 410 relist
 writes only what changed · `kubectl`'s current-context never moves unless the user pressed the
 control that moves it · no Remote cluster is ever connected · pod pills legible in greyscale.
+
+**Progress:** built, and run end to end against kind through the app — the web head in both themes
+and the macOS head.
+
+- **The engine layer.** `IClusterClient`, `ClusterStore` and `ClusterManager` in Core beside their
+  Docker counterparts; `Dray.Kubernetes` over `KubernetesClient` 21.0.8 with a reflector that
+  streams or lists, follows bookmarks, resumes quietly and relists by diffing on a 410 it learns of
+  only through the watch's error callback.
+- **The pages.** Workloads, Pods, Services and Events, worst first; pod and workload detail with
+  Overview, Logs, Terminal and Inspect. The cluster and namespace pickers are toolbar menus on these
+  pages — native ones on macOS. `LogView` and `ExecTerminal` take a source rather than being copied.
+- **The join.** Node containers are a row per cluster above the Containers list. An image a pod
+  cannot pull that is on the engine is diagnosed as never loaded, with `kind load` shown and run on
+  request; the cluster's name comes off the node's providerID.
+- **kind.** Created from a dialog that states the 1.3 GB node image and the current-context switch
+  before anything runs; deleted, typed, only where its nodes are measured on the engine.
+
+**The demo, as run:** `myapp:v2` built on Docker Desktop, deployed to kind, shown as Can't pull image
+with the diagnosis "on Laptop, never loaded into this cluster"; Run it, and the pod went Running with
+nothing restarted. A Service forwarded from its row answered on `localhost:8080`. A kind cluster was
+created from the dialog and deleted from the Hosts page.
+
+**Exit:** a watch changes rows with no refresh — scaling from the page showed the third pod arrive
+and leave · a 410 relist writing nothing for unchanged data is a test · current-context moves only
+when kind does, from the dialog that says it will · a remote context is refused with its reason, a
+test · every pod state has a glyph of its own, a test, and a greyscale screenshot of the Pods page
+reads by glyph and word alone.
+
+**Still to do:** the Windows head is written and unbuilt; the explicit "Use in terminal" control
+(KUBERNETES.md §6) is not built — selecting a cluster changes nothing in the terminal, which is the
+rule, and the control to opt in is next; OrbStack, Docker Desktop's own Kubernetes, k3d and minikube
+have not been run.
 
 ---
 
