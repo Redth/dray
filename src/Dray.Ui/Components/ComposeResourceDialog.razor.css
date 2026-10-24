@@ -1,0 +1,39 @@
+.cr {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+}
+
+/* The app's column rule spaces fields apart; here the column's own gap does. */
+.cr .field + .field,
+.cr .field + .toggle,
+.cr .toggle + .field {
+    margin-top: 0;
+}
+
+.cr__pair {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--s3);
+}
+
+.cr__checks {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.cr__hint {
+    display: block;
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+}
+
+.cr__problem {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--danger-ink);
+}

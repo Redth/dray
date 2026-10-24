@@ -11,14 +11,23 @@
 <IconSprite />
 <PlatformThemeSync />
 
-<div class="surface">
-    @if (State.Current is { } session)
+<div class="surface @(Session is null ? null : "surface--window")">
+    @if ((Session ?? State.Current) is { } session)
     {
-        <DialogContent @key="session" Session="session" Measure="true" />
+        <DialogContent @key="session" Session="session" Measure="@(Session is null)" />
     }
 </div>
 
 @code {
+    /// <summary>
+    /// The session this surface is for, when the head hands it over directly — a dialog in a window
+    /// of its own, which is not modal, so a sheet opened in the main window meanwhile must not take
+    /// over its body the way it would take over the one shared <see cref="NativeDialogState"/>.
+    /// A window is sized by the user rather than by its content, so its body fills it instead of
+    /// being measured.
+    /// </summary>
+    [Parameter] public DialogSession? Session { get; set; }
+
     protected override void OnInitialized() => State.Changed += OnChanged;
 
     void OnChanged() => InvokeAsync(StateHasChanged);

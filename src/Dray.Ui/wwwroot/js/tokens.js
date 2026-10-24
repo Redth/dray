@@ -84,6 +84,11 @@ export function monoFontStack() {
   return stack || 'ui-monospace, monospace';
 }
 
+/** The app's interface face — the platform's own — read off the body as the mono stack is read off .mono. */
+export function uiFontStack() {
+  return getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif';
+}
+
 /**
  * Which theme is actually on screen.
  *

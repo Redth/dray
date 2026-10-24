@@ -219,6 +219,72 @@ public class ShellStateTests
         Assert.Equal(1, shell.Chrome.FilterList[0].SelectedIndex);
     }
 
+    static PageChrome Stacks(params string[] folders) => new(
+        "Stacks",
+        Menus:
+        [
+            new ChromeMenu("folders", $"{folders.Length} folders", IconRef.Folder,
+            [
+                .. folders.Select(f => new ChromeMenuItem("folder:" + f, f, Children: [new ChromeMenuItem("reveal:" + f, "Show in Finder")])),
+                ChromeMenuItem.Separator,
+                new ChromeMenuItem("add-folder", "Add folder…"),
+            ]),
+        ]);
+
+    [Fact]
+    public void AMenuCommandFiresThroughInvokeActionAtAnyDepth()
+    {
+        var shell = new ShellState();
+        shell.DeclareChrome(Stacks("/s"));
+
+        var seen = new List<string>();
+        shell.ActionInvoked += seen.Add;
+
+        shell.InvokeAction("add-folder");
+        shell.InvokeAction("reveal:/s");
+
+        // A submenu's own row opens the submenu; it is not a command, and nor is a separator.
+        shell.InvokeAction("folder:/s");
+        shell.InvokeAction(ChromeMenuItem.Separator.Id);
+        shell.InvokeAction("reveal:/elsewhere");
+
+        Assert.Equal(["add-folder", "reveal:/s"], seen);
+    }
+
+    [Fact]
+    public void AMenuWhoseItemsChangeIsANewShapeAndAnIdenticalOneIsNoChange()
+    {
+        // Native menus are built once, so a folder added is a rebuild rather than an update.
+        Assert.NotEqual(Stacks("/s").Signature, Stacks("/s", "/code").Signature);
+
+        var shell = new ShellState();
+        var changes = 0;
+        shell.ChromeChanged += _ => changes++;
+
+        shell.DeclareChrome(Stacks("/s"));
+        shell.DeclareChrome(Stacks("/s"));
+
+        Assert.Equal(1, changes);
+        Assert.True(Stacks("/s").HasControls);
+    }
+
+    [Fact]
+    public void ChoosingAFilterOptionReprojectsTheChrome()
+    {
+        // A native menu shows its choice as its title, and nothing else tells it the choice was
+        // made: the page re-declaring the same chrome is, by then, no change at all.
+        var shell = new ShellState();
+        shell.DeclareChrome(Containers());
+
+        var projected = new List<int>();
+        shell.ChromeChanged += chrome => projected.Add(chrome.FilterList[0].SelectedIndex);
+
+        shell.SetFilter("state", 2);
+        shell.SetFilter("state", 2);
+
+        Assert.Equal([2], projected);
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(3)]

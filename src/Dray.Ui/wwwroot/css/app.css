@@ -707,6 +707,15 @@ textarea,
   color: var(--ok-ink);
 }
 
+/* On the window ground a banner is a notice in the page's flow, rounded like the cards around it.
+   The square bar with a rule under it belongs at the top of a card or an editor, where the card's
+   own edge frames it; out on the ground it read as a strip torn from something else. */
+.page > .banner {
+  border-bottom: 0;
+  border-radius: var(--r-md);
+  margin-bottom: var(--s3);
+}
+
 /* Something in progress — Docker Desktop switching engines. Neither failure nor success, so it is
    neither tone: a switch drawn in danger pink reads as one that has already gone wrong. */
 .banner--info {
@@ -1154,6 +1163,23 @@ textarea,
 
 .dialog--lg {
   max-width: min(880px, calc(100vw - var(--s5)));
+}
+
+/* A browser has no second window, so a body that wants one gets the most of this one: wide, a
+   fixed height for its editor to fill, and the body laid out to that height rather than scrolled. */
+.dialog--window {
+  max-width: min(1200px, calc(100vw - var(--s5)));
+  height: min(820px, calc(100vh - var(--s5)));
+}
+
+.dialog--window .dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dialog--window .dlgcontent {
+  height: 100%;
 }
 
 /* Under the title, in the body rather than the head: it is a sentence about the content, and the

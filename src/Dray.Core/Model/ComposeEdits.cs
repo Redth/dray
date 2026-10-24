@@ -25,7 +25,7 @@ public sealed record ComposeSplice(int BeforeLine, string Text)
         return string.Concat(lines);
     }
 
-    static List<string> SplitKeepingBreaks(string text)
+    internal static List<string> SplitKeepingBreaks(string text)
     {
         var lines = new List<string>();
         var start = 0;
@@ -40,6 +40,38 @@ public sealed record ComposeSplice(int BeforeLine, string Text)
 
         if (start < text.Length) lines.Add(text[start..]);
         return lines;
+    }
+}
+
+/// <summary>
+/// Whole lines of a file replaced: <see cref="StartLine"/> to <see cref="EndLine"/>, inclusive and
+/// 1-based, become <see cref="Text"/>. An <see cref="EndLine"/> before the start replaces nothing —
+/// an insertion before <see cref="StartLine"/> — and an empty <see cref="Text"/> is a removal.
+/// </summary>
+public sealed record ComposeChange(int StartLine, int EndLine, string Text)
+{
+    /// <summary>
+    /// The file with every change made. The changes are each about the text as given and must not
+    /// overlap; they are applied from the bottom up so each one's line numbers still hold.
+    /// </summary>
+    public static string Apply(string text, IReadOnlyList<ComposeChange> changes)
+    {
+        var lines = ComposeSplice.SplitKeepingBreaks(text);
+
+        foreach (var change in changes.OrderByDescending(c => c.StartLine).ThenByDescending(c => c.EndLine))
+        {
+            var start = Math.Clamp(change.StartLine - 1, 0, lines.Count);
+            var count = Math.Clamp(change.EndLine - change.StartLine + 1, 0, lines.Count - start);
+
+            // Inserting after a last line that has no break would join the two.
+            if (count == 0 && start == lines.Count && lines.Count > 0 && !lines[^1].EndsWith('\n') && change.Text.Length > 0)
+                lines[^1] += ComposeEdits.BreakOf(text);
+
+            lines.RemoveRange(start, count);
+            if (change.Text.Length > 0) lines.Insert(start, change.Text);
+        }
+
+        return string.Concat(lines);
     }
 }
 
@@ -59,7 +91,13 @@ public static class ComposeEdits
     /// <summary>Why an edit was declined, in one sentence. Null when it was made.</summary>
     public sealed record Result(ComposeSplice? Splice, string? Declined)
     {
+        /// <summary>The edit as line changes — the one shape every edit can take, an insertion included.</summary>
+        public IReadOnlyList<ComposeChange> Changes { get; init; } =
+            Splice is null ? [] : [new ComposeChange(Splice.BeforeLine, Splice.BeforeLine - 1, Splice.Text)];
+
         public static Result Made(ComposeSplice splice) => new(splice, null);
+
+        public static Result Changed(IReadOnlyList<ComposeChange> changes) => new(null, null) { Changes = changes };
 
         public static Result No(string why) => new(null, why);
     }
@@ -91,6 +129,31 @@ public static class ComposeEdits
 
     public static Result AddPort(string text, string service, string mapping)
         => AddToList(text, service, "ports", Quote(mapping));
+
+    /// <summary>Mount a named volume into a service: <c>- "data:/var/lib/data"</c>.</summary>
+    public static Result AddVolumeMount(string text, string service, string volume, string path)
+        => AddToList(text, service, "volumes", Quote($"{volume}:{path}"));
+
+    /// <summary>
+    /// Put a service on a network, in whichever form its <c>networks</c> already takes — a list of
+    /// names, or a map whose keys are names (and whose values say how).
+    /// </summary>
+    public static Result JoinNetwork(string text, string service, string network)
+    {
+        var document = ComposeDocument.Parse(text);
+
+        if (document.NodeAt("services", service, "networks") is YamlMappingNode { Style: not MappingStyle.Flow } map)
+        {
+            if (map.Children.Keys.OfType<YamlScalarNode>().Any(k => k.Value == network)) return Result.No($"{service} is already on {network}.");
+
+            var indent = new string(' ', (int)(map.Children.Count > 0 ? map.Children.Keys.First().Start.Column : map.Start.Column) - 1);
+            return Result.Made(new ComposeSplice(LastLine(map) + 1, $"{indent}{network}:{BreakOf(text)}"));
+        }
+
+        if (document.ItemsOf(service, "networks").Any(i => i.Value == network)) return Result.No($"{service} is already on {network}.");
+
+        return AddToList(text, service, "networks", network);
+    }
 
     /// <summary>
     /// Add a variable to a service's <c>environment</c>, in whichever of compose's two forms the
@@ -188,7 +251,7 @@ public static class ComposeEdits
     /// follows it, which may be lines later past blank lines and comments; the last leaf inside it
     /// is where the block's own text actually ends.
     /// </summary>
-    static int LastLine(YamlNode node) => node switch
+    internal static int LastLine(YamlNode node) => node switch
     {
         YamlMappingNode { Children.Count: > 0 } map => LastLine(map.Children.Last().Value) is var v && v > 0 ? v : (int)map.Children.Last().Key.End.Line,
         YamlSequenceNode { Children.Count: > 0 } list => LastLine(list.Children.Last()),
@@ -200,7 +263,7 @@ public static class ComposeEdits
     };
 
     /// <summary>The indentation one level down from a mapping's keys, as the file writes it.</summary>
-    static string? StepUnder(YamlMappingNode parent)
+    internal static string? StepUnder(YamlMappingNode parent)
     {
         foreach (var (key, value) in parent.Children)
         {
@@ -218,10 +281,10 @@ public static class ComposeEdits
         return dash < 0 ? "" : new string(' ', dash);
     }
 
-    static int LineCount(string text) => text.Length == 0 ? 0 : text.Count(c => c == '\n') + (text.EndsWith('\n') ? 0 : 1);
+    internal static int LineCount(string text) => text.Length == 0 ? 0 : text.Count(c => c == '\n') + (text.EndsWith('\n') ? 0 : 1);
 
     internal static string BreakOf(string text) => text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
 
     /// <summary>Double-quoted, so a port mapping is never read as a base-60 number and a value never as a boolean.</summary>
-    static string Quote(string value) => "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    internal static string Quote(string value) => "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 }

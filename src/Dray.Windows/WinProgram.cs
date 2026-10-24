@@ -59,7 +59,14 @@ public static class WinProgram
         builder.Services.AddSingleton<DockerCliContext>();
         builder.Services.AddSingleton<IContainerRuntimeFactory>(
             new CompositeRuntimeFactory(new DockerRuntimeFactory()));
+        // Stacks beyond what is running: remembered ones and the stacks folder. Paths only — see
+        // StackRegistry for why nothing else is written. Missing here, the Stacks page could not
+        // be constructed at all on this head: it injects StackOperations and StackActionService.
+        builder.Services.AddSingleton(new StackRegistry(Path.Combine(DrayPaths.ConfigDirectory, "stacks.json")));
+        builder.Services.AddSingleton<StackCatalog>();
         builder.Services.AddSingleton<EngineManager>();
+        builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
+        builder.Services.AddSingleton<StackOperations>();
 
         // Singleton like the bridge it confirms through: the native sidebar's picker uses it, and
         // the sidebar outlives any page.
@@ -68,6 +75,7 @@ public static class WinProgram
         // that asked for them.
         builder.Services.AddScoped<StatsHub>();
         builder.Services.AddScoped<PruneService>();
+        builder.Services.AddScoped<StackActionService>();
         builder.Services.AddSingleton<RegistryReader>();
         // The registry's own API, for what the engine cannot answer: tags, and what each was built for.
         builder.Services.AddSingleton<RegistryBrowser>();

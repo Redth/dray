@@ -98,7 +98,7 @@ public class StackCatalogTests
     {
         // The exit criterion Phase 5 missed: no containers, so no labels — and still on the list.
         var stacks = StackCatalog.Merge(
-            [], [], [new StackRecord("h", "web", "/s/web", ["/s/web/compose.yaml"])], "/s", Declares, _ => true);
+            [], [], [new StackRecord("h", "web", "/s/web", ["/s/web/compose.yaml"])], ["/s"], Declares, _ => true);
 
         var stack = Assert.Single(stacks);
         Assert.Equal(StackState.Down, stack.State);
@@ -113,7 +113,7 @@ public class StackCatalogTests
     [Fact]
     public void AFolderNeverDeployedHereIsADraft()
     {
-        var stacks = StackCatalog.Merge([], [new StackDefinition("api", "/s/api", ["/s/api/compose.yaml"])], [], "/s", Declares, _ => true);
+        var stacks = StackCatalog.Merge([], [new StackDefinition("api", "/s/api", ["/s/api/compose.yaml"])], [], ["/s"], Declares, _ => true);
 
         Assert.Equal(StackState.Draft, Assert.Single(stacks).State);
     }
@@ -124,7 +124,7 @@ public class StackCatalogTests
         var stacks = StackCatalog.Merge(
             [Observed("web", "/s/web/compose.yaml")],
             [new StackDefinition("web", "/s/web", ["/s/web/compose.yaml"])],
-            [], "/s", Declares, _ => true);
+            [], ["/s"], Declares, _ => true);
 
         var stack = Assert.Single(stacks);
         Assert.Equal(["web", "worker"], stack.Services.Select(s => s.Name));
@@ -140,7 +140,7 @@ public class StackCatalogTests
     {
         var stacks = StackCatalog.Merge(
             [Observed("inside", "/s/inside/compose.yaml"), Observed("outside", "/code/app/compose.yaml"), Observed("remote", "/srv/x/compose.yaml")],
-            [], [], "/s", Declares, path => !path.StartsWith("/srv", StringComparison.Ordinal));
+            [], [], ["/s"], Declares, path => !path.StartsWith("/srv", StringComparison.Ordinal));
 
         Assert.Equal(StackProvenance.Managed, stacks.Single(s => s.Name == "inside").Provenance);
         Assert.Equal(StackProvenance.Adopted, stacks.Single(s => s.Name == "outside").Provenance);
@@ -149,6 +149,28 @@ public class StackCatalogTests
         var remote = stacks.Single(s => s.Name == "remote");
         Assert.Equal(StackProvenance.Observed, remote.Provenance);
         Assert.Equal(["web"], remote.Services.Select(s => s.Name));
+    }
+
+    [Fact]
+    public void EveryStacksFolderManagesWhatIsInIt()
+    {
+        var stacks = StackCatalog.Merge(
+            [],
+            [new StackDefinition("web", "/s/web", ["/s/web/compose.yaml"]), new StackDefinition("infra", "/code/ops/infra", ["/code/ops/infra/compose.yaml"])],
+            [], ["/s", "/code/ops"], Declares, _ => true);
+
+        Assert.All(stacks, s => Assert.Equal(StackProvenance.Managed, s.Provenance));
+    }
+
+    [Fact]
+    public void AStackBelongsToTheFolderItIsIn()
+    {
+        string[] folders = ["/s", "/code/ops"];
+
+        Assert.Equal("/code/ops", StackCatalog.FolderOf("/code/ops/infra", folders));
+        Assert.Equal("/s", StackCatalog.FolderOf("/s/deep/web", folders));
+        Assert.Null(StackCatalog.FolderOf("/code/app", folders));
+        Assert.Null(StackCatalog.FolderOf(null, folders));
     }
 
     [Fact]
@@ -182,12 +204,12 @@ public sealed class StackRegistryTests : IDisposable
     public void WhatIsRememberedSurvivesARestart()
     {
         var registry = new StackRegistry(PathOf);
-        registry.SetStacksFolder(_dir);
+        registry.AddStacksFolder(_dir);
         Assert.True(registry.Remember(new StackRecord("h", "web", "/s/web", ["/s/web/compose.yaml"])));
 
         var reopened = new StackRegistry(PathOf);
 
-        Assert.Equal(System.IO.Path.GetFullPath(_dir), reopened.StacksFolder);
+        Assert.Equal([System.IO.Path.GetFullPath(_dir)], reopened.StacksFolders);
         Assert.Equal("web", Assert.Single(reopened.KnownOn("h")).Project);
         Assert.Empty(reopened.KnownOn("other"));
     }
@@ -222,14 +244,99 @@ public sealed class StackRegistryTests : IDisposable
     }
 
     [Fact]
+    public void ASecondProcessSavingDoesNotUndoTheFirst()
+    {
+        // The dev host beside the app, or two windows: both opened the file before either wrote.
+        var app = new StackRegistry(PathOf);
+        var devHost = new StackRegistry(PathOf);
+
+        app.AddStacksFolder(_dir);
+        app.Adopt("/elsewhere/api");
+
+        // The dev host sees a stack come up and records it. Writing from what it read at startup
+        // would put back a file with no stacks folder — how a chosen folder used to disappear.
+        Assert.True(devHost.Remember(new StackRecord("h", "web", "/s/web", ["/s/web/compose.yaml"])));
+
+        var reopened = new StackRegistry(PathOf);
+        Assert.Equal([System.IO.Path.GetFullPath(_dir)], reopened.StacksFolders);
+        Assert.Equal([System.IO.Path.GetFullPath("/elsewhere/api")], reopened.AdoptedFolders);
+        Assert.Equal("web", Assert.Single(reopened.KnownOn("h")).Project);
+
+        // And the one that wrote last now reads the other's choice too.
+        Assert.Equal([System.IO.Path.GetFullPath(_dir)], devHost.StacksFolders);
+    }
+
+    [Fact]
+    public void AFileThatBreaksMidSessionKeepsWhatWasInMemory()
+    {
+        var registry = new StackRegistry(PathOf);
+        registry.AddStacksFolder(_dir);
+
+        File.WriteAllText(PathOf, "{ not json");
+        registry.Remember(new StackRecord("h", "web", "/s/web", []));
+
+        // An unreadable file is not an empty one: the folder chosen this session survives.
+        Assert.Equal([System.IO.Path.GetFullPath(_dir)], new StackRegistry(PathOf).StacksFolders);
+    }
+
+    [Fact]
     public void AFileDrayCannotReadStartsEmptyRatherThanFailing()
     {
         File.WriteAllText(PathOf, "{ not json");
 
         var registry = new StackRegistry(PathOf);
 
-        Assert.Null(registry.StacksFolder);
+        Assert.Empty(registry.StacksFolders);
         Assert.Empty(registry.AdoptedFolders);
+    }
+
+    [Fact]
+    public void TheOneFolderOfEarlierVersionsBecomesTheFirstOfTheList()
+    {
+        File.WriteAllText(PathOf, """{ "version": 1, "stacksFolder": "/s", "adopted": [], "stacks": [], "forgotten": [] }""");
+
+        var registry = new StackRegistry(PathOf);
+        Assert.Equal(["/s"], registry.StacksFolders);
+
+        // Written back as the list, and only the list: one place to read it from.
+        registry.AddStacksFolder("/code/ops");
+        var json = File.ReadAllText(PathOf);
+        Assert.DoesNotContain("\"stacksFolder\"", json, StringComparison.Ordinal);
+        Assert.Equal(["/s", System.IO.Path.GetFullPath("/code/ops")], new StackRegistry(PathOf).StacksFolders);
+    }
+
+    [Fact]
+    public void AFolderIsAddedOnceAndInTheOrderChosen()
+    {
+        var registry = new StackRegistry(PathOf);
+        var changes = 0;
+        registry.Changed += () => changes++;
+
+        registry.AddStacksFolder("/s");
+        registry.AddStacksFolder("/code/ops");
+        registry.AddStacksFolder("/s/");
+
+        Assert.Equal([System.IO.Path.GetFullPath("/s"), System.IO.Path.GetFullPath("/code/ops")], registry.StacksFolders);
+        Assert.Equal(2, changes);
+    }
+
+    [Fact]
+    public void RemovingAFolderStopsListingItsStacksAndTouchesNothingElse()
+    {
+        var registry = new StackRegistry(PathOf);
+        registry.AddStacksFolder("/s");
+        registry.AddStacksFolder("/code/ops");
+        registry.Remember(new StackRecord("h", "infra", "/code/ops/infra", ["/code/ops/infra/compose.yaml"]));
+        registry.Remember(new StackRecord("h", "web", "/s/web", ["/s/web/compose.yaml"]));
+        registry.Remember(new StackRecord("h", "far", "/code/ops/far", ["/code/ops/far/compose.yaml"], OnHost: true));
+
+        registry.RemoveStacksFolder("/code/ops/");
+
+        Assert.Equal([System.IO.Path.GetFullPath("/s")], registry.StacksFolders);
+
+        // A remembered stack from that folder would otherwise come back as one added by hand. One
+        // whose files are on the engine's host was never in it, whatever its path says.
+        Assert.Equal(["far", "web"], registry.KnownOn("h").Select(r => r.Project).Order());
     }
 
     [Fact]

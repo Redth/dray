@@ -91,6 +91,13 @@ public enum DialogSize
 
     /// <summary>Something being read — a document, a log, a response.</summary>
     Large,
+
+    /// <summary>
+    /// Work that needs the room of a window of its own — an editor beside the form that feeds it.
+    /// A separate, resizable window on a head that has them, so the window behind stays usable; the
+    /// largest dialog the head draws where it does not.
+    /// </summary>
+    Window,
 }
 
 /// <summary>

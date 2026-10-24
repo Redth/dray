@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject EngineManager Engine
 @inject IShellBridge Shell
+@inject ShellCapabilities Caps
 @inject NavigationManager Nav
 @inject StackActionService Actions
 @inject StackOperations Operations
@@ -10,7 +11,7 @@
     @* Declared inside EngineScope, not above it: this page's chrome reports a count that comes
        from the store, and EngineScope re-renders only its own child content. Left outside, the
        toolbar would keep the subtitle it had when the page opened. *@
-    <PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="s => _search = s" />
+    <PageChromeScope Chrome="Chrome" OnAction="HandleAction" OnSearch="s => _search = s" OnFilter="HandleFilter" />
 
     <div class="page page--flush">
         @if (_notice is { } notice)
@@ -37,13 +38,17 @@
                         Choose a folder for compose projects. Dray lists every stack in it — including ones
                         you have never deployed — and keeps a stack on this list after it is brought down.
                         Your files stay plain files; <span class="mono">docker compose</span> works on them as before.
+                        You can add more folders later.
                     </p>
                 </div>
 
                 <div class="stacks__setup-actions">
                     <Button Label="@($"Use {Display(DrayPaths.SuggestedStacksFolder)}")" Variant="ButtonVariant.Primary"
                             OnClick="UseSuggestedFolderAsync" />
-                    <Button Label="Choose a folder…" Variant="ButtonVariant.Secondary" OnClick="ChooseFolderAsync" />
+                    @if (Caps.HasNativeDialogs)
+                    {
+                        <Button Label="Choose a folder…" Variant="ButtonVariant.Secondary" OnClick="ChooseFolderAsync" />
+                    }
                 </div>
             </section>
         }
@@ -60,107 +65,133 @@
             <NotOnThisEngine Feature="stacks" Icon="IconRef.Stack"
                              Instead="Compose does not target this engine, so nothing here carries the labels a stack is made of. Switch to a Docker-compatible host on the Hosts page." />
         }
-        else if (Visible.Count == 0)
+        else if (Groups.Count == 0)
         {
             <EmptyState Icon="IconRef.Stack"
                         Title="@(_search.Length > 0 ? "No stacks match" : "No stacks")"
-                        Body="@(_search.Length > 0
-                            ? "Nothing here matches the current search."
-                            : "A stack appears here as soon as one is running — including one brought up from a terminal — and every compose project in your stacks folder is listed whether or not it has run. Add a folder from elsewhere with Add folder.")" />
+                        Body="@(_search.Length > 0 ? "Nothing here matches the current search." : EmptyBody)" />
         }
         else
         {
-            <div class="stacks">
-                @foreach (var stack in Visible)
-                {
-                    var open = IsOpen(stack);
-                    var services = $"services-{stack.Name}";
-                    var captured = stack;
+            @foreach (var group in Groups)
+            {
+                <div class="stacks__group" @key="group.Key">
+                    @if (group.Title is { } title)
+                    {
+                        @* A folder's stacks under the folder, with the folder's own commands — the
+                           same ones the line above the ungrouped list has. *@
+                        <div class="stacks__group-head">
+                            <Icon Name="@(group.Folder is null ? IconRef.Stack : IconRef.Folder)" Size="IconSize.Sm" Class="stacks__group-icon" />
+                            <h2 class="stacks__group-title @(group.Folder is null ? null : "mono")" title="@(group.Folder ?? group.Detail)">@title</h2>
 
-                    <section class="stacks__card card @(stack.IsDown ? "is-down" : null)" @key="stack.Name">
-                        <div class="panel__head stacks__head">
-                            <button type="button" class="stacks__toggle" aria-expanded="@open"
-                                    aria-controls="@services"
-                                    aria-label="@($"{(open ? "Hide" : "Show")} the services in {stack.Name}")"
-                                    @onclick="() => Toggle(captured)">
-                                <Icon Name="IconRef.ChevronRight" Size="IconSize.Sm" />
-                            </button>
-
-                            <Icon Name="IconRef.Stack" Size="IconSize.Sm" Class="stacks__glyph" />
-
-                            <h3 class="panel__title">
-                                <a href="@($"/stacks/{Uri.EscapeDataString(stack.Name)}")">@stack.Name</a>
-                            </h3>
-                            <StatePill Status="stack.Status" />
-
-                            @if (HealthPill(stack) is { } health)
+                            @if (group.Folder is { } folder)
                             {
-                                <StatePill Status="health" />
+                                <OverflowMenu Actions="FolderCommands(folder)" Label="@($"Commands for {Display(folder)}")"
+                                              TriggerClass="btn--ghost" OnAction="id => RunFolderAsync(folder, id)" />
                             }
 
-                            <span class="muted stacks__count">
-                                @stack.Services.Count service@(stack.Services.Count == 1 ? "" : "s")
-                                @if (!stack.IsDown)
-                                {
-                                    <text> · @stack.RunningCount/@stack.ContainerCount running</text>
-                                }
-                            </span>
+                            <span class="stacks__group-count" title="@($"{group.Stacks.Count} stack{(group.Stacks.Count == 1 ? "" : "s")}")" aria-label="@($"{group.Stacks.Count} stack{(group.Stacks.Count == 1 ? "" : "s")}")">@group.Stacks.Count</span>
+                        </div>
+                    }
 
-                            <span class="muted mono stacks__where" title="@Where(stack).Title">@Where(stack).Text</span>
+                    @if (group.Stacks.Count == 0 && group.Folder is { } empty)
+                    {
+                        @* An empty folder is a place a stack can go, so where its cards would be is
+                           the way to put one there: the same dashed slot the hosts list ends with. *@
+                        <button type="button" class="stacks__add" aria-label="@($"New stack in {Display(empty)}")"
+                                @onclick="() => NewStackAsync(empty)">
+                            <Icon Name="IconRef.Plus" Size="IconSize.Sm" />
+                            <span>New stack in this folder…</span>
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="stacks">
+                            @foreach (var stack in group.Stacks)
+                            {
+                                var open = IsOpen(stack);
+                                var services = $"services-{stack.Name}";
+                                var captured = stack;
 
-                            @if (_composeMissing)
-                            {
-                                @* Compose is a separate CLI, and a stack can be running that Dray
-                                   cannot drive. Saying so beats buttons that fail on click. *@
-                                <span class="muted stacks__note" title="Install Docker Compose to control stacks from Dray">
-                                    <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
-                                    compose not installed
-                                </span>
-                            }
-                            else
-                            {
-                                @* The action the stack's state invites on the card, the rest behind
-                                   a ⋯. The stack's name is in each accessible label rather than on
-                                   screen: with a card per stack, four controls reading "Stop" are
-                                   only distinguishable by which card they are in. *@
-                                <RowActions Actions="CommandsFor(stack)" Visible="1"
-                                            MenuLabel="@($"More commands for {stack.Name}")"
-                                            OnAction="id => RunAsync(captured, id)" />
+                                <section class="stacks__card card @(stack.IsDown ? "is-down" : null)" @key="stack.Name">
+                                    <div class="panel__head stacks__head">
+                                        <button type="button" class="stacks__toggle" aria-expanded="@open"
+                                                aria-controls="@services"
+                                                aria-label="@($"{(open ? "Hide" : "Show")} the services in {stack.Name}")"
+                                                @onclick="() => Toggle(captured)">
+                                            <Icon Name="IconRef.ChevronRight" Size="IconSize.Sm" />
+                                        </button>
+
+                                        <Icon Name="IconRef.Stack" Size="IconSize.Sm" Class="stacks__glyph" />
+
+                                        <h3 class="panel__title">
+                                            <a href="@($"/stacks/{Uri.EscapeDataString(stack.Name)}")">@stack.Name</a>
+                                        </h3>
+                                        <StatePill Status="stack.Status" />
+
+                                        @if (HealthPill(stack) is { } health)
+                                        {
+                                            <StatePill Status="health" />
+                                        }
+
+                                        <span class="muted stacks__count">
+                                            @stack.Services.Count service@(stack.Services.Count == 1 ? "" : "s")
+                                            @if (!stack.IsDown)
+                                            {
+                                                <text> · @stack.RunningCount/@stack.ContainerCount running</text>
+                                            }
+                                        </span>
+
+                                        <span class="muted mono stacks__where" title="@Where(stack).Title">@Where(stack).Text</span>
+
+                                        @if (_composeMissing)
+                                        {
+                                            @* Compose is a separate CLI, and a stack can be running that Dray
+                                               cannot drive. Saying so beats buttons that fail on click. *@
+                                            <span class="muted stacks__note" title="Install Docker Compose to control stacks from Dray">
+                                                <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+                                                compose not installed
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            @* The action the stack's state invites on the card, the rest behind
+                                               a ⋯. The stack's name is in each accessible label rather than on
+                                               screen: with a card per stack, four controls reading "Stop" are
+                                               only distinguishable by which card they are in. *@
+                                            <RowActions Actions="CommandsFor(stack)" Visible="1"
+                                                        MenuLabel="@($"More commands for {stack.Name}")"
+                                                        OnAction="id => RunAsync(captured, id)" />
+                                        }
+                                    </div>
+
+                                    <OperationLog Stack="@stack.Name" />
+
+                                    @* The wrapper is always here so the disclosure button always has something
+                                       to point aria-controls at; the table itself is only built when it is
+                                       being shown. *@
+                                    <div id="@services" class="stacks__services">
+                                        @if (open)
+                                        {
+                                    @* Flush: this is the card's content, and a card inside a card is always
+                                       wrong. Columns from StackServiceGrid — narrower than the containers
+                                       list, because the stack's own name and state are already above it. *@
+                                    <DataTable TRow="StackService"
+                                               Flush="true"
+                                               Columns="StackServiceGrid.Columns()"
+                                               Rows="stack.Services"
+                                               Values="s => StackServiceGrid.Row(s)"
+                                               Key="s => s.Name"
+                                               ActionsFor="s => Actions.ServiceActionsFor(captured, s)"
+                                               OnAction="a => RunServiceAsync(captured, a.Row, a.Action)" />
+                                        }
+                                    </div>
+                                </section>
                             }
                         </div>
-
-                        <OperationLog Stack="@stack.Name" />
-
-                        @* The wrapper is always here so the disclosure button always has something
-                           to point aria-controls at; the table itself is only built when it is
-                           being shown. *@
-                        <div id="@services" class="stacks__services">
-                            @if (open)
-                            {
-                        @* Flush: this is the card's content, and a card inside a card is always
-                           wrong. Columns from StackServiceGrid — narrower than the containers
-                           list, because the stack's own name and state are already above it. *@
-                        <DataTable TRow="StackService"
-                                   Flush="true"
-                                   Columns="StackServiceGrid.Columns()"
-                                   Rows="stack.Services"
-                                   Values="s => StackServiceGrid.Row(s)"
-                                   Key="s => s.Name"
-                                   ActionsFor="s => Actions.ServiceActionsFor(captured, s)"
-                                   OnAction="a => RunServiceAsync(captured, a.Row, a.Action)" />
-                            }
-                        </div>
-                    </section>
-                }
-            </div>
-        }
-
-        @if (Engine.Catalog?.Registry.StacksFolder is { } folder)
-        {
-            <p class="stacks__folder muted">
-                Stacks folder <span class="mono" title="@folder">@Display(folder)</span>
-                <Button Label="Change…" Variant="ButtonVariant.Ghost" OnClick="ChooseFolderAsync" />
-            </p>
+                    }
+                </div>
+            }
         }
 
         @if (_watching is not null || _output.Count > 0)
@@ -216,6 +247,9 @@
     bool _noticeOk;
     bool _composeMissing;
 
+    /// <summary>Whether the list is in a group per stacks folder, as the toolbar's Group menu says.</summary>
+    bool _byFolder;
+
     /// <summary>What <c>compose watch</c> has printed. Every other command's output is its operation's.</summary>
     readonly List<string> _output = [];
 
@@ -240,7 +274,12 @@
         if (operation.Lines.Count <= 1 || !operation.IsRunning) InvokeAsync(StateHasChanged);
     }
 
-    bool NeedsFolder => Engine.Catalog is { Registry.StacksFolder: null };
+    bool NeedsFolder => Engine.Catalog is { Registry.StacksFolders.Count: 0 };
+
+    IReadOnlyList<string> Folders => Engine.Catalog?.Registry.StacksFolders ?? [];
+
+    /// <summary>Grouped only where there is a folder to group by.</summary>
+    bool ByFolder => _byFolder && Folders.Count > 0;
 
     /// <summary>A home-relative path, the way a shell would show it.</summary>
     static string Display(string path)
@@ -249,12 +288,36 @@
         return path.StartsWith(home, StringComparison.Ordinal) ? "~" + path[home.Length..] : path;
     }
 
+    /// <summary>What the platform calls its file manager, because that is what the button opens.</summary>
+    static string RevealLabel => OperatingSystem.IsWindows() ? "Show in File Explorer" : "Show in Finder";
+
+    /// <summary>
+    /// The empty list, explained. Names the folder when there is one, since "your stacks folder" is
+    /// a riddle when the answer is already known, and mentions Add folder only where it is offered.
+    /// </summary>
+    string EmptyBody
+    {
+        get
+        {
+            var where = Folders switch
+            {
+                [var only] => Display(only),
+                { Count: 0 } => "your stacks folder",
+                var many => $"your {many.Count} stacks folders",
+            };
+
+            var body = $"A stack appears here as soon as one is running — including one brought up from a terminal — and every compose project in {where} is listed whether or not it has run.";
+
+            return Caps.HasNativeDialogs ? body + " Add a folder from elsewhere with Add folder." : body;
+        }
+    }
+
     async Task UseSuggestedFolderAsync()
     {
         try
         {
             Directory.CreateDirectory(DrayPaths.SuggestedStacksFolder);
-            Engine.Catalog?.Registry.SetStacksFolder(DrayPaths.SuggestedStacksFolder);
+            Engine.Catalog?.Registry.AddStacksFolder(DrayPaths.SuggestedStacksFolder);
         }
         catch (Exception ex)
         {
@@ -267,80 +330,133 @@
     async Task ChooseFolderAsync()
     {
         if (await Shell.PickFolderAsync("Choose the folder your stacks live in") is { } folder)
-            Engine.Catalog?.Registry.SetStacksFolder(folder);
+            Engine.Catalog?.Registry.AddStacksFolder(folder);
+    }
+
+    /// <summary>What can be done to one stacks folder, from its line or its group's heading.</summary>
+    IReadOnlyList<RowAction> FolderCommands(string folder)
+    {
+        var commands = new List<RowAction> { new("new", "New stack here…", IconRef.Plus) };
+
+        if (Caps.HasNativeDialogs) commands.Add(new("reveal", RevealLabel, IconRef.Folder));
+
+        commands.Add(new("copy", "Copy path", IconRef.Copy));
+
+        // Not a danger action: nothing on disk is touched, and adding the folder again undoes it.
+        commands.Add(new("remove", "Remove from Dray", IconRef.Close, "Stop listing the stacks in this folder. Its files are left alone"));
+
+        return commands;
+    }
+
+    async Task RunFolderAsync(string folder, string command)
+    {
+        switch (command)
+        {
+            case "new":
+                await NewStackAsync(folder);
+                break;
+
+            case "reveal":
+                await Shell.RevealInFileManagerAsync(folder);
+                break;
+
+            case "copy":
+                await Shell.WriteClipboardAsync(folder);
+                break;
+
+            case "remove":
+                Engine.Catalog?.Registry.RemoveStacksFolder(folder);
+                Notify($"Stopped listing {Display(folder)}. Its files are untouched, and a stack from it that is running stays listed while it runs.", ok: true);
+                break;
+        }
     }
 
     /// <summary>
-    /// Write a new stack into the stacks folder and open it in the editor.
+    /// Write a new stack into a stacks folder and open it in the editor.
     /// <para>
-    /// The stacks folder is where it goes, so it has to have been chosen first — the card at the
-    /// top of the page is how, and it is what this says rather than picking a folder silently.
+    /// A stacks folder is where it goes, so one has to have been chosen first — the card at the top
+    /// of the page is how, and it is what this says rather than picking a folder silently. With more
+    /// than one, the window asks which, starting from <paramref name="into"/> or else the first.
     /// </para>
     /// </summary>
-    async Task NewStackAsync()
+    async Task NewStackAsync(string? into = null)
     {
         if (Engine.Catalog is not { } catalog) return;
 
-        if (catalog.Registry.StacksFolder is not { } folder)
+        var folders = catalog.Registry.StacksFolders;
+
+        if (folders.Count == 0)
         {
-            Notify("Choose where stacks live first — a new stack is written into that folder.", ok: false);
+            Notify("Choose where stacks live first — a new stack is written into a stacks folder.", ok: false);
             return;
         }
 
-        var request = new NewStackRequest { StacksFolder = folder, Existing = [.. Engine.Stacks.Select(s => s.Name)] };
-
-        var choice = await Shell.ShowDialogAsync(new DialogRequest(
-            "New stack",
-            typeof(NewStackDialog),
-            new Dictionary<string, object?> { [nameof(NewStackDialog.Request)] = request },
-            [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
-            Subtitle: $"In {Display(folder)}",
-            Size: DialogSize.Large));
-
-        if (choice != "create") return;
-
-        if (!request.IsComplete || request.Result is not { } result)
+        var request = new NewStackRequest
         {
-            Notify(request.NameProblem ?? request.SourceProblem ?? "Nothing was created: the stack needs a name and a compose file.", ok: false);
-            return;
-        }
+            StacksFolder = into ?? folders[0],
+            Folders = folders,
+            Existing = [.. Engine.Stacks.Select(s => s.Name)],
+        };
 
-        var (_, problem) = StackCreation.Create(folder, request.Name, result);
-
-        if (problem is not null)
-        {
-            Notify(problem, ok: false);
-            return;
-        }
+        // Its own window, written there; what comes back is the name of a stack that now exists.
+        if (await NewStackDialog.ShowAsync(Shell, request) is not { } name) return;
 
         // Now, not when the watcher next fires: the page about to open has to find it.
         catalog.Refresh();
-        Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(request.Name)}?tab=compose");
+        Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(name)}?tab=compose");
     }
 
     /// <summary>
-    /// Add one existing compose project from outside the stacks folder. Its files stay where they
-    /// are, and Dray will never delete them — that is what makes it adopted rather than managed.
+    /// Add a folder, read for what it is.
+    /// <para>
+    /// A compose file at its top makes it one stack, added where it is: its files stay put, and Dray
+    /// will never delete them — that is what makes it adopted rather than managed. Anything else is
+    /// a folder of stacks, scanned like the first one and offered as a place for new ones. Asking
+    /// which was meant would be a question the folder already answers.
+    /// </para>
     /// </summary>
-    async Task AdoptAsync()
+    async Task AddFolderAsync()
     {
         if (Engine.Catalog is not { } catalog) return;
-        if (await Shell.PickFolderAsync("Add a folder that holds a compose project") is not { } folder) return;
+        if (await Shell.PickFolderAsync("Add a folder of stacks, or one stack's folder") is not { } folder) return;
 
-        if (StackFolder.Read(folder) is not { } definition)
+        var folders = catalog.Registry.StacksFolders;
+
+        if (StackFolder.Read(folder) is { } definition)
         {
-            Notify($"{Display(folder)} has no compose.yaml or docker-compose.yml, so there is no stack in it to add.", ok: false);
+            if (StackCatalog.FolderOf(folder, folders) is { } within)
+            {
+                Notify($"{definition.Project} is in {Display(within)}, so it is already listed.", ok: true);
+                return;
+            }
+
+            catalog.Registry.Adopt(folder);
+            Notify($"Added {definition.Project}. Its files stay in {Display(folder)}, and Dray will never delete them.", ok: true);
             return;
         }
 
-        if (StackCatalog.IsUnder(folder, catalog.Registry.StacksFolder))
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+
+        if (folders.Contains(full, StackCatalog.PathComparer))
         {
-            Notify($"{definition.Project} is already in the stacks folder, so it is already listed.", ok: true);
+            Notify($"{Display(folder)} is already a stacks folder.", ok: true);
             return;
         }
 
-        catalog.Registry.Adopt(folder);
-        Notify($"Added {definition.Project}. Its files stay in {Display(folder)}, and Dray will never delete them.", ok: true);
+        if (StackCatalog.FolderOf(folder, folders) is { } parent)
+        {
+            Notify($"{Display(folder)} is inside {Display(parent)}, so the stacks in it are already listed.", ok: true);
+            return;
+        }
+
+        catalog.Registry.AddStacksFolder(folder);
+
+        Notify(StackFolder.Scan(folder).Count switch
+        {
+            0 => $"Added {Display(folder)}. There are no stacks in it yet; New stack can write one there.",
+            1 => $"Added {Display(folder)}, and the one stack in it.",
+            var found => $"Added {Display(folder)}, and the {found} stacks in it.",
+        }, ok: true);
     }
 
     /// <summary>Health, as a second pill — only when there is something to say.</summary>
@@ -354,8 +470,8 @@
     /// <summary>Where a stack's files are, said briefly, and why that decides what it offers.</summary>
     static (string Text, string Title) Where(StackSummary stack) => stack.Provenance switch
     {
-        StackProvenance.Managed => (Display(stack.WorkingDirectory ?? ""), "In the stacks folder"),
-        StackProvenance.Adopted => (Display(stack.WorkingDirectory ?? ""), "Added from outside the stacks folder — Dray never deletes these files"),
+        StackProvenance.Managed => (Display(stack.WorkingDirectory ?? ""), "In a stacks folder"),
+        StackProvenance.Adopted => (Display(stack.WorkingDirectory ?? ""), "Added on its own, outside the stacks folders — Dray never deletes these files"),
         StackProvenance.Remote => ($"{stack.WorkingDirectory} on the host", "Its files are on the engine's host. Compose runs there, over SSH, and the editor reads and writes them there"),
         _ => ("files not on this machine", "Its compose files are on the machine that started it, so it can be started, stopped and brought down but not deployed from here"),
     };
@@ -378,9 +494,67 @@
         }
     }
 
+    /// <summary>One run of cards, under a heading when the list is grouped.</summary>
+    /// <param name="Folder">The stacks folder the group is, or null for one that is not a folder.</param>
+    /// <param name="Detail">Said in the heading's tooltip where there is no path to show there.</param>
+    sealed record StackGroup(string Key, string? Folder, string? Title, IReadOnlyList<StackSummary> Stacks, string? Detail = null);
+
+    /// <summary>
+    /// The list as it is shown: one ungrouped run, or a group per stacks folder — in the order they
+    /// were added, an empty one included so a folder just added is visibly there, unless a search
+    /// is narrowing the list — and a last group for every stack that is in none of them. Nothing at
+    /// all when there is nothing to show, which is when the page explains itself instead.
+    /// </summary>
+    IReadOnlyList<StackGroup> Groups
+    {
+        get
+        {
+            var visible = Visible;
+
+            if (!ByFolder) return visible.Count == 0 ? [] : [new StackGroup("all", null, null, visible)];
+
+            var folders = Folders;
+            var searching = _search.Length > 0;
+
+            // Managed is the catalog's word for "in a stacks folder". A stack whose files are on the
+            // engine's host can have a path that happens to look like a local folder's; it is not in it.
+            string? FolderOf(StackSummary stack) => stack.Provenance == StackProvenance.Managed
+                ? StackCatalog.FolderOf(stack.WorkingDirectory, folders)
+                : null;
+
+            var groups = new List<StackGroup>();
+
+            foreach (var folder in folders)
+            {
+                var stacks = visible.Where(s => FolderOf(s) == folder).ToList();
+                if (stacks.Count > 0 || !searching) groups.Add(new StackGroup(folder, folder, Display(folder), stacks));
+            }
+
+            var elsewhere = visible.Where(s => FolderOf(s) is null).ToList();
+
+            if (elsewhere.Count > 0)
+            {
+                groups.Add(new StackGroup("elsewhere", null, "Not in a stacks folder", elsewhere,
+                    "Added on their own, or found running with their files somewhere else"));
+            }
+
+            // Searching, an empty folder is left out, so nothing matching leaves no groups at all.
+            return groups;
+        }
+    }
+
     IReadOnlyList<RowAction> CommandsFor(StackSummary stack)
     {
         var commands = Actions.ActionsFor(stack).ToList();
+
+        // A stack's own logs are on its card, where it is clear whose they are. They were a toolbar
+        // button that opened whichever stack happened to be running first, and did nothing at all
+        // when none was. First in the menu: reading comes before anything that changes the stack.
+        if (stack.ContainerCount > 0)
+        {
+            commands.Insert(Math.Min(1, commands.Count), new RowAction(
+                "logs", $"Logs for {stack.Name}", IconRef.Logs, "Every service's output, interleaved and keyed by colour"));
+        }
 
         // Watch is offered only where it would do something: compose has to be new enough to have
         // the subcommand, and the file has to say what to watch. Without both, `compose watch`
@@ -440,6 +614,12 @@
         if (command == "watch")
         {
             await WatchAsync(stack);
+            return;
+        }
+
+        if (command == "logs")
+        {
+            Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(stack.Name)}/logs");
             return;
         }
 
@@ -559,22 +739,71 @@
                     ? null
                     : $"{stacks.Count} on {Engine.Selected.Name}",
                 Search: new ChromeSearch("Filter stacks", _search),
-                Actions:
-                [
-                    ChromeAction.Primary("new", "New stack", IconRef.Plus),
-                    ChromeAction.Secondary("adopt", "Add folder", IconRef.Folder),
-                    ChromeAction.Secondary("logs", "Aggregated logs", IconRef.Logs),
-                ]);
+                // Add folder is a folder picker and nothing else, so it is offered only where the
+                // host has one. In a browser it was a button that did nothing.
+                Actions: [ChromeAction.Primary("new", "New stack", IconRef.Plus)],
+                Menus: [FoldersMenu],
+                // A view, not a filter: every stack stays listed either way. Offered once there is a
+                // folder to group by.
+                Filters: Folders.Count == 0
+                    ? null
+                    : [new ChromeFilter("group", "Group", [new ChromeFilterOption("No grouping"), new ChromeFilterOption("Group by folder")], _byFolder ? 1 : 0)]);
         }
     }
 
     async Task HandleAction(string id)
     {
         if (id == "new") await NewStackAsync();
-        if (id == "adopt") await AdoptAsync();
+        if (id == "add-folder") await AddFolderAsync();
 
-        if (id == "logs" && Engine.Stacks.FirstOrDefault(s => !s.IsDown) is { } first)
-            Nav.NavigateTo($"/stacks/{Uri.EscapeDataString(first.Name)}/logs");
+        // "folder-reveal:/Users/me/Stacks" — the command, then the folder it is for.
+        if (id.StartsWith("folder-", StringComparison.Ordinal) && id.IndexOf(':') is var colon and > 0)
+            await RunFolderAsync(id[(colon + 1)..], id["folder-".Length..colon]);
+    }
+
+    /// <summary>
+    /// The stacks folders, in the toolbar: each one with what can be done to it, then a way to add
+    /// another. Where the list comes from belongs with how it is grouped and filtered, not in a line
+    /// above the cards that every visit has to read past.
+    /// <para>
+    /// Add folder is a folder picker and nothing else, so it is offered only where the host has one.
+    /// </para>
+    /// </summary>
+    ChromeMenu FoldersMenu
+    {
+        get
+        {
+            var folders = Folders;
+
+            List<ChromeMenuItem> rows =
+            [
+                .. folders.Select(folder => new ChromeMenuItem(
+                    $"folder:{folder}",
+                    Display(folder),
+                    IconRef.Folder,
+                    [.. FolderCommands(folder).Select(c => new ChromeMenuItem($"folder-{c.Id}:{folder}", c.Label, c.Icon))])),
+            ];
+
+            if (Caps.HasNativeDialogs)
+            {
+                if (rows.Count > 0) rows.Add(ChromeMenuItem.Separator);
+                rows.Add(new ChromeMenuItem("add-folder", "Add folder…", IconRef.Plus));
+            }
+
+            var label = folders.Count switch
+            {
+                0 => "Folders",
+                1 => "1 folder",
+                var n => $"{n} folders",
+            };
+
+            return new ChromeMenu("folders", label, IconRef.Folder, rows);
+        }
+    }
+
+    void HandleFilter((string FilterId, int Index) change)
+    {
+        if (change.FilterId == "group") _byFolder = change.Index == 1;
     }
 
     public void Dispose()

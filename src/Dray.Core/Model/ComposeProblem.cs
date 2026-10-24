@@ -152,11 +152,29 @@ public static partial class ComposeProblems
                 attribute.Groups["msg"].Value, severity, attribute.Groups["file"].Value, [attribute.Groups["key"].Value]);
         }
 
+        // services.web.environment.[0]: unexpected type map[string]interface {}
+        // — a list item of the wrong kind, said in Go's words. Placed on the item, and said in
+        // the file's: a mapping where a string belongs.
+        if (Typed().Match(text) is { Success: true } typed)
+        {
+            var path = typed.Groups["path"].Value;
+            var message = GoType().Replace(typed.Groups["msg"].Value, m => m.Value.StartsWith("map[", StringComparison.Ordinal) ? "a mapping" : m.Value.StartsWith("[]", StringComparison.Ordinal) ? "a list" : m.Value);
+
+            if (message.StartsWith("unexpected type ", StringComparison.Ordinal))
+                message = $"cannot be {message["unexpected type ".Length..]} here";
+
+            return new ComposeProblem($"{path} {message}", severity, Path: [.. Dotted(path).Select(Index)]);
+        }
+
         return new ComposeProblem(text, severity);
     }
 
     /// <summary><c>services.web.ports.[].target</c> → services, web, ports, [], target.</summary>
     static List<string> Dotted(string path) => [.. path.Split('.', StringSplitOptions.RemoveEmptyEntries)];
+
+    /// <summary>A list position as compose writes it in a path, <c>[0]</c>, as the document indexes it, <c>0</c>.</summary>
+    static string Index(string segment)
+        => segment.Length > 2 && segment[0] == '[' && segment[^1] == ']' && int.TryParse(segment[1..^1], out _) ? segment[1..^1] : segment;
 
     /// <summary><c>services[web].mem_limit</c> → services, web, mem_limit.</summary>
     static List<string> Bracketed(string path)
@@ -188,6 +206,14 @@ public static partial class ComposeProblems
 
     [GeneratedRegex(@"^(?<file>/.+?|[A-Za-z]:\\.+?): (?<msg>the attribute `(?<key>[^`]+)` .+)$", RegexOptions.CultureInvariant)]
     private static partial Regex Attribute();
+
+    /// <summary>A dotted path into the file, then a colon: <c>services.web.environment.[0]: …</c>.</summary>
+    [GeneratedRegex(@"^(?<path>[A-Za-z_][\w-]*(?:\.(?:[\w-]+|\[\d+\]))+): (?<msg>.+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex Typed();
+
+    /// <summary>Go's names for the YAML shapes: <c>map[string]interface {}</c>, <c>[]interface {}</c>.</summary>
+    [GeneratedRegex(@"map\[[^\]]*\][\w.]*(?: ?\{\})?|\[\][\w.]*(?: ?\{\})?", RegexOptions.CultureInvariant)]
+    private static partial Regex GoType();
 }
 
 /// <summary>A problem, the file of the stack it belongs to, and where in that file.</summary>

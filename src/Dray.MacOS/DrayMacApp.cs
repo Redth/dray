@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using AppKit;
-using CoreGraphics;
 using Dray.Core.Engine;
 using Dray.Core.Navigation;
 using Dray.Core.Shell;
@@ -91,23 +90,6 @@ public sealed class DrayMacApp : Application
 
         MacOSFlyoutPage.SetSidebarSelectionChanged(flyout, item =>
         {
-            if (item.Tag as string == PickerTag)
-            {
-                // The picker is a control, not a place: the selection goes back to the page the
-                // user is on, so the sidebar never claims they have navigated to "an engine".
-                SelectRoute(flyout, _shell.Route);
-
-                // The sidebar selects its first row by itself as it loads, and that row is this
-                // one. Opening the menu then ran a menu's modal loop inside the app's launch, and
-                // the window never appeared. Only a click or a key opens it.
-                if (IsUserEvent(NSApplication.SharedApplication.CurrentEvent))
-                {
-                    NSApplication.SharedApplication.BeginInvokeOnMainThread(ShowEnginePicker);
-                }
-
-                return;
-            }
-
             // ShellState owns the reentrancy guard, so a head may sync freely: an echo arriving
             // while the router is mid-navigation is swallowed rather than looping.
             if (item.Tag is string route) _shell.RequestNavigation(route);
@@ -116,21 +98,16 @@ public sealed class DrayMacApp : Application
         _shell.RouteChanged += route =>
             NSApplication.SharedApplication.InvokeOnMainThread(() => SelectRoute(flyout, route));
 
-        // The picker's title is the selected engine, so its row is reloaded when that changes —
-        // and only then. Changed also fires for every container event, and reloading the outline
-        // view for each would be churn the user can see.
-        var engine = _services.GetRequiredService<EngineManager>();
-        engine.Changed += () => NSApplication.SharedApplication.BeginInvokeOnMainThread(() =>
-        {
-            if (PickerTitle() == _picker.Title) return;
+        // The host picker, in the toolbar over the sidebar: a control rather than a place, so it
+        // is not a row among the places, and it sits where macOS puts what scopes a window's
+        // content — above the sidebar, beside the window's own buttons.
+        SyncHostPicker();
+        MacOSToolbar.SetSidebarLayout(content, [MacOSToolbarLayoutItem.Menu(_hostPicker)]);
 
-            // The handler reads its items once, when it connects, and after that only follows a
-            // collection that says it changed. Setting a new list does nothing, so the row is
-            // replaced in place — with itself, retitled — which is a change the handler hears.
-            _picker.Title = PickerTitle();
-            _sidebar[0] = _picker;
-            SelectRoute(flyout, _shell.Route);
-        });
+        // Changed fires for every container event; the picker is only touched when what it shows
+        // has changed.
+        var engine = _services.GetRequiredService<EngineManager>();
+        engine.Changed += () => NSApplication.SharedApplication.BeginInvokeOnMainThread(SyncHostPicker);
 
         return flyout;
     }
@@ -148,27 +125,19 @@ public sealed class DrayMacApp : Application
         if (owner is not null) MacOSFlyoutPage.SelectSidebarItem(flyout, i => i.Tag as string == owner);
     }
 
-    /// <summary>Whether AppKit is handling something the user did, rather than its own housekeeping.</summary>
-    static bool IsUserEvent(NSEvent? e) => e?.Type is NSEventType.LeftMouseDown
-        or NSEventType.LeftMouseUp
-        or NSEventType.RightMouseDown
-        or NSEventType.KeyDown;
-
-    /// <summary>Marks the sidebar item that is the host picker rather than a route.</summary>
-    const string PickerTag = "dray:engine-picker";
-
-    /// <summary>The sidebar's rows, kept so the picker's row can be replaced in place.</summary>
-    readonly ObservableCollection<MacOSSidebarItem> _sidebar = [];
-
-    readonly MacOSSidebarItem _picker = new()
+    readonly MacOSMenuToolbarItem _hostPicker = new()
     {
-        SystemImage = Icons.SfSymbol(IconRef.Host),
-        Tag = PickerTag,
+        Icon = Icons.SfSymbol(IconRef.Host),
+        ShowsTitle = true,
+        ShowsIndicator = true,
     };
 
+    /// <summary>What the picker last showed, so a container event that changes none of it is ignored.</summary>
+    string? _hostPickerState;
+
     /// <summary>
-    /// The selected engine, or what is happening to it. One line, because a sidebar item has one:
-    /// what kind of container it runs is in the menu the item opens.
+    /// The selected engine, or what is happening to it. One line: what kind of container each host
+    /// runs is in the menu the picker opens.
     /// </summary>
     string PickerTitle()
     {
@@ -176,50 +145,88 @@ public sealed class DrayMacApp : Application
         return engine.Transition ?? engine.Selected?.Name ?? "No engine";
     }
 
-    ObservableCollection<MacOSSidebarItem> BuildSidebarItems()
-    {
-        // First, above the navigation: which engine is selected decides what every page below it
-        // shows (DESIGN.md section 5).
-        _picker.Title = PickerTitle();
-
-        _sidebar.Clear();
-        _sidebar.Add(_picker);
-        foreach (var node in NavigationManifest.Visible(IsDebug)) _sidebar.Add(ToSidebarItem(node));
-
-        return _sidebar;
-    }
-
-    static bool IsDebug =>
-#if DEBUG
-        true;
-#else
-        false;
-#endif
-
-    /// <summary>
-    /// The engines, as a menu dropped from the picker's row the way a pop-up button drops its own.
-    /// Each says what it is or what choosing it will do, in the sentence every head's picker uses,
-    /// and choosing goes through <see cref="HostSwitcher"/> so a switch that stops something asks
-    /// first here too.
-    /// </summary>
-    void ShowEnginePicker()
+    /// <summary>The picker's rows, as data: a host and its sentence, whether it is chosen, whether it can be.</summary>
+    IReadOnlyList<(string Id, string Text, bool Chosen, bool Enabled)> PickerRows()
     {
         var engine = _services.GetRequiredService<EngineManager>();
         var switcher = _services.GetRequiredService<HostSwitcher>();
-        var bridge = _services.GetRequiredService<IShellBridge>();
 
+        return
+        [
+            .. engine.Hosts.Select(host => (host.Id, $"{host.Name}  ·  {switcher.Describe(host)}", engine.Selected?.Id == host.Id, engine.Transition is null)),
+        ];
+    }
+
+    /// <summary>
+    /// Bring the picker up to date, in both the places it lives.
+    /// <para>
+    /// The managed item, because the platform builds the native one from it whenever the toolbar is
+    /// rebuilt — every page whose chrome has a different shape. The native one too, because the
+    /// platform builds it once and does not follow the managed item after that: without this the
+    /// title and the check stayed on the host the app opened with.
+    /// </para>
+    /// </summary>
+    void SyncHostPicker()
+    {
+        var title = PickerTitle();
+        var rows = PickerRows();
+        var state = title + "\n" + string.Join("\n", rows.Select(r => $"{r.Id}|{r.Text}|{r.Chosen}|{r.Enabled}"));
+
+        if (state == _hostPickerState) return;
+        _hostPickerState = state;
+
+        _hostPicker.Text = title;
+        _hostPicker.Items.Clear();
+
+        foreach (var row in rows)
+        {
+            var id = row.Id;
+            _hostPicker.Items.Add(new MacOSMenuItem
+            {
+                Text = row.Text,
+                IsChecked = row.Chosen,
+                IsEnabled = row.Enabled,
+                Command = new Microsoft.Maui.Controls.Command(() => Choose(id)),
+            });
+        }
+
+        if (rows.Count > 0) _hostPicker.Items.Add(new MacOSMenuItem { IsSeparator = true });
+        _hostPicker.Items.Add(new MacOSMenuItem { Text = "Hosts and setup…", Command = new Microsoft.Maui.Controls.Command(() => _shell.RequestNavigation("/hosts")) });
+
+        if (NativeHostPicker() is { } native)
+        {
+            native.Label = title;
+            native.ToolTip = title;
+            native.Title = title;
+            native.Menu = BuildPickerMenu(rows);
+        }
+    }
+
+    /// <summary>
+    /// The picker's native item: the one menu in the toolbar's sidebar section, which is everything
+    /// before the separator that tracks the sidebar's edge.
+    /// </summary>
+    NSMenuToolbarItem? NativeHostPicker()
+        => (_flyout?.Window?.Handler?.PlatformView as NSWindow ?? NSApplication.SharedApplication.MainWindow)?.Toolbar?.Items
+            .TakeWhile(i => i is not NSTrackingSeparatorToolbarItem)
+            .OfType<NSMenuToolbarItem>()
+            .FirstOrDefault();
+
+    /// <summary>The same rows the managed item holds, as the native menu shows them.</summary>
+    NSMenu BuildPickerMenu(IReadOnlyList<(string Id, string Text, bool Chosen, bool Enabled)> rows)
+    {
         var menu = new NSMenu { AutoEnablesItems = false };
 
-        foreach (var host in engine.Hosts)
+        foreach (var row in rows)
         {
-            var id = host.Id;
-            var item = new NSMenuItem($"{host.Name}  ·  {switcher.Describe(host)}")
+            var id = row.Id;
+            var item = new NSMenuItem(row.Text)
             {
-                State = engine.Selected?.Id == id ? NSCellStateValue.On : NSCellStateValue.Off,
-                Enabled = engine.Transition is null,
+                State = row.Chosen ? NSCellStateValue.On : NSCellStateValue.Off,
+                Enabled = row.Enabled,
             };
 
-            item.Activated += (_, _) => _ = ChooseAsync(switcher, bridge, id);
+            item.Activated += (_, _) => Choose(id);
             menu.AddItem(item);
         }
 
@@ -229,31 +236,22 @@ public sealed class DrayMacApp : Application
         manage.Activated += (_, _) => _shell.RequestNavigation("/hosts");
         menu.AddItem(manage);
 
-        // Under the row when it can be found, at the pointer when it cannot. The outline view is
-        // flipped, so the row's bottom edge is its larger y.
-        if (FindSidebar(NSApplication.SharedApplication.MainWindow?.ContentView) is { } sidebar && sidebar.RowCount > 0)
-        {
-            var row = sidebar.RectForRow(0);
-            menu.PopUpMenu(null, new CGPoint(row.X + 8, row.Y + row.Height), sidebar);
-        }
-        else
-        {
-            menu.PopUpMenu(null, NSEvent.CurrentMouseLocation, null);
-        }
+        return menu;
     }
 
-    static NSOutlineView? FindSidebar(NSView? view)
-    {
-        if (view is null) return null;
-        if (view is NSOutlineView outline) return outline;
+    /// <summary>Choosing goes through <see cref="HostSwitcher"/>, so a switch that stops something asks first here too.</summary>
+    void Choose(string hostId)
+        => _ = ChooseAsync(_services.GetRequiredService<HostSwitcher>(), _services.GetRequiredService<IShellBridge>(), hostId);
 
-        foreach (var child in view.Subviews)
-        {
-            if (FindSidebar(child) is { } found) return found;
-        }
+    static ObservableCollection<MacOSSidebarItem> BuildSidebarItems()
+        => [.. NavigationManifest.Visible(IsDebug).Select(ToSidebarItem)];
 
-        return null;
-    }
+    static bool IsDebug =>
+#if DEBUG
+        true;
+#else
+        false;
+#endif
 
     static async Task ChooseAsync(HostSwitcher switcher, IShellBridge bridge, string hostId)
     {

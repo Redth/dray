@@ -354,7 +354,7 @@ public sealed class StackActionService(
     /// <summary>
     /// Bring a stack down and delete its folder.
     /// <para>
-    /// Only ever a folder in the stacks folder, checked again here rather than trusted from the list,
+    /// Only ever a folder in a stacks folder, checked again here rather than trusted from the list,
     /// and only after compose has taken the stack down: deleting the files of a stack that is still
     /// running leaves containers nothing can manage. If the down fails the files stay, and the
     /// output says why — the stranded half-deleted stack Dockge leaves behind is the other outcome.
@@ -362,10 +362,10 @@ public sealed class StackActionService(
     /// </summary>
     async Task<string?> DeleteAsync(StackSummary stack)
     {
-        var stacksFolder = engine.Catalog?.Registry.StacksFolder;
+        var stacksFolders = engine.Catalog?.Registry.StacksFolders ?? [];
 
-        if (stack.Provenance != StackProvenance.Managed || stack.WorkingDirectory is not { } folder || !StackCatalog.IsUnder(folder, stacksFolder))
-            return $"{stack.Name} is not in the stacks folder, so Dray will not delete its files. Forget it instead.";
+        if (stack.Provenance != StackProvenance.Managed || stack.WorkingDirectory is not { } folder || StackCatalog.FolderOf(folder, stacksFolders) is null)
+            return $"{stack.Name} is not in a stacks folder, so Dray will not delete its files. Forget it instead.";
 
         var answer = await shell.ConfirmDestructiveAsync(new DestructiveConfirm(
             $"Delete {stack.Name}?",

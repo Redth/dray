@@ -1,0 +1,183 @@
+@* A volume or a network, as a form: the fields the Compose Specification gives it that people set
+   by hand, named in words, with what each does said beside it — for someone who knows they want a
+   private network and does not know it is spelled `internal: true`.
+
+   Adding writes a new entry, and can mount the volume into a service or connect services to the
+   network in the same step, since a declaration nothing uses does nothing. Editing changes only
+   the lines of the fields that changed: anything else in the entry stays exactly as written. *@
+@inherits DialogBody
+
+<div class="cr">
+    <div class="field">
+        <label class="field__label" for="cr-name">Name</label>
+        <input id="cr-name" class="input mono" @bind="Request.Name" @bind:event="oninput"
+               placeholder="@(IsVolume ? "data" : "backend")" spellcheck="false" autocomplete="off"
+               readonly="@Request.Editing" />
+        @if (Request.Editing)
+        {
+            <span class="cr__hint muted">Services refer to it by this name, so it stays as it is here. Rename it in the YAML.</span>
+        }
+    </div>
+
+    <label class="toggle">
+        <input type="checkbox" @bind="Request.External" />
+        <span>
+            Created outside this stack
+            <span class="cr__hint muted">Compose uses it as it is, and never creates or removes it.</span>
+        </span>
+    </label>
+
+    @if (!Request.External)
+    {
+        <div class="cr__pair">
+            <div class="field">
+                <label class="field__label" for="cr-driver">Driver <span class="muted">— optional</span></label>
+                <input id="cr-driver" class="input mono" list="cr-drivers" @bind="Request.Driver" @bind:event="oninput"
+                       placeholder="@(IsVolume ? "local" : "bridge")" spellcheck="false" autocomplete="off" />
+                <datalist id="cr-drivers">
+                    @foreach (var driver in Drivers)
+                    {
+                        <option value="@driver"></option>
+                    }
+                </datalist>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="cr-engine">Name on the engine <span class="muted">— optional</span></label>
+                <input id="cr-engine" class="input mono" @bind="Request.EngineName" @bind:event="oninput"
+                       placeholder="@($"{{project}}_{(Request.Name.Length > 0 ? Request.Name : "name")}")" spellcheck="false" autocomplete="off" />
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="field">
+            <label class="field__label" for="cr-engine">Name on the engine <span class="muted">— if it differs from the one above</span></label>
+            <input id="cr-engine" class="input mono" @bind="Request.EngineName" @bind:event="oninput" spellcheck="false" autocomplete="off" />
+        </div>
+    }
+
+    @if (!IsVolume)
+    {
+        <fieldset class="cr__checks">
+            <legend class="field__label">Network</legend>
+            <label class="toggle">
+                <input type="checkbox" @bind="Request.Internal" />
+                <span>Internal <span class="cr__hint muted">— no route out of the host; containers only reach each other</span></span>
+            </label>
+            <label class="toggle">
+                <input type="checkbox" @bind="Request.Attachable" />
+                <span>Attachable <span class="cr__hint muted">— containers outside this stack may join it</span></span>
+            </label>
+            <label class="toggle">
+                <input type="checkbox" @bind="Request.EnableIpv6" />
+                <span>IPv6</span>
+            </label>
+        </fieldset>
+
+        @if (!Request.External)
+        {
+            <div class="cr__pair">
+                <div class="field">
+                    <label class="field__label" for="cr-subnet">Subnet <span class="muted">— optional</span></label>
+                    <input id="cr-subnet" class="input mono" @bind="Request.Subnet" @bind:event="oninput" placeholder="172.28.0.0/16" spellcheck="false" />
+                </div>
+                <div class="field">
+                    <label class="field__label" for="cr-gateway">Gateway <span class="muted">— optional</span></label>
+                    <input id="cr-gateway" class="input mono" @bind="Request.Gateway" @bind:event="oninput" placeholder="172.28.0.1" spellcheck="false" />
+                </div>
+            </div>
+        }
+    }
+
+    @if (!Request.External)
+    {
+        <OptionRows Title="Driver options" Rows="Request.DriverOptions" KeyPlaceholder="@(IsVolume ? "type" : "com.docker.network.bridge.name")" ValuePlaceholder="@(IsVolume ? "nfs" : "br-stack")" />
+    }
+
+    <OptionRows Title="Labels" Rows="Request.Labels" KeyPlaceholder="com.example.team" ValuePlaceholder="ops" />
+
+    @if (!Request.Editing && Request.Services.Count > 0)
+    {
+        @if (IsVolume)
+        {
+            <div class="cr__pair">
+                <div class="field">
+                    <label class="field__label" for="cr-mount">Mount into <span class="muted">— optional</span></label>
+                    <select id="cr-mount" class="input" @bind="Request.MountInto">
+                        <option value="">No service yet</option>
+                        @foreach (var service in Request.Services)
+                        {
+                            <option value="@service">@service</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="cr-path">At</label>
+                    <input id="cr-path" class="input mono" @bind="Request.MountPath" @bind:event="oninput"
+                           placeholder="/var/lib/data" spellcheck="false" disabled="@(Request.MountInto.Length == 0)" />
+                </div>
+            </div>
+        }
+        else
+        {
+            <fieldset class="cr__checks">
+                <legend class="field__label">Connect services <span class="muted">— optional</span></legend>
+                @foreach (var service in Request.Services)
+                {
+                    var captured = service;
+
+                    <label class="toggle">
+                        <input type="checkbox" checked="@Request.Join.Contains(service)"
+                               @onchange="e => Toggle(captured, (bool)e.Value!)" />
+                        <span class="mono">@service</span>
+                    </label>
+                }
+            </fieldset>
+        }
+    }
+
+    @if (Request.Problem is { } problem)
+    {
+        <p class="cr__problem" role="alert">@problem</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ComposeResourceRequest Request { get; set; } = default!;
+
+    bool IsVolume => Request.Kind == Dray.Core.Model.ComposeResourceKind.Volume;
+
+    static readonly string[] VolumeDrivers = ["local"];
+
+    static readonly string[] NetworkDrivers = ["bridge", "overlay", "macvlan", "ipvlan", "host", "none"];
+
+    IReadOnlyList<string> Drivers => IsVolume ? VolumeDrivers : NetworkDrivers;
+
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(),
+        DialogButton.Confirm("save", Request.Editing ? "Save" : "Add") with { Enabled = Request.IsComplete },
+    ];
+
+    void Toggle(string service, bool on)
+    {
+        if (on) Request.Join.Add(service);
+        else Request.Join.Remove(service);
+    }
+
+    /// <summary>Open the form. True when the user saved it; the request then holds what they said.</summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell, ComposeResourceRequest request)
+    {
+        var noun = request.Kind == Dray.Core.Model.ComposeResourceKind.Volume ? "volume" : "network";
+
+        var choice = await shell.ShowDialogAsync(new DialogRequest(
+            request.Editing ? $"Edit {noun} {request.Name}" : $"Add a {noun}",
+            typeof(ComposeResourceDialog),
+            new Dictionary<string, object?> { [nameof(Request)] = request },
+            [DialogButton.Cancel(), DialogButton.Confirm("save", request.Editing ? "Save" : "Add")],
+            Subtitle: request.Editing ? "Only the fields you change are rewritten; the rest of the entry stays as it is." : null));
+
+        return choice == "save";
+    }
+}

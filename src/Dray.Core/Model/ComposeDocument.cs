@@ -277,6 +277,9 @@ public sealed class ComposeDocument
         return node;
     }
 
+    /// <summary>The 1-based line a key is written on — <c>["volumes"]</c>, <c>["services", "web"]</c> — or null.</summary>
+    public int? LineOfKey(params string[] path) => KeyAt(path) is { } key ? (int)key.Start.Line : null;
+
     /// <summary>The key node for the last segment of a path — where a key is written.</summary>
     internal YamlScalarNode? KeyAt(params string[] path)
     {

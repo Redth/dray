@@ -87,6 +87,83 @@ public sealed record ChromeFilter(
 }
 
 /// <summary>
+/// One row of a <see cref="ChromeMenu"/>: a command, a submenu of them, or a separator.
+/// </summary>
+/// <param name="Id">Raised through <c>InvokeAction</c> when chosen. A row with children is never chosen itself.</param>
+/// <param name="Children">A submenu. The row then opens it rather than doing anything.</param>
+public sealed record ChromeMenuItem(
+    string Id,
+    string Label,
+    IconRef? Icon = null,
+    IReadOnlyList<ChromeMenuItem>? Children = null,
+    bool IsSeparator = false)
+{
+    public static readonly ChromeMenuItem Separator = new("-", string.Empty, IsSeparator: true);
+
+    public IReadOnlyList<ChromeMenuItem> ChildList => Children ?? [];
+
+    /// <summary>Whether choosing this row runs something: not a separator, and not a submenu's own row.</summary>
+    public bool IsCommand => !IsSeparator && ChildList.Count == 0;
+
+    /// <summary>This row and every row under it.</summary>
+    public IEnumerable<ChromeMenuItem> SelfAndDescendants() => ChildList.SelectMany(c => c.SelfAndDescendants()).Prepend(this);
+
+    /// <summary>Value equality including <see cref="Children"/> — see the note on PageChrome.Equals.</summary>
+    public bool Equals(ChromeMenuItem? other)
+        => other is not null
+           && Id == other.Id
+           && Label == other.Label
+           && Icon == other.Icon
+           && IsSeparator == other.IsSeparator
+           && ChildList.SequenceEqual(other.ChildList);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Id);
+        hash.Add(Label);
+        hash.Add(IsSeparator);
+        foreach (var c in ChildList) hash.Add(c);
+        return hash.ToHashCode();
+    }
+
+    /// <summary>Its place in a menu's shape: which rows, in which order, nested how.</summary>
+    internal string Shape => IsSeparator ? "-" : ChildList.Count == 0 ? Id : $"{Id}({string.Join(',', ChildList.Select(c => c.Shape))})";
+}
+
+/// <summary>
+/// A menu of commands in the chrome — where a filter is a choice of one, this is a list of things to
+/// do. The stacks page's folders are one: each folder with what can be done to it, then a way to
+/// add another.
+/// <para>
+/// Native menus are built once and not updated (upstream on macOS, by design on Windows), so every
+/// row is part of the chrome's <see cref="PageChrome.Signature"/>: a menu whose rows change is
+/// rebuilt. Only its own label is updated in place.
+/// </para>
+/// </summary>
+public sealed record ChromeMenu(string Id, string Label, IconRef Icon, IReadOnlyList<ChromeMenuItem> Items)
+{
+    public bool Equals(ChromeMenu? other)
+        => other is not null
+           && Id == other.Id
+           && Label == other.Label
+           && Icon == other.Icon
+           && Items.SequenceEqual(other.Items);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Id);
+        hash.Add(Label);
+        foreach (var i in Items) hash.Add(i);
+        return hash.ToHashCode();
+    }
+
+    /// <summary>The commands in it, at any depth.</summary>
+    public IEnumerable<ChromeMenuItem> Commands => Items.SelectMany(i => i.SelfAndDescendants()).Where(i => i.IsCommand);
+}
+
+/// <summary>
 /// Everything a page wants from the window's native chrome, declared as one value.
 /// <para>
 /// A page states what it needs the way it states a page title; the host projects that onto
@@ -101,7 +178,8 @@ public sealed record PageChrome(
     ChromeSearch? Search = null,
     IReadOnlyList<ChromeAction>? Actions = null,
     IReadOnlyList<ChromeFilter>? Filters = null,
-    ChromeBack? Back = null)
+    ChromeBack? Back = null,
+    IReadOnlyList<ChromeMenu>? Menus = null)
 {
     public static readonly PageChrome Empty = new(string.Empty);
 
@@ -113,11 +191,13 @@ public sealed record PageChrome(
     /// has one whether Dray fills it or not — so this is only consulted by the web chrome.
     /// </para>
     /// </summary>
-    public bool HasControls => Search is not null || ActionList.Count > 0 || FilterList.Count > 0;
+    public bool HasControls => Search is not null || ActionList.Count > 0 || FilterList.Count > 0 || MenuList.Count > 0;
 
     public IReadOnlyList<ChromeAction> ActionList => Actions ?? [];
 
     public IReadOnlyList<ChromeFilter> FilterList => Filters ?? [];
+
+    public IReadOnlyList<ChromeMenu> MenuList => Menus ?? [];
 
     /// <summary>
     /// Value equality including the collections.
@@ -135,7 +215,8 @@ public sealed record PageChrome(
            && Search == other.Search
            && Back == other.Back
            && ActionList.SequenceEqual(other.ActionList)
-           && FilterList.SequenceEqual(other.FilterList);
+           && FilterList.SequenceEqual(other.FilterList)
+           && MenuList.SequenceEqual(other.MenuList);
 
     public override int GetHashCode()
     {
@@ -146,6 +227,7 @@ public sealed record PageChrome(
         hash.Add(Back);
         foreach (var a in ActionList) hash.Add(a);
         foreach (var f in FilterList) hash.Add(f);
+        foreach (var m in MenuList) hash.Add(m);
         return hash.ToHashCode();
     }
 
@@ -163,5 +245,6 @@ public sealed record PageChrome(
             '|',
             new[] { Search is null ? "-" : "search", Back is null ? "-" : "back" }
                 .Concat(ActionList.Select(a => $"a:{a.Id}:{a.Kind}"))
-                .Concat(FilterList.Select(f => $"f:{f.Id}:{f.Options.Count}")));
+                .Concat(FilterList.Select(f => $"f:{f.Id}:{f.Options.Count}"))
+                .Concat(MenuList.Select(m => $"m:{m.Id}({string.Join(',', m.Items.Select(i => i.Shape))})")));
 }

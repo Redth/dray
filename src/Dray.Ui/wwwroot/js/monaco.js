@@ -3,7 +3,7 @@
 // Loaded on demand: the editor is 5 MB and most sessions never open a file, so nothing here runs
 // until someone actually opens one.
 
-import { tokenColor, definedColors, monoFontStack, currentMode } from './tokens.js';
+import { tokenColor, definedColors, monoFontStack, uiFontStack, currentMode } from './tokens.js';
 
 let loading = null;
 
@@ -127,6 +127,39 @@ function configureYaml(monaco) {
   return yamlLoading;
 }
 
+/**
+ * Code lenses — the clickable "Edit network" above a line — for every editor that has asked for
+ * them. One provider for YAML, registered once, reading each model's lenses from here; a lens's
+ * click goes back to the component that owns that model.
+ */
+const lensesByModel = new Map();
+let lensChanged = null;
+
+function ensureLensProvider(monaco) {
+  if (lensChanged) return;
+
+  lensChanged = new monaco.Emitter();
+
+  monaco.languages.registerCodeLensProvider('yaml', {
+    onDidChange: lensChanged.event,
+    provideCodeLenses(model) {
+      const entry = lensesByModel.get(model.uri.toString());
+      const lenses = (entry?.lenses ?? [])
+        .filter((l) => l.line >= 1 && l.line <= model.getLineCount())
+        .map((l) => ({
+          range: new monaco.Range(l.line, 1, l.line, 1),
+          command: { id: 'dray.lens', title: l.title, arguments: [model.uri.toString(), l.id] },
+        }));
+
+      return { lenses, dispose() {} };
+    },
+    resolveCodeLens: (_model, lens) => lens,
+  });
+
+  monaco.editor.registerCommand('dray.lens', (_accessor, uri, id) =>
+    lensesByModel.get(uri)?.dotnet.invokeMethodAsync('OnLens', id));
+}
+
 const SEVERITY = { error: 8, warning: 4 }; // monaco.MarkerSeverity, which is not loaded at import time
 
 /**
@@ -205,7 +238,7 @@ export const editor = {
    * `dotnet` receives OnDirtyChanged as the user types and OnSave for the save shortcut, so
    * unsaved state lives in C# and survives the component re-rendering.
    */
-  async create(el, dotnet, { text, language, readOnly, schema, name }) {
+  async create(el, dotnet, { text, language, readOnly, schema, name, reportText }) {
     const monaco = await loadMonaco();
     defineTheme(monaco);
 
@@ -244,9 +277,33 @@ export const editor = {
       // YAML file is worth being able to see.
       renderWhitespace: 'selection',
       scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+
+      // Suggest as the key is typed. YAML's tokenizer calls an unquoted word a string, and
+      // Monaco's default keeps quiet inside strings — so `envir` waited for Ctrl+Space before
+      // offering `environment`, which is exactly when nobody would think to ask. Off in comments.
+      quickSuggestions: model ? { other: true, strings: true, comments: false } : undefined,
+
+      // Completion and hover drawn above the page rather than inside the editor's box: the editor
+      // sits in a panel that clips, and a list near its bottom edge was cut off.
+      fixedOverflowWidgets: true,
+
+      // A lens is a control — "Edit volume…" — not code, so it is set in the interface's face at
+      // the size of the app's secondary text rather than in the editor's monospace.
+      codeLensFontFamily: uiFontStack(),
+      codeLensFontSize: 11,
     });
 
     const state = { instance, monaco, dotnet, model, clean: text };
+
+    // The text itself, for an owner that checks it as it is written rather than when it is saved.
+    // A pause in typing rather than every keystroke: what it is checked against is compose.
+    if (reportText) {
+      let timer = null;
+      instance.onDidChangeModelContent(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => dotnet.invokeMethodAsync('OnTextChanged', instance.getValue()), 400);
+      });
+    }
 
     instance.onDidChangeModelContent(() => {
       const dirty = instance.getValue() !== state.clean;
@@ -321,9 +378,21 @@ export const editor = {
     const model = state.instance.getModel();
     if (!model) return;
 
-    const decorations = (annotations ?? []).map((a) => ({
+    // Worked out from the text as it was when typing last paused. Typed into since, a reference
+    // may no longer be where it was: one whose place does not hold a ${…} any more is left out
+    // rather than drawn beside the wrong text, and the next pause draws it where it now is.
+    const current = (annotations ?? []).filter((a) =>
+      a.line >= 1 && a.line <= model.getLineCount()
+      && model.getValueInRange(new monaco.Range(a.line, a.column, a.line, a.column + a.length)).startsWith('$'));
+
+    const decorations = current.map((a) => ({
       range: new monaco.Range(a.line, a.column, a.line, a.column + a.length),
       options: {
+        // Anchored to the reference. By default a decoration grows when text is typed at its edge,
+        // and the hint is drawn at its end — so typing on straight after ${J} carried "→ empty"
+        // along with the cursor, onto whatever line the typing reached.
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+
         // Marks the reference itself, so it is visibly a thing that gets replaced rather than
         // literal text.
         inlineClassName: `mc-sub mc-sub--${a.kind}`,
@@ -425,7 +494,48 @@ export const editor = {
     state?.instance?.focus();
   },
 
+  /**
+   * Make the text `text`, as one undoable edit of only the part that differs — so an edit Dray
+   * computed over the whole file arrives as the few lines it changed, with the cursor, the scroll
+   * position and everything else in the file where they were.
+   */
+  replace(state, text) {
+    const model = state?.instance?.getModel();
+    if (!model) return;
+
+    const current = model.getValue();
+    if (current === text) return;
+
+    let start = 0;
+    while (start < current.length && start < text.length && current[start] === text[start]) start++;
+
+    let end = 0;
+    while (end < current.length - start && end < text.length - start
+      && current[current.length - 1 - end] === text[text.length - 1 - end]) end++;
+
+    const from = model.getPositionAt(start);
+    const to = model.getPositionAt(current.length - end);
+    const range = new state.monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column);
+
+    model.pushEditOperations([], [{ range, text: text.slice(start, text.length - end) }], () => null);
+    state.instance.revealLineInCenterIfOutsideViewport(from.lineNumber);
+    state.instance.focus();
+  },
+
+  /** The lenses to draw over this editor's lines: [{ line, title, id }]. A click calls OnLens(id). */
+  lenses(state, lenses) {
+    const model = state?.instance?.getModel();
+    if (!model) return;
+
+    ensureLensProvider(state.monaco);
+    lensesByModel.set(model.uri.toString(), { lenses: lenses ?? [], dotnet: state.dotnet });
+    lensChanged.fire();
+  },
+
   dispose(state) {
+    const model = state?.instance?.getModel();
+    if (model) lensesByModel.delete(model.uri.toString());
+
     state?.instance?.dispose();
 
     // Created explicitly, so not disposed with the editor. Left behind, it would hold the URI and

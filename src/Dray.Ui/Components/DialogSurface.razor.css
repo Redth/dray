@@ -32,3 +32,13 @@
     color: var(--ink);
     font-size: var(--text-base);
 }
+
+/* In a window of its own the body is as tall as the window, and lays itself out to fill it: an
+   editor takes what the form above it leaves, rather than the surface scrolling the whole thing. */
+.surface--window {
+    overflow: hidden;
+}
+
+.surface--window ::deep .dlgcontent {
+    height: 100%;
+}
