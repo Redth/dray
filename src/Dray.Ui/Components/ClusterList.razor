@@ -9,6 +9,7 @@
 @inject ClusterManager Clusters
 @inject EngineManager Engine
 @inject KindCli Kind
+@inject KubectlCli Kubectl
 @inject IShellBridge Shell
 @inject NavigationManager Nav
 
@@ -52,6 +53,22 @@
                             }
                         </span>
                         <span class="clusters__why">@Why(context)</span>
+
+                        @* The terminal's cluster moves only from here, and only when asked: the
+                           command is shown first and run on the second click (docs/KUBERNETES.md §6). *@
+                        @if (_useFor == context.Name)
+                        {
+                            <span class="clusters__use">
+                                <code class="mono">@KubectlCli.UseContextCommand(context.Name)</code>
+                                @if (Kubectl.Find() is not null)
+                                {
+                                    <Button Label="Run it" Icon="IconRef.Play" Variant="ButtonVariant.Secondary" OnClick="() => UseAsync(context)" />
+                                }
+                                <Button Label="Copy" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost"
+                                        OnClick="() => Shell.WriteClipboardAsync(KubectlCli.UseContextCommand(context.Name))" />
+                                <Button Label="Cancel" Variant="ButtonVariant.Ghost" OnClick="() => _useFor = null" />
+                            </span>
+                        }
                     </span>
 
                     <span class="clusters__actions">
@@ -64,6 +81,12 @@
                             else
                             {
                                 <Button Label="Show" Variant="ButtonVariant.Secondary" OnClick="() => ShowAsync(context)" />
+                            }
+
+                            @if (!context.IsCurrent && _useFor != context.Name)
+                            {
+                                <Button Label="Use in terminal" Icon="IconRef.Terminal" Variant="ButtonVariant.Ghost"
+                                        Tooltip="Make this kubectl's current context" OnClick="() => _useFor = context.Name" />
                             }
 
                             @* Only for a kind cluster measured on this engine — its node containers are
@@ -123,6 +146,16 @@
 
     string? _working;
     string? _problem;
+    string? _useFor;
+
+    async Task UseAsync(KubeContext context)
+    {
+        if (Kubectl.Find() is not { } kubectl) return;
+
+        _problem = await Kubectl.UseContextAsync(kubectl, context.Name);
+        _useFor = null;
+        await Clusters.RefreshAsync();
+    }
 
     /// <summary>The kind cluster behind a context, when its nodes are containers on the connected engine.</summary>
     string? KindClusterOf(KubeContext context)

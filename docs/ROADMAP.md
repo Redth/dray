@@ -444,10 +444,12 @@ when kind does, from the dialog that says it will · a remote context is refused
 test · every pod state has a glyph of its own, a test, and a greyscale screenshot of the Pods page
 reads by glyph and word alone.
 
-**Still to do:** the Windows head is written and unbuilt; the explicit "Use in terminal" control
-(KUBERNETES.md §6) is not built — selecting a cluster changes nothing in the terminal, which is the
-rule, and the control to opt in is next; OrbStack, Docker Desktop's own Kubernetes, k3d and minikube
-have not been run.
+"Use in terminal" on the Hosts page is the one control that moves `kubectl`'s current-context: it
+shows `kubectl config use-context` first and runs it on the second click. Verified against a second
+context — kubectl moved, Dray's own selection did not.
+
+**Still to do:** the Windows head is written and unbuilt; OrbStack, Docker Desktop's own
+Kubernetes, k3d and minikube have not been run.
 
 ---
 

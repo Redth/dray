@@ -70,7 +70,7 @@ public sealed class KindCli(IDockerConfigSource source)
         return null;
     }
 
-    IEnumerable<string> KnownDirectories()
+    internal IEnumerable<string> KnownDirectories()
     {
         var home = source.GetEnvironmentVariable(source.IsWindows ? "USERPROFILE" : "HOME") ?? "";
 
@@ -170,5 +170,53 @@ public sealed class KindCli(IDockerConfigSource source)
         await process.WaitForExitAsync(ct);
         if (process.ExitCode != 0)
             throw new ClusterException(tail.Count > 0 ? string.Join(" ", tail) : $"kind exited {process.ExitCode}.");
+    }
+}
+
+/// <summary>
+/// <c>kubectl config use-context</c>, behind the one control that moves the terminal's cluster
+/// (docs/KUBERNETES.md §6). Selecting a cluster in Dray never does this; the user asks, sees the
+/// command, and it runs.
+/// </summary>
+public sealed class KubectlCli(IDockerConfigSource source)
+{
+    public string? Find()
+    {
+        var exe = source.IsWindows ? "kubectl.exe" : "kubectl";
+        var path = (source.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        var known = new KindCli(source).KnownDirectories();
+
+        // Docker Desktop ships one under its own resources on macOS, which is where a machine with
+        // no Homebrew kubectl has one.
+        IEnumerable<string> extra = source.IsMacOS ? ["/Applications/Docker.app/Contents/Resources/bin"] : [];
+
+        foreach (var dir in path.Concat(known).Concat(extra))
+        {
+            var candidate = Path.Combine(dir, exe);
+            if (source.FileExists(candidate)) return candidate;
+        }
+
+        return null;
+    }
+
+    public static string UseContextCommand(string context) => $"kubectl config use-context {context}";
+
+    public async Task<string?> UseContextAsync(string kubectl, string context, CancellationToken ct = default)
+    {
+        var info = new ProcessStartInfo(kubectl)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var arg in new[] { "config", "use-context", context }) info.ArgumentList.Add(arg);
+
+        using var process = Process.Start(info) ?? throw new ClusterException($"Could not start {kubectl}.");
+        var stderr = process.StandardError.ReadToEndAsync(ct);
+        await process.StandardOutput.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+
+        return process.ExitCode == 0 ? null : (await stderr).Trim() is { Length: > 0 } why ? why : $"kubectl exited {process.ExitCode}.";
     }
 }

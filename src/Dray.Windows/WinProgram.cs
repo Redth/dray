@@ -77,6 +77,7 @@ public static class WinProgram
         builder.Services.AddSingleton<IClusterClientFactory, KubeClusterClientFactory>();
         builder.Services.AddSingleton<ClusterManager>();
         builder.Services.AddSingleton<KindCli>();
+        builder.Services.AddSingleton<KubectlCli>();
         builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
         builder.Services.AddSingleton<StackOperations>();
 

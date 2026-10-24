@@ -51,6 +51,7 @@ builder.Services.AddSingleton<ClusterSelectionStore>();
 builder.Services.AddSingleton<IClusterClientFactory, KubeClusterClientFactory>();
 builder.Services.AddSingleton<ClusterManager>();
 builder.Services.AddSingleton<KindCli>();
+builder.Services.AddSingleton<KubectlCli>();
 builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
 builder.Services.AddSingleton<StackOperations>();
 // Scoped: it holds one live stream per watched container and must go away with the view

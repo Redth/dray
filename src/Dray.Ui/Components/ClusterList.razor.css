@@ -91,3 +91,18 @@
     color: var(--danger-ink);
     font-size: var(--text-sm);
 }
+
+.clusters__use {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2);
+    margin-top: var(--s2);
+}
+
+.clusters__use code {
+    padding: var(--s1) var(--s2);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    user-select: text;
+}

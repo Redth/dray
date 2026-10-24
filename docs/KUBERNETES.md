@@ -254,8 +254,10 @@ The Docker picker offers to make the terminal agree with the screen (`docs/ARCHI
 every terminal's next `delete` lands on.
 
 **Dray never changes `kubectl`'s current-context implicitly.** Selecting a cluster in the picker
-changes what Dray shows and nothing else. An explicit "Use in terminal" control sets the
-current-context, shows what it will run first, and is offered for Local clusters only. A user who
+changes what Dray shows and nothing else. "Use in terminal", on the Hosts page, is the one control
+that sets it: it shows `kubectl config use-context <name>` first, runs it on the second click with
+the `kubectl` found on PATH or where Homebrew and Docker Desktop put one, and is offered for Local
+clusters only. Measured: kubectl moved, Dray's own selection did not. A user who
 selects a cluster to look at it must not find their next `kubectl delete` aimed somewhere new.
 
 Creating a cluster is the one action that moves it as a side effect, because kind does (§7) — and
