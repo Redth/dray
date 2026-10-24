@@ -1,0 +1,282 @@
+@page "/kubernetes/pods/{Namespace}/{Name}"
+@inject ClusterManager Clusters
+@inject KubeActions Actions
+@inject NavigationManager Nav
+@inject ShellCapabilities Caps
+
+<ClusterScope>
+    <PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
+    <ClusterGate Kind="ClusterKind.Pod">
+        @if (Pod is not { } pod)
+        {
+            <div class="page">
+                <EmptyState Icon="IconRef.Pod"
+                            Title="That pod is not here"
+                            Body="@($"{Namespace}/{Name} has gone — deleted, or replaced by its controller under a new name. A replica's name changes every time it is recreated.")">
+                    <Actions>
+                        <Button Label="All pods" Icon="IconRef.Pod" OnClick="@(() => Nav.NavigateTo("/kubernetes/pods"))" />
+                    </Actions>
+                </EmptyState>
+            </div>
+        }
+        else
+        {
+            var status = PodStatusVocabulary.Resolve(pod);
+            var owner = Clusters.Store.TopOwner(pod);
+
+            <div class="detail">
+                <div class="detail__head">
+                    <div class="detail__title">
+                        @if (!Caps.HasNativeToolbar)
+                        {
+                            <BackButton To="/kubernetes/pods" Label="All pods" />
+                        }
+                        <h2>@pod.Name</h2>
+                        <StatePill Status="status" />
+                    </div>
+                    <div class="detail__meta mono muted">
+                        <span>@pod.Namespace</span>
+                        @if (owner is not null)
+                        {
+                            <span>@WorkloadStatus.KindLabel(owner.Kind): @owner.Name</span>
+                        }
+                        @if (pod.Node is { } node)
+                        {
+                            <span>node: @node</span>
+                        }
+                    </div>
+                </div>
+
+                <KubeNotice @bind-Outcome="_outcome" />
+
+                <div class="detail__card card">
+                    <div class="detail__tabs" role="tablist">
+                        @foreach (var tab in Tabs(pod))
+                        {
+                            <button type="button" role="tab" class="tab @(ActiveTab(pod) == tab ? "is-active" : null)"
+                                    aria-selected="@((ActiveTab(pod) == tab).ToString().ToLowerInvariant())"
+                                    @onclick="() => _tab = tab">
+                                @tab
+                            </button>
+                        }
+                        <span class="detail__tabs-spacer"></span>
+
+                        @* Which container, for the tabs that are about one. A pod with one
+                           container does not ask. *@
+                        @if (ActiveTab(pod) is "Logs" or "Terminal" && pod.Containers.Count > 1)
+                        {
+                            <select class="input kpod__container" aria-label="Container" @bind="_container">
+                                @foreach (var c in pod.Containers)
+                                {
+                                    <option value="@c.Name">@c.Name</option>
+                                }
+                            </select>
+                        }
+
+                        @* The instance before this one. Measured: while a pod is in back-off, the
+                           plain log already is the dead instance's, so this is only offered once a
+                           replacement is running and has a predecessor (docs/KUBERNETES.md §5.2). *@
+                        @if (ActiveTab(pod) == "Logs" && Container(pod) is { RestartCount: > 0, State: "running" })
+                        {
+                            <label class="kpod__previous">
+                                <input type="checkbox" @bind="_previous" />
+                                <span>Previous instance</span>
+                            </label>
+                        }
+                    </div>
+
+                    <div class="detail__body">
+                        @switch (ActiveTab(pod))
+                        {
+                            case "Logs":
+                                var logContainer = Container(pod)?.Name ?? "";
+                                var previous = _previous && Container(pod) is { RestartCount: > 0, State: "running" };
+                                <LogView @key="@($"{pod.Uid}/{logContainer}/{previous}")"
+                                         SourceKey="@($"{pod.Uid}/{logContainer}/{previous}")"
+                                         Source="ct => Clusters.StreamLogsAsync(pod, logContainer, new PodLogOptions(Follow: !previous, Previous: previous), ct)"
+                                         LogMetadata="false" />
+                                break;
+
+                            case "Terminal":
+                                var shellContainer = Container(pod)?.Name ?? "";
+                                <ExecTerminal @key="@($"{pod.Uid}/{shellContainer}")"
+                                              Open="() => Clusters.StartExecAsync(pod, shellContainer, ExecOptions.InteractiveShell)" />
+                                break;
+
+                            case "Inspect":
+                                @if (_raw is { } raw)
+                                {
+                                    <JsonViewer Json="raw" />
+                                }
+                                else if (_rawError is { } error)
+                                {
+                                    <div class="page"><EmptyState Icon="IconRef.Warning" Title="Could not read this pod" Body="@error" /></div>
+                                }
+                                else
+                                {
+                                    <div class="page stack-v"><Skeleton Width="60%" /><Skeleton Width="45%" /></div>
+                                }
+                                break;
+
+                            default:
+                                <div class="page kpod">
+                                    @if (status.Tone == StateTone.Danger)
+                                    {
+                                        <KubeDiagnosis Pod="pod" />
+                                    }
+
+                                    <dl class="kv">
+                                        <dt>Namespace</dt><dd class="mono">@pod.Namespace</dd>
+                                        @if (owner is not null)
+                                        {
+                                            <dt>@WorkloadStatus.KindLabel(owner.Kind)</dt>
+                                            <dd><a href="@KubeRoutes.Workload(owner, pod.Namespace)">@owner.Name</a></dd>
+                                        }
+                                        <dt>Node</dt><dd class="mono">@(pod.Node ?? "not scheduled")</dd>
+                                        <dt>Pod IP</dt><dd class="mono">@(pod.PodIp ?? "—")</dd>
+                                        <dt>Restarts</dt><dd>@pod.Restarts</dd>
+                                        <dt>Created</dt><dd>@(pod.Created is { } created ? Humanize.Since(created) + " ago" : "—")</dd>
+                                    </dl>
+
+                                    <section class="panel">
+                                        <div class="panel__head"><span class="panel__title">Containers</span></div>
+                                        <ul class="kpod__containers">
+                                            @foreach (var c in pod.InitContainers.Concat(pod.Containers))
+                                            {
+                                                <li class="kpod__c">
+                                                    <div class="kpod__cname">
+                                                        <strong>@c.Name</strong>
+                                                        @if (c.IsInit)
+                                                        {
+                                                            <span class="muted"> · init</span>
+                                                        }
+                                                        <span class="mono muted kpod__image">@c.Image</span>
+                                                    </div>
+                                                    <div class="kpod__cstate">
+                                                        <span>@ContainerLine(c)</span>
+                                                        @if (c.Message is { Length: > 0 } message && c.State != "running")
+                                                        {
+                                                            <span class="muted kpod__message">@message</span>
+                                                        }
+                                                    </div>
+                                                    @if (c.Ports.Count > 0 && Clusters.Selected?.Capabilities.CanPortForward == true && pod.Phase == "Running")
+                                                    {
+                                                        <div class="kpod__ports">
+                                                            @foreach (var port in c.Ports)
+                                                            {
+                                                                <Button Label="@($"Forward {port}")" Icon="IconRef.Port" Variant="ButtonVariant.Secondary"
+                                                                        OnClick="() => ForwardAsync(pod, port)" />
+                                                            }
+                                                        </div>
+                                                    }
+                                                </li>
+                                            }
+                                        </ul>
+                                    </section>
+
+                                    <KubeEventList Item="pod" />
+                                </div>
+                                break;
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </ClusterGate>
+</ClusterScope>
+
+@code {
+    [Parameter] public string Namespace { get; set; } = "";
+
+    [Parameter] public string Name { get; set; } = "";
+
+    [SupplyParameterFromQuery(Name = "tab")] public string? InitialTab { get; set; }
+
+    string? _tab;
+    string? _container;
+    bool _previous;
+    KubeOutcome? _outcome;
+    string? _raw;
+    string? _rawError;
+    string? _rawFor;
+
+    PodSummary? Pod => Clusters.Store.FindPod(Namespace, Name);
+
+    protected override void OnParametersSet() => _tab ??= InitialTab;
+
+    IReadOnlyList<string> Tabs(PodSummary pod) =>
+    [
+        "Overview",
+        "Logs",
+        // Only with a container to run it in: exec into one that is crash-looping fails at once.
+        .. Clusters.Selected?.Capabilities.CanExec == true && pod.Containers.Any(c => c.State == "running") ? new[] { "Terminal" } : [],
+        "Inspect",
+    ];
+
+    string ActiveTab(PodSummary pod) => _tab is { } tab && Tabs(pod).Contains(tab) ? tab : "Overview";
+
+    /// <summary>The chosen container, or the one most worth looking at: the first that is failing, else the first.</summary>
+    PodContainer? Container(PodSummary pod)
+        => pod.Containers.FirstOrDefault(c => c.Name == _container)
+            ?? (ActiveTab(pod) == "Terminal"
+                ? pod.Containers.FirstOrDefault(c => c.State == "running")
+                : pod.Containers.FirstOrDefault(c => c.State != "running" || !c.Ready))
+            ?? pod.Containers.FirstOrDefault();
+
+    static string ContainerLine(PodContainer c) => c switch
+    {
+        { State: "running", Ready: true } => c.RestartCount > 0 ? $"Running · ready · {c.RestartCount} restarts" : "Running · ready",
+        { State: "running" } => "Running · not ready",
+        { State: "terminated", RestartCount: > 0 } => $"Exited {c.ExitCode}{(c.Reason is { } r ? $" · {r}" : "")} · restarting ({c.RestartCount} so far)",
+        { State: "terminated" } => $"Exited {c.ExitCode}{(c.Reason is { } r ? $" · {r}" : "")}",
+        { State: "waiting" } => $"Waiting · {c.Reason}{(c.LastExitCode is { } last ? $" · last exit {last}{(c.LastReason is { } lr ? $" ({lr})" : "")}" : "")}",
+        _ => "Not started",
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Inspect is read when it is opened, once per pod: it is the one tab that is not the store.
+        if (Pod is { } pod && ActiveTab(pod) == "Inspect" && _rawFor != pod.Uid)
+        {
+            _rawFor = pod.Uid;
+            _raw = null;
+            _rawError = null;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(await Clusters.GetRawAsync(pod));
+                _raw = System.Text.Json.JsonSerializer.Serialize(doc.RootElement, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+            catch (Exception e)
+            {
+                _rawError = e.Message;
+            }
+
+            StateHasChanged();
+        }
+    }
+
+    async Task ForwardAsync(PodSummary pod, int port) => _outcome = await Actions.ForwardAsync(pod, port);
+
+    async Task HandleAction(string id)
+    {
+        switch (id)
+        {
+            case "back":
+                Nav.NavigateTo("/kubernetes/pods");
+                break;
+
+            case "delete" when Pod is { } pod:
+                _outcome = await Actions.RunAsync(pod, "delete") ?? _outcome;
+                break;
+        }
+    }
+
+    PageChrome Chrome => new(
+        Pod?.Name ?? Name,
+        Subtitle: $"{Namespace} · {Clusters.Selected?.Name}",
+        Back: new ChromeBack("back", "All pods"),
+        Actions: Pod is { IsTerminating: false } && Clusters.Selected?.Capabilities.CanDeletePods == true
+            ? [ChromeAction.Destructive("delete", "Delete", IconRef.Trash)]
+            : null);
+}

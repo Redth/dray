@@ -1,3 +1,5 @@
+using Dray.Core.Kubernetes;
+using Dray.Kubernetes;
 using Dray.Core.Engine;
 using Dray.Core.Shell;
 using Dray.Apple;
@@ -42,6 +44,12 @@ builder.Services.AddSingleton<IContainerRuntimeFactory>(
 builder.Services.AddSingleton(new StackRegistry(Path.Combine(DrayPaths.ConfigDirectory, "stacks.json")));
 builder.Services.AddSingleton<StackCatalog>();
 builder.Services.AddSingleton<EngineManager>();
+// The local cluster beside the engine (docs/KUBERNETES.md): its own manager, its own store,
+// its own remembered choice — the engine picker and the cluster picker are separate.
+builder.Services.AddSingleton<KubeconfigReader>();
+builder.Services.AddSingleton<ClusterSelectionStore>();
+builder.Services.AddSingleton<IClusterClientFactory, KubeClusterClientFactory>();
+builder.Services.AddSingleton<ClusterManager>();
 builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
 builder.Services.AddSingleton<StackOperations>();
 // Scoped: it holds one live stream per watched container and must go away with the view
@@ -61,12 +69,18 @@ builder.Services.AddScoped<IShellBridge, WebShellBridge>();
 // Scoped because the bridge it confirms through is.
 builder.Services.AddScoped<HostSwitcher>();
 builder.Services.AddScoped<EnginePicker>();
+builder.Services.AddSingleton<KubeView>();
+builder.Services.AddScoped<KubeActions>();
 
 var app = builder.Build();
 
 // Discover and connect before the first render, so the UI opens on real state rather than an
 // empty list that fills in a moment later.
 await app.Services.GetRequiredService<EngineManager>().InitializeAsync();
+
+// The cluster in the background: a kubeconfig naming a cluster that is not running must not hold
+// the page back by the connect timeout.
+_ = app.Services.GetRequiredService<ClusterManager>().InitializeAsync();
 
 // Serves Dray.Ui's wwwroot under /_content/Dray.Ui/ via the static web assets manifest.
 app.MapStaticAssets();

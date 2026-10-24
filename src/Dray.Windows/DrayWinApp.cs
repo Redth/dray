@@ -1,3 +1,4 @@
+using Dray.Core.Kubernetes;
 using Dray.Core.Engine;
 using Dray.Core.Shell;
 using Microsoft.Extensions.DependencyInjection;
@@ -91,6 +92,20 @@ public sealed class DrayWinApp(IServiceProvider services) : Application
             catch (Exception ex)
             {
                 CrashLog.Write($"[dray:engine] initialise failed: {ex}");
+            }
+        });
+
+        // The cluster beside it, independently: a cluster that does not answer must not hold the
+        // engine back, nor the other way round.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await services.GetRequiredService<ClusterManager>().InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write($"[dray:cluster] initialise failed: {ex}");
             }
         });
 

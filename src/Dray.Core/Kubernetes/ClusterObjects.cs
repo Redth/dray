@@ -124,6 +124,9 @@ public sealed record PodContainer
     public DateTimeOffset? LastFinishedAt { get; init; }
 
     public IReadOnlyList<int> Ports { get; init; } = [];
+
+    /// <summary>Ports the spec names — what a Service's <c>targetPort: http</c> refers to.</summary>
+    public IReadOnlyDictionary<string, int> NamedPorts { get; init; } = new Dictionary<string, int>();
 }
 
 public sealed record PodSummary : ClusterObject

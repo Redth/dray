@@ -206,7 +206,7 @@
         if (_widths.TryGetValue(column.Field, out var width))
             return $"width: {width.ToString("0", System.Globalization.CultureInfo.InvariantCulture)}px";
 
-        if (column.Cell == GridCell.Actions)
+        if (column.Cell == GridCell.Actions || !column.Grow)
             return column.MinWidth is { } fixedWidth ? $"width: {fixedWidth}px" : null;
 
         return column.MinWidth is { } min ? $"min-width: {min}px" : null;
@@ -296,9 +296,12 @@
                                OnAction="id => OnAction.InvokeAsync((key, id))" />,
 
             @* A humanized value renders its words and sorts by its number — see GridValue. *@
+            @* Plain text clips at its column with an ellipsis, and says the whole of itself on hover.
+               Unclipped, a long value — an event's message, an image with a registry in front of it
+               — painted straight across the columns beside it. *@
             _ => value is GridValue shown
-                ? @<span>@shown.Display</span>
-                : @<span>@value</span>,
+                ? @<span class="dt__text" title="@shown.Display">@shown.Display</span>
+                : @<span class="dt__text" title="@(value?.ToString())">@value</span>,
         };
     }
 

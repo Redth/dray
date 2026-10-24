@@ -1,0 +1,90 @@
+@page "/kubernetes/pods"
+@inject ClusterManager Clusters
+@inject KubeView View
+@inject KubeActions Actions
+@inject NavigationManager Nav
+
+<ClusterScope>
+    <PageChromeScope Chrome="Chrome" OnSearch="s => _search = s" OnFilter="OnFilterAsync" />
+
+    <div class="page page--flush">
+        <KubeNotice @bind-Outcome="_outcome" />
+
+        <ClusterGate Kind="ClusterKind.Pod">
+            @if (Visible.Count == 0)
+            {
+                <EmptyState Icon="IconRef.Pod"
+                            Title="@(_search.Length > 0 ? "No pods match" : "No pods")"
+                            Body="@(_search.Length > 0
+                                ? "Nothing here matches the current search."
+                                : View.Namespace is { } ns
+                                    ? $"Nothing runs in {ns}. Pods appear here as soon as a workload starts them."
+                                    : "Nothing runs outside the system namespaces. Apply a manifest from a terminal and its pods appear here as they start.")" />
+            }
+            else
+            {
+                <DataTable TRow="PodSummary"
+                           Columns="PodGrid.Columns(View.ManyNamespaces)"
+                           Rows="Visible"
+                           Values="p => PodGrid.Row(p, Clusters.Store.TopOwner(p), showNamespace: View.ManyNamespaces)"
+                           Key="p => p.Uid"
+                           ActionsFor="Actions.ForPod"
+                           OnAction="RunAsync"
+                           OnRowOpen="Open"
+                           Placeholder="No pods" />
+            }
+        </ClusterGate>
+    </div>
+</ClusterScope>
+
+@code {
+    string _search = "";
+    KubeOutcome? _outcome;
+
+    /// <summary>Worst first: a page opened to find out why something is broken should open on it.</summary>
+    IReadOnlyList<PodSummary> Visible =>
+    [
+        .. Clusters.Store.Pods
+            .Where(p => View.Matches(p.Namespace))
+            .Where(p => _search.Length == 0
+                || p.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                || (Clusters.Store.TopOwner(p)?.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderBy(p => GridState.From(PodStatusVocabulary.Resolve(p)).Rank)
+            .ThenBy(p => p.Namespace, StringComparer.Ordinal)
+            .ThenBy(p => p.Name, StringComparer.Ordinal),
+    ];
+
+    PodSummary? ByUid(string uid) => Clusters.Store.Find<PodSummary>(ClusterKind.Pod, uid);
+
+    async Task RunAsync((string Row, string Action) chosen)
+    {
+        if (ByUid(chosen.Row) is { } pod) _outcome = await Actions.RunAsync(pod, chosen.Action) ?? _outcome;
+    }
+
+    void Open(string uid)
+    {
+        if (ByUid(uid) is { } pod) Nav.NavigateTo(KubeRoutes.Pod(pod));
+    }
+
+    async Task OnFilterAsync((string FilterId, int Index) change)
+    {
+        if (await View.ApplyAsync(change.FilterId, change.Index) is { } problem) _outcome = new KubeOutcome(problem, Ok: false);
+    }
+
+    PageChrome Chrome
+    {
+        get
+        {
+            var pods = Clusters.Store.Pods.Where(p => View.Matches(p.Namespace)).ToList();
+            var broken = pods.Count(p => PodStatusVocabulary.Resolve(p).Tone == StateTone.Danger);
+
+            return new PageChrome(
+                "Pods",
+                Subtitle: Clusters.Selected is { State: HostConnectionState.Connected } c
+                    ? broken > 0 ? $"{pods.Count} on {c.Name} · {broken} failing" : $"{pods.Count} on {c.Name}"
+                    : Clusters.Selected?.Name,
+                Search: new ChromeSearch("Filter pods", _search),
+                Filters: View.Filters);
+        }
+    }
+}

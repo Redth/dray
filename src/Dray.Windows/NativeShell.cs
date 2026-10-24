@@ -1,3 +1,4 @@
+using Dray.Core.Kubernetes;
 using Dray.Core.Engine;
 using Dray.Core.Shell;
 using Dray.Ui.Services;
@@ -137,6 +138,7 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
             nav,
             shell,
             theme,
+            services.GetRequiredService<ClusterManager>(),
             debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
         _toolbar = new WinToolbarProjector(services.GetRequiredService<WinTitleBarToolbar>(), titleBar, _webView, shell, theme);
 

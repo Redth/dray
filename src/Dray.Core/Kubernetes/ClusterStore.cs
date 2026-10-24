@@ -147,10 +147,11 @@ public sealed class ClusterStore
     public IReadOnlyList<PodSummary> PodsOf(WorkloadSummary workload)
         => [.. Pods.Where(p => TopOwner(p)?.Uid == workload.Uid)];
 
-    /// <summary>What the cluster has said about one object, newest first.</summary>
+    /// <summary>What the cluster has said about one object: warnings first, then newest — the warning is the why.</summary>
     public IReadOnlyList<ClusterEvent> EventsFor(ClusterObject item)
         => [.. Events.Where(e => e.InvolvedUid == item.Uid || (e.InvolvedKind == item.Kind && e.InvolvedName == item.Name && e.Namespace == item.Namespace))
-                .OrderByDescending(e => e.LastSeen)];
+                .OrderByDescending(e => e.IsWarning)
+                .ThenByDescending(e => e.LastSeen)];
 
     /// <summary>The pods a service sends traffic to: every label in its selector, matched.</summary>
     public IReadOnlyList<PodSummary> PodsFor(ServiceSummary service)

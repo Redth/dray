@@ -1,0 +1,43 @@
+@* Re-renders its content when the cluster, its store or the namespace filter change — the
+   Kubernetes counterpart of EngineScope, with the same rule: anything that reads the cluster's store
+   goes inside this tag, PageChromeScope included, or it is computed once and never again.
+
+   One difference. Watches arrive in bursts — measured: deleting a two-replica Deployment's pods
+   produced fourteen events in half a second — so a change marks the content stale and one render
+   follows per frame, however many changes landed in it (docs/KUBERNETES.md §9.3). *@
+@implements IDisposable
+@inject ClusterManager Clusters
+@inject KubeView View
+
+@ChildContent
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    int _pending;
+
+    protected override void OnInitialized()
+    {
+        Clusters.Changed += OnChanged;
+        View.Changed += OnChanged;
+    }
+
+    void OnChanged()
+    {
+        if (Interlocked.Exchange(ref _pending, 1) == 1) return;
+
+        _ = InvokeAsync(async () =>
+        {
+            // About a frame. Long enough to gather a burst, short enough that nothing reads as lag.
+            await Task.Delay(16);
+            Interlocked.Exchange(ref _pending, 0);
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        Clusters.Changed -= OnChanged;
+        View.Changed -= OnChanged;
+    }
+}

@@ -1,0 +1,66 @@
+.scale {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--bg);
+}
+
+.scale__step {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    width: 1.75rem;
+    height: var(--row-h);
+    font-size: var(--text-md);
+    line-height: 1;
+    cursor: pointer;
+    border-radius: var(--r-sm);
+}
+
+.scale__step:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--ink);
+}
+
+.scale__step:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.scale__step:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+}
+
+/* Fixed width so the row does not jog when the count goes from one digit to two, or when the
+   spinner replaces the number. */
+.scale__count {
+    min-width: 2ch;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.scale__spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--line-strong);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: scale-spin 0.7s linear infinite;
+}
+
+@keyframes scale-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* A spinner that never stops is worse than no spinner for anyone who cannot look away from it. */
+@media (prefers-reduced-motion: reduce) {
+    .scale__spinner {
+        animation: none;
+        border-top-color: var(--line-strong);
+        opacity: 0.5;
+    }
+}

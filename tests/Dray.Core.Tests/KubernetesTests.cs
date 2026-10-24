@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Dray.Core.Engine;
 using Dray.Core.Kubernetes;
 using Dray.Core.Model;
+using Dray.Core.Shell;
 using Xunit;
 
 namespace Dray.Core.Tests;
@@ -428,5 +429,87 @@ public class ClusterManagerTests
         public Task<string> GetRawAsync(ClusterKind kind, string ns, string name, CancellationToken ct = default) => Task.FromResult("{}");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>The image a cluster could not pull, against what the engine has (docs/KUBERNETES.md §8).</summary>
+public class ImageDiagnosisTests
+{
+    static NodeSummary KindNode => new() { Uid = "n", Name = "dray-spike-control-plane", ProviderId = "kind://docker/dray-spike/dray-spike-control-plane" };
+
+    /// <summary>Measured: the pull error says docker.io/library/myapp:dev where Docker says myapp:dev.</summary>
+    [Theory]
+    [InlineData("myapp:dev", "docker.io/library/myapp:dev")]
+    [InlineData("myapp", "docker.io/library/myapp:latest")]
+    [InlineData("user/app:1", "docker.io/user/app:1")]
+    [InlineData("ghcr.io/x/y", "ghcr.io/x/y:latest")]
+    [InlineData("localhost:5000/app", "localhost:5000/app:latest")]
+    [InlineData("docker.io/library/myapp:dev", "docker.io/library/myapp:dev")]
+    [InlineData("app@sha256:abc", "docker.io/library/app@sha256:abc")]
+    public void ReferencesNormalise(string reference, string expected) => Assert.Equal(expected, ImageDiagnosis.Normalize(reference));
+
+    [Fact]
+    public void KindIsReadOffTheNodesProviderId()
+        => Assert.Equal((ClusterTool.Kind, "dray-spike"), ImageDiagnosis.Identify([KindNode]));
+
+    [Fact]
+    public void AnImageOnTheEngineButNotInKindIsOneLoadAway()
+    {
+        var d = ImageDiagnosis.Diagnose("myapp:v2", [KindNode], ["nginx:alpine", "myapp:v2"]);
+
+        Assert.Equal(PullCause.NotLoaded, d.Cause);
+        Assert.Equal("kind load docker-image myapp:v2 --name dray-spike", d.Command);
+    }
+
+    [Fact]
+    public void TheDefaultKindClusterNeedsNoName()
+        => Assert.Equal("kind load docker-image myapp:v2",
+            ImageDiagnosis.Diagnose("myapp:v2", [KindNode with { ProviderId = "kind://docker/kind/kind-control-plane" }], ["myapp:v2"]).Command);
+
+    [Fact]
+    public void AnImageNowhereIsARegistryProblem()
+        => Assert.Equal(PullCause.NotHereEither, ImageDiagnosis.Diagnose("nope:1", [KindNode], ["myapp:v2"]).Cause);
+
+    [Fact]
+    public void K3dNodesNameTheirCluster()
+        => Assert.Equal((ClusterTool.K3d, "dev"), ImageDiagnosis.Identify([new NodeSummary { Uid = "n", Name = "k3d-dev-server-0", ProviderId = "k3s://k3d-dev-server-0" }]));
+}
+
+/// <summary>The Kubernetes lists: the sidebar's group, a workload's state, and what a row carries.</summary>
+public class KubeListTests
+{
+    [Fact]
+    public void TheKubernetesGroupIsInTheSidebarOnlyWithACluster()
+    {
+        Assert.DoesNotContain(Dray.Core.Navigation.NavigationManifest.Visible(includeDebug: false, includeCluster: false), n => n.Title == "Kubernetes");
+
+        var group = Assert.Single(Dray.Core.Navigation.NavigationManifest.Visible(includeDebug: false, includeCluster: true), n => n.Title == "Kubernetes");
+        Assert.Equal(["/kubernetes/workloads", "/kubernetes/pods", "/kubernetes/services", "/kubernetes/events"], group.Children.Select(c => c.Route));
+    }
+
+    /// <summary>A Deployment with one crash-looping replica of two is not healthy: its worst pod decides.</summary>
+    [Fact]
+    public void AWorkloadIsAsWellAsItsWorstPod()
+    {
+        var w = new WorkloadSummary { Uid = "d", Name = "myapp", Namespace = "spike", WorkloadKind = ClusterKind.Deployment, Desired = 2, Ready = 1 };
+        PodSummary Pod(string uid, PodContainer c) => new() { Uid = uid, Name = uid, Namespace = "spike", Phase = "Running", Node = "n", ConditionReady = c.Ready, Containers = [c] };
+
+        var healthy = Pod("a", new PodContainer { Name = "m", Image = "x", State = "running", Ready = true });
+        var looping = Pod("b", new PodContainer { Name = "m", Image = "x", State = "waiting", Reason = "CrashLoopBackOff", RestartCount = 3 });
+
+        Assert.Equal("Crash loop", WorkloadStatus.Resolve(w, [healthy, looping]).Word);
+        Assert.Equal("Running", WorkloadStatus.Resolve(w with { Ready = 2 }, [healthy, healthy with { Uid = "c" }]).Word);
+        Assert.Equal("Scaled to zero", WorkloadStatus.Resolve(w with { Desired = 0, Ready = 0 }, []).Word);
+    }
+
+    [Fact]
+    public void APodRowCarriesItsWorkloadAndNamespaceUnderItsName()
+    {
+        var pod = new PodSummary { Uid = "p", Name = "myapp-84cb689584-9npfr", Namespace = "spike", Phase = "Running" };
+        var link = Assert.IsType<GridLink>(PodGrid.Row(pod, new OwnerRef(ClusterKind.Deployment, "myapp", "d"))["name"]);
+
+        Assert.Equal("myapp · spike", link.Sub);
+        Assert.Equal("/kubernetes/pods/spike/myapp-84cb689584-9npfr", link.Href);
+        Assert.Equal("myapp", Assert.IsType<GridLink>(PodGrid.Row(pod, new OwnerRef(ClusterKind.Deployment, "myapp", "d"), showNamespace: false)["name"]).Sub);
     }
 }

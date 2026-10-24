@@ -1,0 +1,24 @@
+@* What a Kubernetes action did, in a banner at the top of the page — with the address to open when
+   it started a forward, because opening it is the next thing anyone does. *@
+@inject IShellBridge Shell
+
+@if (Outcome is { } outcome)
+{
+    <div class="banner @(outcome.Ok ? "banner--ok" : null)" role="@(outcome.Ok ? "status" : "alert")">
+        <Icon Name="@(outcome.Ok ? IconRef.Check : IconRef.Warning)" Size="IconSize.Sm" />
+        <span>@outcome.Message</span>
+        @if (outcome.OpenUrl is { } url)
+        {
+            <Button Label="Open" Icon="IconRef.External" Variant="ButtonVariant.Secondary"
+                    OnClick="() => Shell.OpenExternalAsync(url)" />
+        }
+        <Button Label="Dismiss" Icon="IconRef.Close" IconOnly="true" Variant="ButtonVariant.Ghost"
+                OnClick="() => OutcomeChanged.InvokeAsync(null)" />
+    </div>
+}
+
+@code {
+    [Parameter] public KubeOutcome? Outcome { get; set; }
+
+    [Parameter] public EventCallback<KubeOutcome?> OutcomeChanged { get; set; }
+}

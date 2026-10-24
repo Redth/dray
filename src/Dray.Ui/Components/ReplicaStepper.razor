@@ -1,0 +1,67 @@
+@* How many replicas a Kubernetes workload asks for — the cluster's twin of ScaleControl, with its
+   look, and one difference: zero is reachable here. A Deployment scaled to nothing is still listed
+   on the Workloads page, so the control that brings it back does not vanish with it — but zero is
+   the count that stops everything, and the page types it before it is sent.
+
+   The count shown is what was asked for until the cluster catches up, so the click does not seem
+   to snap back while the pods are starting. *@
+<div class="scale">
+    <button type="button" class="scale__step"
+            aria-label="@($"One fewer replica of {Name}")"
+            disabled="@(Busy || Target <= 0)"
+            @onclick="() => SetAsync(Target - 1)">−</button>
+    <span class="scale__count num" aria-live="polite"
+          aria-label="@($"{Name}: {Target} replica{(Target == 1 ? "" : "s")}")">
+        @if (Busy)
+        {
+            <span class="scale__spinner" aria-hidden="true"></span>
+        }
+        else
+        {
+            @Target
+        }
+    </span>
+    <button type="button" class="scale__step"
+            aria-label="@($"One more replica of {Name}")"
+            disabled="@(Busy || Target >= Maximum)"
+            @onclick="() => SetAsync(Target + 1)">+</button>
+</div>
+
+@code {
+    /// <summary>A stepper on a developer machine, not an orchestrator: past this, edit the manifest.</summary>
+    const int Maximum = 20;
+
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+
+    /// <summary>The workload's desired replicas, as the cluster reports them.</summary>
+    [Parameter, EditorRequired] public int Desired { get; set; }
+
+    [Parameter] public bool Busy { get; set; }
+
+    [Parameter] public EventCallback<int> OnScale { get; set; }
+
+    int? _requested;
+
+    int Target => _requested ?? Desired;
+
+    protected override void OnParametersSet()
+    {
+        // The cluster has caught up — or a terminal scaled it — so the control reports reality again.
+        if (_requested == Desired) _requested = null;
+    }
+
+    async Task SetAsync(int replicas)
+    {
+        if (replicas < 0 || replicas > Maximum || Busy) return;
+
+        _requested = replicas;
+        await OnScale.InvokeAsync(replicas);
+    }
+
+    /// <summary>A scale that was declined or refused: show what the cluster has again.</summary>
+    public void Reset()
+    {
+        _requested = null;
+        StateHasChanged();
+    }
+}

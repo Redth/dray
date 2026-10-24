@@ -1,0 +1,85 @@
+@* Every cluster the kubeconfig names, on the Hosts page beside the engines: which Dray connects to,
+   and — for the ones it does not — why, in the words that decided it (docs/KUBERNETES.md §3).
+
+   Local is measured: the API server resolves to this machine. A remote context is listed, never
+   connectable in v1, and never hidden, because a cluster that silently does not appear reads as
+   Dray not having found the kubeconfig. kubectl's current-context is marked and never changed from
+   here. *@
+@implements IDisposable
+@inject ClusterManager Clusters
+@inject NavigationManager Nav
+
+@if (Clusters.Contexts.Count > 0)
+{
+    <section class="card clusters" aria-labelledby="clusters-title">
+        <header class="clusters__head">
+            <h2 id="clusters-title" class="clusters__title">Kubernetes</h2>
+            <span class="muted">@Clusters.LocalContexts.Count on this machine · @(Clusters.Contexts.Count - Clusters.LocalContexts.Count) elsewhere</span>
+        </header>
+
+        <ul class="clusters__list">
+            @foreach (var context in Clusters.Contexts)
+            {
+                var selected = Clusters.Selected?.Name == context.Name;
+                <li class="clusters__item @(context.IsLocal ? null : "is-remote")" @key="context.Name">
+                    <EngineGlyph Icon="IconRef.Cluster" Active="@(selected && context.State == HostConnectionState.Connected)" />
+                    <span class="clusters__text">
+                        <span class="clusters__name">
+                            @context.Name
+                            @if (context.IsCurrent)
+                            {
+                                <span class="clusters__tag">kubectl's current</span>
+                            }
+                        </span>
+                        <span class="clusters__why">@Why(context)</span>
+                    </span>
+
+                    @if (context.IsLocal)
+                    {
+                        @if (selected)
+                        {
+                            <StatePill Status="State(context)" />
+                        }
+                        else
+                        {
+                            <Button Label="Show" Variant="ButtonVariant.Secondary" OnClick="() => ShowAsync(context)" />
+                        }
+                    }
+                    else
+                    {
+                        <span class="muted clusters__remote">Not connected</span>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    protected override void OnInitialized() => Clusters.Changed += OnChanged;
+
+    void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>For a local cluster, where it is and what it runs; for a remote one, the reason — the measured sentence, not a policy.</summary>
+    static string Why(KubeContext c)
+    {
+        if (!c.IsLocal) return $"{c.LocalityReason} Dray connects to clusters on this machine for now.";
+        if (c.State == HostConnectionState.Unreachable) return c.StateDetail ?? c.LocalityReason;
+        return c.Capabilities.ServerVersion is { } version ? $"{c.LocalityReason.TrimEnd('.')} · Kubernetes {version}" : c.LocalityReason;
+    }
+
+    static ContainerStatus State(KubeContext c) => c.State switch
+    {
+        HostConnectionState.Connected => new(StateTone.Ok, "●", "Connected"),
+        HostConnectionState.Connecting => new(StateTone.Warn, "◐", "Connecting"),
+        HostConnectionState.Unreachable => new(StateTone.Danger, "⚠", "Unreachable"),
+        _ => new(StateTone.Neutral, "○", "Not connected"),
+    };
+
+    async Task ShowAsync(KubeContext context)
+    {
+        if (await Clusters.SelectAsync(context.Name) is null) Nav.NavigateTo("/kubernetes/workloads");
+    }
+
+    public void Dispose() => Clusters.Changed -= OnChanged;
+}

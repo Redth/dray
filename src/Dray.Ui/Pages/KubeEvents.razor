@@ -1,0 +1,89 @@
+@page "/kubernetes/events"
+@inject ClusterManager Clusters
+@inject KubeView View
+@inject NavigationManager Nav
+
+<ClusterScope>
+    <PageChromeScope Chrome="Chrome" OnSearch="s => _search = s" OnFilter="OnFilterAsync" />
+
+    <div class="page page--flush">
+        <KubeNotice @bind-Outcome="_outcome" />
+
+        <ClusterGate Kind="ClusterKind.Event">
+            @if (Visible.Count == 0)
+            {
+                <EmptyState Icon="IconRef.Events"
+                            Title="@(_search.Length > 0 ? "No events match" : _warningsOnly ? "No warnings" : "No events")"
+                            Body="@(_search.Length > 0
+                                ? "Nothing here matches the current search."
+                                : "The cluster keeps events for an hour. Nothing has happened outside the system namespaces in that time.")" />
+            }
+            else
+            {
+                <DataTable TRow="ClusterEvent"
+                           Columns="EventGrid.Columns()"
+                           Rows="Visible"
+                           Values="e => EventGrid.Row(e)"
+                           Key="e => e.Uid"
+                           OnRowOpen="Open"
+                           Placeholder="No events" />
+            }
+        </ClusterGate>
+    </div>
+</ClusterScope>
+
+@code {
+    string _search = "";
+    bool _warningsOnly;
+    KubeOutcome? _outcome;
+
+    /// <summary>Warnings first, then newest — the cluster saying why something went wrong is the reason to look.</summary>
+    IReadOnlyList<ClusterEvent> Visible =>
+    [
+        .. Clusters.Store.Events
+            .Where(e => View.Matches(e.Namespace))
+            .Where(e => !_warningsOnly || e.IsWarning)
+            .Where(e => _search.Length == 0
+                || e.InvolvedName.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                || e.Reason.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                || e.Message.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(e => e.IsWarning)
+            .ThenByDescending(e => e.LastSeen),
+    ];
+
+    /// <summary>An event opens the object it is about, where that object has a page.</summary>
+    void Open(string uid)
+    {
+        if (Clusters.Store.Find<ClusterEvent>(ClusterKind.Event, uid) is not { } e) return;
+
+        if (e.InvolvedKind == ClusterKind.Pod && Clusters.Store.FindPod(e.Namespace, e.InvolvedName) is { } pod)
+            Nav.NavigateTo(KubeRoutes.Pod(pod));
+        else if (e.InvolvedKind is { } kind && Clusters.Store.FindWorkload(kind, e.Namespace, e.InvolvedName) is { } w)
+            Nav.NavigateTo(KubeRoutes.Workload(w));
+    }
+
+    async Task OnFilterAsync((string FilterId, int Index) change)
+    {
+        if (change.FilterId == "show")
+        {
+            _warningsOnly = change.Index == 1;
+            return;
+        }
+
+        if (await View.ApplyAsync(change.FilterId, change.Index) is { } problem) _outcome = new KubeOutcome(problem, Ok: false);
+    }
+
+    PageChrome Chrome => new(
+        "Events",
+        Subtitle: Clusters.Selected is { State: HostConnectionState.Connected } c
+            ? $"{Clusters.Store.Events.Count(e => e.IsWarning && View.Matches(e.Namespace))} warnings on {c.Name}"
+            : Clusters.Selected?.Name,
+        Search: new ChromeSearch("Filter events", _search),
+        Filters:
+        [
+            .. View.Filters,
+            .. Clusters.Selected?.State == HostConnectionState.Connected
+                ? new[] { new ChromeFilter("show", "Show", [new ChromeFilterOption("All events"), new ChromeFilterOption("Warnings only")], _warningsOnly ? 1 : 0) }
+                : [],
+        ]);
+}

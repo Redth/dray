@@ -1,3 +1,4 @@
+using Dray.Core.Kubernetes;
 using System.Collections.ObjectModel;
 using AppKit;
 using Dray.Core.Engine;
@@ -72,6 +73,20 @@ public sealed class DrayMacApp : Application
             }
         });
 
+        // The cluster beside it, independently: a cluster that does not answer must not hold the
+        // engine back, nor the other way round.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _services.GetRequiredService<ClusterManager>().InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[dray:cluster] initialise failed: {ex}");
+            }
+        });
+
         return window;
     }
 
@@ -85,7 +100,27 @@ public sealed class DrayMacApp : Application
         };
 
         MacOSFlyoutPage.SetUseNativeSidebar(flyout, true);
-        MacOSFlyoutPage.SetSidebarItems(flyout, BuildSidebarItems());
+
+        // The Kubernetes group is in the list only while the kubeconfig has a local cluster. The
+        // handler follows this collection, not a new one, so the rows are replaced in place.
+        var clusters = _services.GetRequiredService<ClusterManager>();
+        _hasCluster = clusters.LocalContexts.Count > 0;
+        Fill(_sidebar, _hasCluster);
+        MacOSFlyoutPage.SetSidebarItems(flyout, _sidebar);
+
+        clusters.Changed += () =>
+        {
+            // Changed fires for every watch event; the sidebar is touched only when the group comes or goes.
+            var has = clusters.LocalContexts.Count > 0;
+            if (has == _hasCluster) return;
+            _hasCluster = has;
+
+            NSApplication.SharedApplication.BeginInvokeOnMainThread(() =>
+            {
+                Fill(_sidebar, has);
+                SelectRoute(flyout, _shell.Route);
+            });
+        };
 
         // The engine picker is not in here: it is the toolbar's leading item, above this list
         // (MacToolbarProjector), so every row of the sidebar is a place to go.
@@ -115,8 +150,15 @@ public sealed class DrayMacApp : Application
         if (owner is not null) MacOSFlyoutPage.SelectSidebarItem(flyout, i => i.Tag as string == owner);
     }
 
-    static ObservableCollection<MacOSSidebarItem> BuildSidebarItems()
-        => [.. NavigationManifest.Visible(IsDebug).Select(ToSidebarItem)];
+    readonly ObservableCollection<MacOSSidebarItem> _sidebar = [];
+
+    bool _hasCluster;
+
+    static void Fill(ObservableCollection<MacOSSidebarItem> rows, bool hasCluster)
+    {
+        rows.Clear();
+        foreach (var node in NavigationManifest.Visible(IsDebug, hasCluster)) rows.Add(ToSidebarItem(node));
+    }
 
     static bool IsDebug =>
 #if DEBUG

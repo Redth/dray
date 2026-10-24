@@ -1,0 +1,26 @@
+.kube-forwards {
+    margin: var(--s3) var(--s4);
+}
+
+.kube-forwards__list {
+    display: flex;
+    flex-direction: column;
+    padding: var(--s1) var(--s2);
+}
+
+.kube-forwards__item {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-height: 36px;
+    padding: 0 var(--s2);
+}
+
+.kube-forwards__spacer {
+    flex: 1 1 auto;
+}
+
+.kube-forwards__failure {
+    color: var(--danger-ink);
+    font-size: var(--text-sm);
+}

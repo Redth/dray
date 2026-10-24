@@ -1,0 +1,38 @@
+.kev-panel {
+    flex-shrink: 0;
+}
+
+.kev {
+    display: flex;
+    flex-direction: column;
+}
+
+.kev__item {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    align-items: baseline;
+    gap: var(--s2) var(--s3);
+    padding: var(--s2) var(--s4);
+    border-top: 1px solid var(--line);
+}
+
+.kev__item:first-child {
+    border-top: 0;
+}
+
+.kev__reason {
+    font-weight: var(--text-sm-weight);
+    white-space: nowrap;
+}
+
+/* The cluster's sentence, verbatim and selectable: it is often the answer, and the thing to paste. */
+.kev__message {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.kev__when {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}

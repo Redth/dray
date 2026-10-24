@@ -20,6 +20,12 @@ public sealed record NavNode
     /// <summary>Hidden unless the app is running a Debug build.</summary>
     public bool DebugOnly { get; init; }
 
+    /// <summary>
+    /// Shown only while there is a cluster to show — the Kubernetes group. Someone with no cluster
+    /// should not carry four entries that all say "no cluster" (docs/KUBERNETES.md §5).
+    /// </summary>
+    public bool RequiresCluster { get; init; }
+
     public bool IsGroup => Children.Count > 0;
 
     public static NavNode Leaf(string title, string route, IconRef icon, bool debugOnly = false)
@@ -59,6 +65,15 @@ public static class NavigationManifest
             NavNode.Leaf("Volumes", "/volumes", IconRef.Volume),
             NavNode.Leaf("Networks", "/networks", IconRef.Network)),
 
+        // The local cluster, beside the engine it runs on (docs/KUBERNETES.md). After the Docker
+        // groups, because the engine is what Dray is first: the cluster is one more thing on it.
+        NavNode.Group(
+            "Kubernetes",
+            NavNode.Leaf("Workloads", "/kubernetes/workloads", IconRef.Workload),
+            NavNode.Leaf("Pods", "/kubernetes/pods", IconRef.Pod),
+            NavNode.Leaf("Services", "/kubernetes/services", IconRef.Service),
+            NavNode.Leaf("Events", "/kubernetes/events", IconRef.Events)) with { RequiresCluster = true },
+
         NavNode.Group(
             "Configuration",
             NavNode.Leaf("Registries", "/registries", IconRef.Registry),
@@ -67,15 +82,17 @@ public static class NavigationManifest
     ];
 
     /// <summary>The manifest with debug-only entries filtered out for release builds.</summary>
-    public static IReadOnlyList<NavNode> Visible(bool includeDebug)
-        => includeDebug ? Nodes : Nodes.Select(Prune).Where(n => n is not null).Select(n => n!).ToList();
+    /// <param name="includeCluster">Whether there is a cluster, so the Kubernetes group belongs in the sidebar.</param>
+    public static IReadOnlyList<NavNode> Visible(bool includeDebug, bool includeCluster = true)
+        => [.. Nodes.Select(n => Prune(n, includeDebug, includeCluster)).Where(n => n is not null).Select(n => n!)];
 
-    static NavNode? Prune(NavNode node)
+    static NavNode? Prune(NavNode node, bool includeDebug, bool includeCluster)
     {
-        if (node.DebugOnly) return null;
+        if (node.DebugOnly && !includeDebug) return null;
+        if (node.RequiresCluster && !includeCluster) return null;
         if (!node.IsGroup) return node;
 
-        var kept = node.Children.Select(Prune).Where(c => c is not null).Select(c => c!).ToList();
+        var kept = node.Children.Select(c => Prune(c, includeDebug, includeCluster)).Where(c => c is not null).Select(c => c!).ToList();
         return kept.Count == 0 ? null : node with { Children = kept };
     }
 

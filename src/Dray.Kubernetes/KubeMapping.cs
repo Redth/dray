@@ -88,6 +88,7 @@ static class KubeMapping
                     LastExitCode = last?.ExitCode,
                     LastFinishedAt = ToOffset(last?.FinishedAt),
                     Ports = [.. (c.Ports ?? []).Select(p => p.ContainerPort)],
+                    NamedPorts = (c.Ports ?? []).Where(p => !string.IsNullOrEmpty(p.Name)).DistinctBy(p => p.Name).ToDictionary(p => p.Name, p => p.ContainerPort),
                 };
             }),
         ];

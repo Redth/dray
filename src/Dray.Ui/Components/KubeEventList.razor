@@ -1,0 +1,45 @@
+@* What the cluster has said about one object, newest first — the "why" Kubernetes keeps beside the
+   object rather than in it. Warnings carry the warning pill; Normal is neutral, never green. *@
+@inject ClusterManager Clusters
+
+<section class="panel kev-panel">
+    <div class="panel__head">
+        <span class="panel__title">Events</span>
+        @if (Events.Count > Shown.Count)
+        {
+            <span class="muted">newest @Shown.Count of @Events.Count</span>
+        }
+    </div>
+
+    @if (Events.Count == 0)
+    {
+        <p class="panel__body muted">
+            Nothing in the last hour. The cluster keeps events for about that long, so an object that
+            has been quiet longer has none to show.
+        </p>
+    }
+    else
+    {
+        <ul class="kev">
+            @foreach (var e in Shown)
+            {
+                <li class="kev__item">
+                    <StatePill Status="EventGrid.Status(e)" />
+                    <span class="kev__reason">@e.Reason</span>
+                    <span class="kev__message">@e.Message</span>
+                    <span class="kev__when muted">
+                        @(e.LastSeen is { } at ? Humanize.Since(at) : "")@(e.Count > 1 ? $" · ×{e.Count}" : "")
+                    </span>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ClusterObject Item { get; set; } = default!;
+
+    IReadOnlyList<ClusterEvent> Events => Clusters.Store.EventsFor(Item);
+
+    IReadOnlyList<ClusterEvent> Shown => [.. Events.Take(20)];
+}

@@ -1,3 +1,4 @@
+using Dray.Core.Kubernetes;
 using Dray.Core.Navigation;
 using Dray.Core.Shell;
 using Xaml = Microsoft.UI.Xaml;
@@ -19,32 +20,30 @@ public sealed class WinSidebar : IDisposable
     readonly Xaml.Controls.NavigationView _nav;
     readonly IShellState _shell;
     readonly IPlatformTheme _theme;
+    readonly ClusterManager _clusters;
     readonly List<Entry> _items = [];
+    readonly bool _debug;
+    bool _hasCluster;
 
     public WinSidebar(
         Xaml.Controls.NavigationView nav,
         IShellState shell,
         IPlatformTheme theme,
+        ClusterManager clusters,
         bool debug)
     {
         _nav = nav;
         _shell = shell;
         _theme = theme;
 
+        _debug = debug;
+        _clusters = clusters;
+        _hasCluster = clusters.LocalContexts.Count > 0;
+
         // The engine picker is not in here: it is in the title bar (WinEnginePicker), so every item
         // in the pane is a place to go.
-        foreach (var node in NavigationManifest.Visible(debug))
-        {
-            if (node.IsGroup)
-            {
-                nav.MenuItems.Add(new Xaml.Controls.NavigationViewItemHeader { Content = node.Title });
-                foreach (var child in node.Children) nav.MenuItems.Add(Build(child));
-            }
-            else
-            {
-                nav.MenuItems.Add(Build(node));
-            }
-        }
+        Fill();
+        _clusters.Changed += OnClustersChanged;
 
         // ItemInvoked rather than SelectionChanged: it fires for the user and not for the
         // programmatic selection below, so following the router never asks the router to navigate.
@@ -55,6 +54,40 @@ public sealed class WinSidebar : IDisposable
         _theme.Changed += OnThemeChanged;
 
         Select(_shell.Route);
+    }
+
+    /// <summary>The pane's items from the manifest — with the Kubernetes group only while there is a local cluster.</summary>
+    void Fill()
+    {
+        _nav.MenuItems.Clear();
+        _items.Clear();
+
+        foreach (var node in NavigationManifest.Visible(_debug, _hasCluster))
+        {
+            if (node.IsGroup)
+            {
+                _nav.MenuItems.Add(new Xaml.Controls.NavigationViewItemHeader { Content = node.Title });
+                foreach (var child in node.Children) _nav.MenuItems.Add(Build(child));
+            }
+            else
+            {
+                _nav.MenuItems.Add(Build(node));
+            }
+        }
+    }
+
+    /// <summary>ClusterManager raises for every watch event; the pane is rebuilt only when the group comes or goes.</summary>
+    void OnClustersChanged()
+    {
+        var has = _clusters.LocalContexts.Count > 0;
+        if (has == _hasCluster) return;
+        _hasCluster = has;
+
+        _nav.DispatcherQueue.TryEnqueue(() =>
+        {
+            Fill();
+            Select(_shell.Route);
+        });
     }
 
     Xaml.Controls.NavigationViewItem Build(NavNode node)
@@ -122,5 +155,6 @@ public sealed class WinSidebar : IDisposable
         _nav.ItemInvoked -= OnItemInvoked;
         _shell.RouteChanged -= OnRouteChanged;
         _theme.Changed -= OnThemeChanged;
+        _clusters.Changed -= OnClustersChanged;
     }
 }
