@@ -47,3 +47,10 @@ public sealed record EditorProblem(
     string Message,
     string Severity,
     string Source);
+
+/// <summary>
+/// A clickable label drawn above a line of the editor — a code lens: "Edit network", "Add volume…".
+/// </summary>
+/// <param name="Line">1-based; the lens sits above it.</param>
+/// <param name="Id">Handed back to the owner when the lens is clicked.</param>
+public sealed record EditorLens(int Line, string Title, string Id);

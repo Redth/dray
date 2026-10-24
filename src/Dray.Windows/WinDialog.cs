@@ -38,6 +38,8 @@ public sealed class WinDialog(IServiceProvider services)
     {
         DialogSize.Small => (420, 160),
         DialogSize.Large => (760, 520),
+        // No second window on this head yet: the largest dialog the window can hold.
+        DialogSize.Window => (1000, 640),
         _ => (560, 320),
     };
 

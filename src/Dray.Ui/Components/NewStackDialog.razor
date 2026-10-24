@@ -1,129 +1,186 @@
-@* The body of the New stack dialog: a name, where the compose file comes from, and the file.
+@* The New stack window: a name, a folder, and then the file itself beside its variables — written
+   here, not previewed.
 
-   Four ways in, because people arrive with four different things: nothing yet, an image they
-   want running, a `docker run` line from a README, or containers they started by hand and now
-   want to keep. Each ends as the same thing — a compose.yaml, previewed exactly as it will be
-   written, in the stacks folder, opened in the editor. *@
-@implements IDisposable
+   Where the file starts is asked once, over the editors, as the window opens: a blank template, an
+   image found the way Pull finds one, or a `docker run` line from a README. After that the file is
+   the user's, checked as it is typed — by the YAML language server against the Compose
+   Specification, by Dray's own lint, and by compose itself against a private copy — and every
+   ${VAR} in it shows the value it will read, or a mask where the value is secret. *@
+@inherits DialogBody
+@implements IAsyncDisposable
 @inject EngineManager Engine
 @inject IJSRuntime JS
+@inject IShellBridge Shell
+@inject ShellCapabilities Caps
 
 <div class="ns">
-    <div class="ns__form">
-        <div class="field">
+    <div class="ns__strip">
+        <div class="field ns__name">
             <label class="field__label" for="ns-name">Name</label>
             <input id="ns-name" class="input mono" @bind="Request.Name" @bind:event="oninput"
                    placeholder="shop" spellcheck="false" autocomplete="off" />
-            @if (Request.NameProblem is { } nameProblem)
-            {
-                <span class="ns__problem" role="alert">@nameProblem</span>
-            }
-            else
-            {
-                <span class="ns__hint muted mono">@System.IO.Path.Combine(Display(Request.StacksFolder), Request.Name.Length > 0 ? Request.Name : "…", "compose.yaml")</span>
-            }
         </div>
 
-        <div class="ns__sources" role="radiogroup" aria-label="Start from">
-            @foreach (var (source, title, body) in Sources)
-            {
-                var captured = source;
-                var selected = Request.Source == source;
-
-                <button type="button" role="radio" aria-checked="@(selected.ToString().ToLowerInvariant())"
-                        class="ns__source @(selected ? "is-selected" : null)" @onclick="() => ChooseAsync(captured)">
-                    <span class="ns__title">
-                        <Icon Name="@(selected ? IconRef.Check : IconRef.ChevronRight)" Size="IconSize.Sm" />
-                        @title
-                    </span>
-                    <span class="ns__body muted">@body</span>
-                </button>
-            }
-        </div>
-
-        @switch (Request.Source)
+        @if (Request.Folders.Count > 1)
         {
-            case NewStackSource.Image:
-                <div class="field">
-                    <label class="field__label" for="ns-image">Image</label>
-                    <input id="ns-image" class="input mono" value="@Request.Image" @oninput="e => SetAsync(() => Request.Image = (string)e.Value!)"
-                           placeholder="postgres:16" spellcheck="false" autocomplete="off" />
-                </div>
-                <div class="field">
-                    <label class="field__label" for="ns-ports">Ports <span class="muted">— optional, one per line</span></label>
-                    <textarea id="ns-ports" class="input mono ns__area" rows="2" value="@Request.Ports"
-                              @oninput="e => SetAsync(() => Request.Ports = (string)e.Value!)" placeholder="5432:5432" spellcheck="false"></textarea>
-                </div>
-                break;
-
-            case NewStackSource.Run:
-                <div class="field">
-                    <label class="field__label" for="ns-run">docker run line</label>
-                    <textarea id="ns-run" class="input mono ns__area" rows="4" value="@Request.RunLine"
-                              @oninput="e => SetAsync(() => Request.RunLine = (string)e.Value!)"
-                              placeholder="docker run -d -p 8080:80 -e TZ=UTC nginx:alpine" spellcheck="false"></textarea>
-                    <span class="ns__hint muted">Converted by composerize, the library Dockge uses for this.</span>
-                </div>
-                break;
-
-            case NewStackSource.Containers:
-                <div class="field">
-                    <span class="field__label">Containers</span>
-                    @if (Candidates.Count == 0)
+            <div class="field ns__folder">
+                <label class="field__label" for="ns-folder">Folder</label>
+                <select id="ns-folder" class="input mono" @bind="Request.StacksFolder">
+                    @foreach (var folder in Request.Folders)
                     {
-                        <span class="muted ns__hint">There are no containers on this host to start from.</span>
+                        <option value="@folder">@Display(folder)</option>
                     }
-                    else
-                    {
-                        <div class="ns__containers">
-                            @foreach (var container in Candidates)
-                            {
-                                var id = container.Id;
-
-                                <label class="ns__container">
-                                    <input type="checkbox" checked="@Request.Containers.Contains(id)"
-                                           @onchange="e => ToggleAsync(id, (bool)e.Value!)" />
-                                    <StatePill Status="container.Status" />
-                                    <span class="mono ns__cname" title="@container.Name">@container.Name</span>
-                                    <span class="muted ns__image">@container.Image</span>
-                                    @if (container.Stack is { } stack)
-                                    {
-                                        <span class="muted ns__image">in @stack</span>
-                                    }
-                                </label>
-                            }
-                        </div>
-                    }
-                </div>
-                break;
+                </select>
+            </div>
         }
 
-        @if (Request.SourceProblem is { } problem)
+        @if (_started is { } started)
         {
-            <p class="ns__problem" role="alert">@problem</p>
-        }
-
-        @if (Request.Result is { Notes.Count: > 0 } result)
-        {
-            <ul class="ns__notes">
-                @foreach (var note in result.Notes)
-                {
-                    <li class="note"><Icon Name="IconRef.Info" Size="IconSize.Sm" /><span>@note</span></li>
-                }
-            </ul>
+            <div class="ns__origin">
+                <span class="muted">Started from</span>
+                <span class="ns__origin-what @(started == NewStackSource.Blank ? null : "mono")" title="@StartedFrom">@StartedFrom</span>
+                <Button Label="Start over…" Variant="ButtonVariant.Ghost" OnClick="StartOver" />
+            </div>
         }
     </div>
 
-    <div class="ns__preview">
-        <span class="field__label">compose.yaml</span>
-        <CodePreview Text="@(Request.Result?.Compose ?? "")" Schema="compose" />
+    @if (Problem is { } problem)
+    {
+        <p class="ns__problem" role="alert">@problem</p>
+    }
+    else if (_actionNote is { } note)
+    {
+        <p class="@(_actionOk ? "ns__hint muted" : "ns__problem")" role="status">@note</p>
+    }
 
-        @if (Request.Result is { Environment.Count: > 0 } withEnv)
+    <div class="ns__work">
+        <section class="ns__file" aria-label="compose.yaml">
+            <div class="ns__head">
+                <span class="panel__title">compose.yaml</span>
+                <span class="ns__path mono muted" title="@FilePath">@Display(FilePath)</span>
+                <span class="ns__spacer"></span>
+
+                @if (CanUseForms)
+                {
+                    <OverflowMenu Actions="ComposeEditorActions.AddMenu(ComposeDocument.Parse(_text).Services.Count > 0)"
+                                  Label="Add to this compose file" TriggerText="Add" TriggerIcon="IconRef.Plus"
+                                  TriggerClass="btn--ghost" OnAction="RunActionAsync" />
+                }
+
+                <span class="ns__verdict ns__verdict--@VerdictTone" role="status">
+                    <Icon Name="@VerdictIcon" Size="IconSize.Sm" />
+                    @VerdictText
+                </span>
+            </div>
+
+            <CodeEditor @ref="_editor" Bare="true" Schema="compose"
+                        File="_file" OnSave="(_, _) => Task.FromResult<string?>(null)"
+                        Annotations="_annotations" Problems="_problems"
+                        Lenses="@(CanUseForms && _started is not null ? ComposeEditorActions.Lenses(_text) : [])" OnLens="RunActionAsync"
+                        OnTextChanged="OnTextChangedAsync" OnDirtyChanged="d => _edited = d" />
+
+            @if (_unplaced.Count > 0)
+            {
+                @* What compose said without saying where. Still said, below the file it is about. *@
+                <ul class="ns__unplaced">
+                    @foreach (var message in _unplaced)
+                    {
+                        <li><Icon Name="IconRef.Warning" Size="IconSize.Sm" /><span>@message</span></li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <section class="ns__vars" aria-label="Variables">
+            <div class="ns__head">
+                <span class="panel__title">Variables</span>
+                <span class="ns__path mono muted">@DotEnvFile.FileName</span>
+            </div>
+
+            <div class="ns__vars-body">
+                <EnvEditor Variables="_env" VariablesChanged="OnVariablesChangedAsync" />
+
+                @if (Request.Result is { Notes.Count: > 0 } result)
+                {
+                    <ul class="ns__notes">
+                        @foreach (var note in result.Notes)
+                        {
+                            <li class="note"><Icon Name="IconRef.Info" Size="IconSize.Sm" /><span>@note</span></li>
+                        }
+                    </ul>
+                }
+
+                <p class="ns__hint muted">
+                    Compose reads these from <span class="mono">.env</span> and fills in each
+                    <span class="mono">${NAME}</span> in the file — the value is shown beside it there.
+                    Secrets belong here rather than in the file, which is the one people commit and paste.
+                </p>
+            </div>
+        </section>
+
+        @if (_started is null)
         {
-            <span class="ns__hint muted">
-                .env gets @withEnv.Environment.Count value@(withEnv.Environment.Count == 1 ? "" : "s"):
-                <span class="mono">@string.Join(", ", withEnv.Environment.Select(e => e.Key))</span>
-            </span>
+            @* Asked once, over the editors, rather than kept in a strip above them: it is the first
+               decision and then it is made. Start over brings it back. *@
+            <div class="ns__start">
+                <div class="ns__start-card">
+                    <h2 class="ns__start-title">Start from</h2>
+
+                    <div class="ns__choices">
+                        <button type="button" class="ns__choice" @onclick="() => StartAsync(NewStackSource.Blank)">
+                            <Icon Name="IconRef.File" Size="IconSize.Md" />
+                            <span class="ns__choice-title">Blank</span>
+                            <span class="ns__choice-body muted">A one-service template to edit.</span>
+                        </button>
+
+                        <button type="button" class="ns__choice @(_asking == NewStackSource.Image ? "is-selected" : null)"
+                                aria-pressed="@((_asking == NewStackSource.Image).ToString().ToLowerInvariant())"
+                                @onclick="ChooseImageAsync">
+                            <Icon Name="IconRef.Image" Size="IconSize.Md" />
+                            <span class="ns__choice-title">An image</span>
+                            <span class="ns__choice-body muted">Search Docker Hub and your registries, with tags and platforms.</span>
+                        </button>
+
+                        <button type="button" class="ns__choice @(_asking == NewStackSource.Run ? "is-selected" : null)"
+                                aria-pressed="@((_asking == NewStackSource.Run).ToString().ToLowerInvariant())"
+                                @onclick="() => _asking = NewStackSource.Run">
+                            <Icon Name="IconRef.Terminal" Size="IconSize.Md" />
+                            <span class="ns__choice-title">A docker run command</span>
+                            <span class="ns__choice-body muted">Paste one from a README; it becomes a service.</span>
+                        </button>
+                    </div>
+
+                    @if (_asking == NewStackSource.Run)
+                    {
+                        <div class="field ns__ask">
+                            <label class="field__label" for="ns-run">docker run command <span class="muted">— converted by composerize, the library Dockge uses</span></label>
+                            <textarea id="ns-run" class="input mono ns__area" rows="3" @bind="Request.RunLine" @bind:event="oninput"
+                                      placeholder="docker run -d -p 8080:80 -e TZ=UTC nginx:alpine" spellcheck="false"></textarea>
+                            <div class="ns__ask-row">
+                                <span class="ns__problem">@_startProblem</span>
+                                <Button Label="Convert" Variant="ButtonVariant.Primary" Busy="_converting"
+                                        Disabled="@(Request.RunLine.Trim().Length == 0 || _converting)"
+                                        OnClick="() => StartAsync(NewStackSource.Run)" />
+                            </div>
+                        </div>
+                    }
+                    else if (_asking == NewStackSource.Image)
+                    {
+                        @* Where a dialog cannot open over this one, the name is typed rather than found. *@
+                        <div class="field ns__ask">
+                            <label class="field__label" for="ns-image">Image</label>
+                            <input id="ns-image" class="input mono" @bind="Request.Image" @bind:event="oninput"
+                                   placeholder="postgres:16" spellcheck="false" autocomplete="off" />
+                            <div class="ns__ask-row">
+                                <span class="ns__problem">@_startProblem</span>
+                                <Button Label="Use image" Variant="ButtonVariant.Primary"
+                                        Disabled="@(Request.Image.Trim().Length == 0)"
+                                        OnClick="() => StartAsync(NewStackSource.Image)" />
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
         }
     </div>
 </div>
@@ -131,95 +188,379 @@
 @code {
     [Parameter, EditorRequired] public NewStackRequest Request { get; set; } = default!;
 
-    static readonly (NewStackSource Source, string Title, string Body)[] Sources =
-    [
-        (NewStackSource.Blank, "Blank", "A one-service template to edit."),
-        (NewStackSource.Image, "From an image", "A service for an image you name."),
-        (NewStackSource.Run, "From a docker run line", "Paste the command from a README."),
-        (NewStackSource.Containers, "From running containers", "Keep what you started by hand."),
-    ];
+    /// <summary>Open the window, and return the new stack's name once it has been written — or null.</summary>
+    public static async Task<string?> ShowAsync(IShellBridge shell, NewStackRequest request)
+    {
+        var session = new DialogSession(new DialogRequest(
+            "New stack",
+            typeof(NewStackDialog),
+            new Dictionary<string, object?> { [nameof(Request)] = request },
+            [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")],
+            Size: DialogSize.Window));
 
+        await shell.ShowDialogAsync(session);
+
+        return session.Result == "create" ? session.Value as string : null;
+    }
+
+    CodeEditor? _editor;
     IJSObjectReference? _composerize;
-    CancellationTokenSource? _pending;
 
-    /// <summary>Containers on this host, those not already in a stack first — they are the ones people mean.</summary>
-    IReadOnlyList<ContainerSummary> Candidates =>
+    /// <summary>What the editor opens with. Its text is the editor's from then on.</summary>
+    FileContent _file = new() { Path = "compose.yaml" };
+
+    /// <summary>The text as last reported by the editor — what the marks and the checks are about.</summary>
+    string _text = "";
+
+    IReadOnlyList<EnvVar> _env = [];
+    IReadOnlyList<EditorAnnotation> _annotations = [];
+    IReadOnlyList<EditorProblem> _problems = [];
+    IReadOnlyList<string> _unplaced = [];
+
+    /// <summary>How the file was started, once it has been. Null while the choice is still on screen.</summary>
+    NewStackSource? _started;
+
+    /// <summary>The choice being filled in over the editors — the run line or the image — before it starts the file.</summary>
+    NewStackSource? _asking;
+
+    string? _startProblem;
+    bool _converting;
+    bool _edited;
+    bool _creating;
+    string? _createProblem;
+
+    /// <summary>The private copy compose checks, and the check in flight.</summary>
+    string? _draft;
+    CancellationTokenSource? _check;
+    bool _checking;
+    ComposeConfig? _config;
+
+    string FilePath => Path.Combine(Request.StacksFolder, Request.Name.Length > 0 ? Request.Name : "…", "compose.yaml");
+
+    string StartedFrom => _started switch
+    {
+        NewStackSource.Image => Request.Image.Trim(),
+        NewStackSource.Run => "a docker run command",
+        _ => "a blank template",
+    };
+
+    protected override string? Title => Request.Name.Length > 0 ? $"New stack: {Request.Name}" : "New stack";
+
+    protected override string? Subtitle => $"In {Display(Request.StacksFolder)}";
+
+    protected override IReadOnlyList<DialogButton> Buttons =>
     [
-        .. Engine.Store.Containers
-            .OrderBy(c => c.Stack is null ? 0 : 1)
-            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase),
+        DialogButton.Cancel() with { Enabled = !_creating },
+        DialogButton.Confirm("create", "Create") with
+        {
+            Enabled = !_creating && _started is not null && Request.Name.Length > 0 && Request.NameProblem is null,
+            Busy = _creating,
+        },
     ];
 
-    protected override Task OnInitializedAsync() => RebuildAsync();
+    /// <summary>The one thing wrong right now, most fundamental first.</summary>
+    string? Problem => _createProblem ?? Request.NameProblem;
 
-    Task ChooseAsync(NewStackSource source)
+    // ---------------------------------------------------------------- starting
+
+    async Task ChooseImageAsync()
     {
-        Request.Source = source;
-        return RebuildAsync();
+        _startProblem = null;
+
+        // Found, not typed, where a dialog can open over this window: Pull's own search, with its
+        // registries, tags, and what each tag was built for.
+        if (Caps.HasDialogWindows)
+        {
+            if (await PullDialog.ChooseAsync(Shell, "Choose an image for the stack") is not { } reference) return;
+
+            Request.Image = reference;
+            await StartAsync(NewStackSource.Image);
+            return;
+        }
+
+        _asking = NewStackSource.Image;
     }
 
-    Task SetAsync(Action change)
+    async Task StartAsync(NewStackSource source)
     {
-        change();
-        return RebuildAsync();
-    }
-
-    Task ToggleAsync(string id, bool on)
-    {
-        if (on) Request.Containers.Add(id);
-        else Request.Containers.Remove(id);
-
-        return RebuildAsync();
-    }
-
-    /// <summary>
-    /// Produce the files from the chosen source. Debounced for typing, and cancelled when superseded,
-    /// so the preview is always of the latest text rather than whichever conversion finished last.
-    /// </summary>
-    async Task RebuildAsync()
-    {
-        _pending?.Cancel();
-        var cts = _pending = new CancellationTokenSource();
+        _startProblem = null;
+        _converting = source == NewStackSource.Run;
+        StateHasChanged();
 
         try
         {
-            if (Request.Source is NewStackSource.Run or NewStackSource.Image) await Task.Delay(200, cts.Token);
+            var (result, problem) = await BuildAsync(source, Closing);
 
-            var (result, problem) = await BuildAsync(cts.Token);
-            if (cts.IsCancellationRequested) return;
+            if (result is null)
+            {
+                _startProblem = problem;
+                return;
+            }
 
+            Request.Source = source;
             Request.Result = result;
-            Request.SourceProblem = problem;
-            StateHasChanged();
+            _env = result.Environment;
+            _started = source;
+            _asking = null;
+
+            // A name to begin from, where the start suggests one and none has been typed: the image's
+            // own, as compose would name its service.
+            if (Request.Name.Length == 0 && source == NewStackSource.Image && SuggestedName(Request.Image) is { } suggested)
+                Request.Name = suggested;
+
+            if (_editor is not null) await _editor.SetTextAsync(result.Compose);
+            else _file = new FileContent { Path = "compose.yaml", Text = result.Compose };
+
+            await OnTextChangedAsync(result.Compose);
+            _edited = false;
         }
         catch (OperationCanceledException)
         {
         }
+        finally
+        {
+            _converting = false;
+            StateHasChanged();
+        }
     }
 
-    async Task<(AuthoredStack? Result, string? Problem)> BuildAsync(CancellationToken ct)
+    async Task StartOver()
     {
-        switch (Request.Source)
+        // Starting again writes the file again. Asked only where there is something of the user's to lose.
+        if (_edited)
         {
-            case NewStackSource.Blank:
-                return (ComposeAuthoring.Blank(), null);
+            var answer = await Shell.ConfirmDestructiveAsync(new DestructiveConfirm(
+                "Start over?",
+                "The file and its variables are written again from the start you choose, and the edits you made to them are lost.",
+                "Start over"));
 
+            if (answer != ConfirmResult.Confirm) return;
+        }
+
+        _started = null;
+        _asking = null;
+        _startProblem = null;
+    }
+
+    /// <summary>The repository's last segment, as a stack name: <c>library/postgres:16</c> is <c>postgres</c>.</summary>
+    static string? SuggestedName(string reference)
+    {
+        var path = reference.Split('@')[0];
+        var slash = path.LastIndexOf('/');
+        var name = path[(slash + 1)..].Split(':')[0].ToLowerInvariant();
+
+        return name.Length > 0 ? name : null;
+    }
+
+    // ---------------------------------------------------------------- checking as it is written
+
+    async Task OnTextChangedAsync(string text)
+    {
+        _text = text;
+        _annotations = ComposeMarks.Annotations(text, _env);
+        Lint();
+        await CheckSoonAsync();
+    }
+
+    async Task OnVariablesChangedAsync(IReadOnlyList<EnvVar> variables)
+    {
+        _env = variables;
+        _annotations = ComposeMarks.Annotations(_text, _env);
+
+        // Compose reads the values too: a required ${VAR} is an error until it has one.
+        await CheckSoonAsync();
+    }
+
+    /// <summary>Dray's own checks: what compose accepts but will not do what it says.</summary>
+    IReadOnlyList<EditorProblem> _lint = [];
+
+    void Lint()
+    {
+        var published = Engine.Store.Containers
+            .Where(c => c.State == DockerState.Running)
+            .SelectMany(c => c.Ports.Select(p => new PublishedPort(p.HostPort, p.Protocol, c.Stack is { } stack ? $"{c.Name} ({stack})" : c.Name)))
+            .ToList();
+
+        var context = new LintContext(published, Engine.Selected?.Endpoint.IsRemote == true);
+
+        try
+        {
+            var document = ComposeDocument.Parse(_text);
+            _lint = [.. ComposeLint.Check(document, context).Select(f => ComposeMarks.ToEditor(new ComposeProblem(f.Message, ProblemSeverity.Warning, null), f.Range, "dray"))];
+        }
+        catch (Exception)
+        {
+            // Not YAML yet. The language server is already underlining why.
+            _lint = [];
+        }
+
+        Merge();
+    }
+
+    /// <summary>
+    /// Ask compose what it makes of the file, a moment after the typing stops.
+    /// <para>
+    /// Against a private copy in a temporary folder, because the stack's own folder does not exist
+    /// until Create. The variables go into its <c>.env</c> so compose can check what they feed — but
+    /// a secret's value is never written for this: a placeholder stands in, which is all a check of
+    /// the file's shape needs, and the real one reaches disk only when the user creates the stack.
+    /// </para>
+    /// </summary>
+    async Task CheckSoonAsync()
+    {
+        _check?.Cancel();
+        var cts = _check = CancellationTokenSource.CreateLinkedTokenSource(Closing);
+
+        try
+        {
+            await Task.Delay(700, cts.Token);
+
+            _checking = true;
+            StateHasChanged();
+
+            _draft ??= Directory.CreateTempSubdirectory("dray-draft-").FullName;
+            var compose = Path.Combine(_draft, "compose.yaml");
+
+            await File.WriteAllTextAsync(compose, _text, cts.Token);
+            await File.WriteAllTextAsync(
+                Path.Combine(_draft, DotEnvFile.FileName),
+                DotEnvFile.Serialize([.. _env.Select(v => v.IsSecret ? v with { Value = "dray-placeholder" } : v)]),
+                cts.Token);
+
+            var draft = new StackSummary { Name = "dray-draft", ConfigFiles = [compose], WorkingDirectory = _draft, Provenance = StackProvenance.Adopted };
+            var config = await Engine.ValidateComposeAsync(draft, cts.Token);
+            if (cts.IsCancellationRequested) return;
+
+            _config = config;
+
+            var placed = config.Place([(compose, ComposeDocument.Parse(_text))]);
+            _compose = [.. placed.Where(p => p.Range is not null).Select(p => ComposeMarks.ToEditor(p.Problem, p.Range!, "compose"))];
+            // An unset variable is already said beside its reference, where it is — "→ empty", with
+            // what compose will do in the hover. Compose's own sentence about it, with no line to
+            // put it on, would only say it again under the file.
+            _unplaced =
+            [
+                .. placed
+                    .Where(p => p.Range is null && !UnsetVariable().IsMatch(p.Problem.Message))
+                    .Select(p => p.Problem.Message),
+            ];
+            Merge();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _unplaced = [$"Compose could not check the file: {ex.Message}"];
+        }
+        finally
+        {
+            if (_check == cts) _checking = false;
+            StateHasChanged();
+        }
+    }
+
+    IReadOnlyList<EditorProblem> _compose = [];
+
+    void Merge() => _problems = [.. _compose, .. _lint];
+
+    string VerdictTone => _checking || _config is null ? "busy"
+        : !_config.IsValid ? "danger"
+        : _problems.Count > 0 || _unplaced.Count > 0 ? "warn"
+        : "ok";
+
+    IconRef VerdictIcon => VerdictTone switch
+    {
+        "ok" => IconRef.Check,
+        "warn" => IconRef.Warning,
+        "danger" => IconRef.Error,
+        _ => IconRef.Refresh,
+    };
+
+    string VerdictText => VerdictTone switch
+    {
+        "busy" => _config is null ? "Checking…" : "Checking again…",
+        "danger" => "Compose rejects this",
+        "warn" => _problems.Count + _unplaced.Count == 1 ? "1 thing to look at" : $"{_problems.Count + _unplaced.Count} things to look at",
+        _ => "Compose accepts this",
+    };
+
+    // ---------------------------------------------------------------- forms over the file
+
+    /// <summary>
+    /// The Add menu and the Edit lenses open a form over this window. Where a dialog cannot open over
+    /// another — every head whose New stack is itself a dialog — they are not offered.
+    /// </summary>
+    bool CanUseForms => Caps.HasDialogWindows;
+
+    string? _actionNote;
+    bool _actionOk;
+
+    async Task RunActionAsync(string command)
+    {
+        if (_editor is null) return;
+
+        _actionNote = null;
+
+        if (await ComposeEditorActions.RunAsync(Shell, _editor, command) is { } outcome)
+        {
+            // Here nothing is saved until Create, so the sentence about saving is the stack page's.
+            _actionNote = outcome.Ok ? null : outcome.Message;
+            _actionOk = outcome.Ok;
+        }
+    }
+
+    // ---------------------------------------------------------------- creating
+
+    protected override async Task<bool> OnPressedAsync(string id)
+    {
+        if (id != "create") return true;
+
+        _creating = true;
+        _createProblem = null;
+        StateHasChanged();
+
+        try
+        {
+            // What is in the editor, edited or not, and the variables as they now stand: what the
+            // window shows is what is written.
+            var text = (_editor is null ? null : await _editor.GetTextAsync()) ?? _text;
+            var stack = new AuthoredStack(text, _env, Request.Result?.Notes ?? []);
+
+            var (_, problem) = StackCreation.Create(Request.StacksFolder, Request.Name, stack);
+
+            if (problem is null) Close("create", Request.Name);
+            else _createProblem = problem;
+        }
+        catch (Exception ex)
+        {
+            _createProblem = $"Nothing was written: {ex.Message}";
+        }
+        finally
+        {
+            _creating = false;
+            StateHasChanged();
+        }
+
+        // Closed above on success; left open, with the reason on screen, otherwise.
+        return false;
+    }
+
+    /// <summary>The file a start makes. Null with a sentence when what was given cannot make one.</summary>
+    async Task<(AuthoredStack? Result, string? Problem)> BuildAsync(NewStackSource source, CancellationToken ct)
+    {
+        switch (source)
+        {
             case NewStackSource.Image:
             {
-                if (Request.Image.Trim().Length == 0) return (null, null);
-
-                var ports = Request.Ports.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-                RunParser.ParsePorts(Request.Ports, out var portProblem);
-
-                return portProblem is null
-                    ? (ComposeAuthoring.FromImage(Request.Image.Trim(), ports), null)
-                    : (null, portProblem);
+                var image = Request.Image.Trim();
+                return image.Length == 0 ? (null, "Choose an image first.") : (ComposeAuthoring.FromImage(image, []), null);
             }
 
             case NewStackSource.Run:
             {
                 var line = Request.RunLine.Trim();
-                if (line.Length == 0) return (null, null);
+                if (line.Length == 0) return (null, "Paste a docker run command first.");
                 if (!line.StartsWith("docker ", StringComparison.Ordinal) && !line.StartsWith("podman ", StringComparison.Ordinal))
                     return (null, "Paste the whole command, starting with docker run.");
 
@@ -238,28 +579,14 @@
             }
 
             default:
-            {
-                if (Request.Containers.Count == 0) return (null, null);
-
-                var picked = new List<(ContainerInspect, ImageDefaults?)>();
-
-                foreach (var id in Request.Containers)
-                {
-                    try
-                    {
-                        var inspect = await Engine.InspectAsync(id, ct);
-                        picked.Add((inspect, await Engine.GetImageDefaultsAsync(inspect.Image, ct)));
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        return (null, $"Could not read a container: {ex.Message}");
-                    }
-                }
-
-                return (ComposeAuthoring.FromContainers(picked), null);
-            }
+                return (ComposeAuthoring.Blank(), null);
         }
     }
+
+    // A plain Regex: the generator does not see code a .razor file becomes.
+    static readonly System.Text.RegularExpressions.Regex UnsetVariablePattern = new(@"^The ""[^""]+"" variable is not set\.", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    static System.Text.RegularExpressions.Regex UnsetVariable() => UnsetVariablePattern;
 
     static string Display(string path)
     {
@@ -267,5 +594,31 @@
         return path.StartsWith(home, StringComparison.Ordinal) ? "~" + path[home.Length..] : path;
     }
 
-    public void Dispose() => _pending?.Cancel();
+    public async ValueTask DisposeAsync()
+    {
+        _check?.Cancel();
+
+        // The private copy goes with the window.
+        if (_draft is { } draft)
+        {
+            try
+            {
+                Directory.Delete(draft, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+
+        if (_composerize is not null)
+        {
+            try
+            {
+                await _composerize.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
 }

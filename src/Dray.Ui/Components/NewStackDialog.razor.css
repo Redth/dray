@@ -1,141 +1,289 @@
-/* The form on the left, the file it makes on the right: what is being written is never a guess. */
+/* A window, laid out to its height: a strip of form across the top, then the file beside its
+   variables taking everything else. The form was half the dialog, and the file the smaller half. */
 .ns {
-    display: grid;
-    grid-template-columns: minmax(18rem, 1fr) minmax(0, 1.2fr);
-    gap: var(--s4);
-    min-height: min(60vh, 34rem);
-}
-
-@media (max-width: 52rem) {
-    .ns {
-        grid-template-columns: minmax(0, 1fr);
-    }
-}
-
-.ns__form {
     display: flex;
     flex-direction: column;
     gap: var(--s3);
-    min-width: 0;
+    height: 100%;
+    min-height: 0;
 }
 
-.ns__sources {
+.ns__strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--s3);
+    flex: 0 0 auto;
+}
+
+/* The app's rule spaces a column of fields apart; in a row it would push each one after the first
+   down out of line with the rest. */
+.ns__strip .field + .field {
+    margin-top: 0;
+}
+
+.ns__name {
+    flex: 1 1 12rem;
+    min-width: 10rem;
+}
+
+.ns__folder {
+    flex: 1 1 12rem;
+    min-width: 10rem;
+}
+
+.ns__hint {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+}
+
+.ns__problem {
+    flex: 0 0 auto;
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--danger-ink);
+}
+
+/* The file and its variables, side by side and as tall as the window allows. The file gets the
+   larger share: it is what is being written; the variables are what it is read with. */
+.ns__work {
+    position: relative;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--s1);
+    grid-template-columns: minmax(0, 1.8fr) minmax(16rem, 1fr);
+    gap: var(--s3);
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
-.ns__source {
+.ns__file,
+.ns__vars {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: var(--s2) var(--s3);
+    min-width: 0;
+    min-height: 0;
     border: 1px solid var(--line);
-    border-radius: var(--r-md);
-    text-align: left;
-    user-select: none;
-    -webkit-user-select: none;
+    border-radius: var(--r-lg);
+    background: var(--bg);
+    overflow: hidden;
 }
 
-.ns__source:hover {
-    background: var(--surface-2);
-}
-
-/* A border, a check and the radio's own state — never colour alone. */
-.ns__source.is-selected {
-    border-color: var(--brand);
-}
-
-.ns__title {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s1);
-    font-size: var(--text-sm);
-    font-weight: 500;
-}
-
-.ns__body {
-    font-size: var(--text-xs);
-    line-height: var(--text-sm-lh);
-}
-
-.ns__area {
-    height: auto;
-    padding: var(--s2);
-    resize: vertical;
-    line-height: var(--text-sm-lh);
-}
-
-.ns__containers {
+.ns__head {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    max-height: 14rem;
-    overflow-y: auto;
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
-    padding: var(--s1);
-}
-
-.ns__container {
-    display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: var(--s2);
-    padding: var(--s1) var(--s2);
-    border-radius: var(--r-sm);
-    font-size: var(--text-sm);
-    user-select: none;
-    -webkit-user-select: none;
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
 }
 
-.ns__container:hover {
-    background: var(--surface-2);
-}
-
-.ns__cname {
-    flex: 0 1 auto;
+.ns__path {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--text-sm);
 }
 
-.ns__image {
-    font-size: var(--text-xs);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.ns__file ::deep .editor {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.ns__vars-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--s3);
 }
 
 .ns__notes {
     display: flex;
     flex-direction: column;
     gap: var(--s1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
 
 .ns__notes .note {
     margin: 0;
 }
 
-.ns__hint {
-    font-size: var(--text-xs);
-    line-height: var(--text-sm-lh);
+/* How the file was started, and the way back to that choice. Sits at the end of the strip, level
+   with the fields' boxes rather than their labels. */
+.ns__origin {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+    margin-left: auto;
+    min-height: var(--row-h);
+    font-size: var(--text-sm);
 }
 
-.ns__problem {
-    margin: 0;
-    font-size: var(--text-sm);
+.ns__origin-what {
+    min-width: 0;
+    max-width: 28ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ns__spacer {
+    flex: 1 1 auto;
+}
+
+/* Compose's verdict on the file, in its header: tint, glyph and words, never colour alone. */
+.ns__verdict {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    flex: 0 0 auto;
+    padding: 0 var(--s2);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    font-weight: var(--text-xs-weight);
+    line-height: 1.5rem;
+    white-space: nowrap;
+    background: var(--neutral-tint);
+    color: var(--neutral-ink);
+}
+
+.ns__verdict--ok {
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+}
+
+.ns__verdict--warn {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+}
+
+.ns__verdict--danger {
+    background: var(--danger-tint);
     color: var(--danger-ink);
 }
 
-.ns__preview {
+/* What compose said without a line to put it on. Under the file, before the window's buttons. */
+.ns__unplaced {
     display: flex;
     flex-direction: column;
-    gap: var(--s2);
-    min-width: 0;
-    min-height: 0;
+    gap: var(--s1);
+    flex: 0 0 auto;
+    margin: 0;
+    padding: var(--s2) var(--s3);
+    border-top: 1px solid var(--line);
+    list-style: none;
+    font-size: var(--text-sm);
+    color: var(--warn-ink);
 }
 
-.ns__preview ::deep .preview {
-    flex: 1 1 auto;
+.ns__unplaced li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1);
+}
+
+/* ---------------------------------------------------------------- the first choice */
+
+/* Over the editors, which are already there underneath: the choice is the first thing asked, and
+   once made it gets out of the way of the file it produced. */
+.ns__start {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: var(--s4);
+    border-radius: var(--r-lg);
+    background: color-mix(in oklab, var(--bg) 88%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    overflow-y: auto;
+}
+
+.ns__start-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s4);
+    width: min(44rem, 100%);
+}
+
+.ns__start-title {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: var(--text-md-weight);
+    color: var(--ink);
+}
+
+.ns__choices {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--s3);
+}
+
+@media (max-width: 48rem) {
+    .ns__choices {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.ns__choice {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s1);
+    padding: var(--s3) var(--s4);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--ink);
+    text-align: left;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+.ns__choice:hover {
+    background: var(--surface-2);
+}
+
+/* Chosen is a border and the pressed state, not a colour alone. */
+.ns__choice.is-selected {
+    border-color: var(--brand);
+    box-shadow: inset 0 0 0 1px var(--brand);
+}
+
+.ns__choice:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.ns__choice-title {
+    font-weight: var(--text-md-weight);
+}
+
+.ns__choice-body {
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+}
+
+.ns__ask {
+    margin: 0;
+}
+
+.ns__ask-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ns__choice {
+        transition: none;
+    }
 }

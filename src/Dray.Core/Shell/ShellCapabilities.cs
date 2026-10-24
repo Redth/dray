@@ -19,4 +19,11 @@ public sealed record ShellCapabilities(
 
     /// <summary>A bare WebView or browser: Blazor draws everything.</summary>
     public static ShellCapabilities Web(bool debug = false) => new(false, false, false, debug);
+
+    /// <summary>
+    /// Whether a <see cref="DialogSize.Window"/> dialog is a window of its own here, rather than the
+    /// largest dialog the head draws. What follows from it: a dialog can be opened from inside one —
+    /// a sheet on that window — where a head whose dialogs are one-at-a-time would close the first.
+    /// </summary>
+    public bool HasDialogWindows { get; init; }
 }

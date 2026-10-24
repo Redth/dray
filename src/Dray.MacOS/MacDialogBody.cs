@@ -22,16 +22,22 @@ public sealed class MacDialogBody : IDisposable
 {
     readonly IServiceProvider _services;
     readonly MacOSBlazorWebView _webView;
+    readonly bool _ownSession;
 
     public NSView View { get; }
 
-    public MacDialogBody(IServiceProvider services, DialogSession session, CGSize size)
+    /// <param name="ownSession">
+    /// Hand the session to this body alone rather than through the one shared state — for a dialog
+    /// in its own window, which is not modal: a sheet opened behind it would otherwise take its body.
+    /// </param>
+    public MacDialogBody(IServiceProvider services, DialogSession session, CGSize size, bool ownSession = false)
     {
         _services = services;
+        _ownSession = ownSession;
 
         // Set before the view is created: the surface reads it as it mounts, and a session arriving
         // afterwards would render an empty dialog for a frame.
-        services.GetRequiredService<NativeDialogState>().Set(session);
+        if (!ownSession) services.GetRequiredService<NativeDialogState>().Set(session);
 
         _webView = new MacOSBlazorWebView
         {
@@ -44,6 +50,9 @@ public sealed class MacDialogBody : IDisposable
         {
             Selector = "#dialog",
             ComponentType = typeof(Dray.Ui.Components.DialogSurface),
+            Parameters = ownSession
+                ? new Dictionary<string, object?> { [nameof(Dray.Ui.Components.DialogSurface.Session)] = session }
+                : null,
         });
 
         // From the window rather than from DI. IMauiContext is created per window and is not in
@@ -65,7 +74,7 @@ public sealed class MacDialogBody : IDisposable
 
     public void Dispose()
     {
-        _services.GetRequiredService<NativeDialogState>().Set(null);
+        if (!_ownSession) _services.GetRequiredService<NativeDialogState>().Set(null);
 
         View.RemoveFromSuperview();
         _webView.Handler?.DisconnectHandler();

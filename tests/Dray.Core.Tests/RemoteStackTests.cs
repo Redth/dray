@@ -58,15 +58,15 @@ public class RemoteStackTests
         ]);
 
         // Not on this machine: observed, unless the host said the files are there.
-        Assert.Equal(StackProvenance.Observed, StackCatalog.Merge(observed, [], [], null, None, _ => false).Single().Provenance);
-        Assert.Equal(StackProvenance.Remote, StackCatalog.Merge(observed, [], [], null, None, _ => false, new HashSet<string> { "web" }).Single().Provenance);
+        Assert.Equal(StackProvenance.Observed, StackCatalog.Merge(observed, [], [], [], None, _ => false).Single().Provenance);
+        Assert.Equal(StackProvenance.Remote, StackCatalog.Merge(observed, [], [], [], None, _ => false, new HashSet<string> { "web" }).Single().Provenance);
     }
 
     [Fact]
     public void ARemoteStackThatIsDownIsStillTheHosts()
     {
         var stack = StackCatalog.Merge(
-            [], [], [new StackRecord("nas", "web", "/srv/stacks/web", ["/srv/stacks/web/compose.yaml"], OnHost: true)], null, None, _ => false).Single();
+            [], [], [new StackRecord("nas", "web", "/srv/stacks/web", ["/srv/stacks/web/compose.yaml"], OnHost: true)], [], None, _ => false).Single();
 
         Assert.Equal(StackProvenance.Remote, stack.Provenance);
         Assert.Equal(StackState.Down, stack.State);

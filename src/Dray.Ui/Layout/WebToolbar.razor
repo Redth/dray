@@ -39,6 +39,12 @@
             </select>
         }
 
+        @foreach (var menu in Chrome.MenuList)
+        {
+            <OverflowMenu Actions="Flatten(menu)" Label="@menu.Label" TriggerText="@menu.Label" TriggerIcon="menu.Icon"
+                          OnAction="id => Shell.InvokeAction(id)" />
+        }
+
         @foreach (var action in Chrome.ActionList)
         {
             <Button Label="@action.Label"
@@ -65,6 +71,29 @@
     void OnFilterChange(string filterId, ChangeEventArgs e)
     {
         if (int.TryParse(e.Value?.ToString(), out var index)) Shell.SetFilter(filterId, index);
+    }
+
+    /// <summary>
+    /// A command menu as the page's one-level menu draws it: a submenu's rows follow one another,
+    /// each named with the row it hangs from, and separators are left to the gaps between.
+    /// </summary>
+    static IReadOnlyList<RowAction> Flatten(ChromeMenu menu)
+    {
+        var rows = new List<RowAction>();
+
+        foreach (var item in menu.Items.Where(i => !i.IsSeparator))
+        {
+            if (item.IsCommand)
+            {
+                rows.Add(new RowAction(item.Id, item.Label, item.Icon ?? menu.Icon));
+                continue;
+            }
+
+            foreach (var child in item.ChildList.Where(c => c.IsCommand))
+                rows.Add(new RowAction(child.Id, $"{item.Label} — {child.Label}", child.Icon ?? item.Icon ?? menu.Icon));
+        }
+
+        return rows;
     }
 
     // A destructive action in chrome is quiet: ghost weight, danger tone. The filled danger

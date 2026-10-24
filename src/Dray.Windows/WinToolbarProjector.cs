@@ -43,6 +43,7 @@ public sealed class WinToolbarProjector : IDisposable
 
     readonly Dictionary<string, Xaml.Controls.Primitives.ButtonBase> _actionItems = [];
     readonly Dictionary<string, FilterMenu> _filterMenus = [];
+    readonly Dictionary<string, Xaml.Controls.DropDownButton> _commandMenus = [];
     Xaml.Controls.AutoSuggestBox? _search;
     bool _disposed;
 
@@ -160,6 +161,7 @@ public sealed class WinToolbarProjector : IDisposable
 
         _actionItems.Clear();
         _filterMenus.Clear();
+        _commandMenus.Clear();
         _filters.Children.Clear();
         _searchSlot.Children.Clear();
         _primarySlot.Children.Clear();
@@ -171,6 +173,14 @@ public sealed class WinToolbarProjector : IDisposable
             var menu = BuildFilter(filter);
             _filterMenus[filter.Id] = menu;
             _filters.Children.Add(menu.Button);
+        }
+
+        // Beside the filters: like them, about what the page lists rather than one thing in it.
+        foreach (var menu in chrome.MenuList)
+        {
+            var button = BuildCommandMenu(menu);
+            _commandMenus[menu.Id] = button;
+            _filters.Children.Add(button);
         }
 
         if (chrome.Search is { } search)
@@ -321,6 +331,42 @@ public sealed class WinToolbarProjector : IDisposable
         return new FilterMenu(button, items);
     }
 
+    /// <summary>A menu of commands: a drop-down button whose flyout holds the rows, submenus and all.</summary>
+    Xaml.Controls.DropDownButton BuildCommandMenu(ChromeMenu menu)
+    {
+        var flyout = new Xaml.Controls.MenuFlyout();
+        foreach (var row in menu.Items) flyout.Items.Add(BuildMenuRow(row));
+
+        var button = new Xaml.Controls.DropDownButton
+        {
+            Content = menu.Label,
+            Flyout = flyout,
+            VerticalAlignment = Xaml.VerticalAlignment.Center,
+        };
+        Xaml.Controls.ToolTipService.SetToolTip(button, menu.Label);
+
+        return button;
+    }
+
+    Xaml.Controls.MenuFlyoutItemBase BuildMenuRow(ChromeMenuItem row)
+    {
+        if (row.IsSeparator) return new Xaml.Controls.MenuFlyoutSeparator();
+
+        if (row.ChildList.Count > 0)
+        {
+            var sub = new Xaml.Controls.MenuFlyoutSubItem { Text = row.Label };
+            if (row.Icon is { } subIcon) sub.Icon = WinIcons.Create(subIcon, _theme.Current);
+            foreach (var child in row.ChildList) sub.Items.Add(BuildMenuRow(child));
+            return sub;
+        }
+
+        var id = row.Id;
+        var item = new Xaml.Controls.MenuFlyoutItem { Text = row.Label };
+        if (row.Icon is { } icon) item.Icon = WinIcons.Create(icon, _theme.Current);
+        item.Click += (_, _) => InvokeAction(id);
+        return item;
+    }
+
     static string SelectedLabel(ChromeFilter filter)
         => filter.SelectedIndex >= 0 && filter.SelectedIndex < filter.Options.Count
             ? filter.Options[filter.SelectedIndex].Label
@@ -345,6 +391,15 @@ public sealed class WinToolbarProjector : IDisposable
             menu.Button.Content = SelectedLabel(filter);
             for (var i = 0; i < filter.Options.Count && i < menu.Items.Count; i++)
                 menu.Items[i].IsChecked = i == filter.SelectedIndex;
+        }
+
+        // A command menu's rows are its shape and rebuild it; only its label changes in place.
+        foreach (var menu in chrome.MenuList)
+        {
+            if (!_commandMenus.TryGetValue(menu.Id, out var button)) continue;
+
+            button.Content = menu.Label;
+            Xaml.Controls.ToolTipService.SetToolTip(button, menu.Label);
         }
 
         // The search text is deliberately not written back: the field is the source of truth while

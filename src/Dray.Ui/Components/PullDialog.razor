@@ -408,7 +408,30 @@
         await shell.ShowDialogAsync(session);
     }
 
-    protected override IReadOnlyList<DialogButton> Buttons =>
+    /// <summary>
+    /// Open it to choose an image rather than pull one — the same search, registries and tags, with
+    /// Use image where Pull would be. Returns the reference as the CLI would write it, or null.
+    /// </summary>
+    public static async Task<string?> ChooseAsync(IShellBridge shell, string title = "Choose an image")
+    {
+        var session = new DialogSession(new DialogRequest(
+            title,
+            typeof(PullDialog),
+            Parameters: new Dictionary<string, object?> { [nameof(Choose)] = true },
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("use", "Use image")],
+            Size: DialogSize.Large));
+
+        await shell.ShowDialogAsync(session);
+
+        return session.Result == "use" ? session.Value as string : null;
+    }
+
+    /// <summary>Choosing a reference for something else to use, not pulling it. See <see cref="ChooseAsync"/>.</summary>
+    [Parameter] public bool Choose { get; set; }
+
+    protected override IReadOnlyList<DialogButton> Buttons => Choose
+        ? [DialogButton.Cancel(), DialogButton.Confirm("use", "Use image") with { Enabled = Draft.IsPullable }]
+        :
     [
         DialogButton.Cancel(_pulling ? "Cancel" : "Close"),
         DialogButton.Confirm("pull", _pulling ? "Pulling…" : "Pull") with { Enabled = !_pulling && Draft.IsPullable, Busy = _pulling },
@@ -421,6 +444,10 @@
         // Dray stops reading it. The engine finishes the pull it started; saying otherwise would be a lie, and
         // a half-pulled image is not a state Dray can create.
         if (buttonId == "pull") _ = StartAsync();
+
+        // Nothing is pulled when choosing: whoever asked writes the reference into a file, and the
+        // engine pulls it when that file is brought up.
+        if (buttonId == "use" && Draft.IsPullable) Close("use", Draft.Reference);
 
         return Task.FromResult(false);
     }

@@ -26,19 +26,27 @@ public sealed class StackRegistry
     readonly Lock _lock = new();
     State _state;
 
+    /// <summary>The file's write time when this process last read or wrote it.</summary>
+    DateTime _seen;
+
     public StackRegistry(string path)
     {
         _path = path;
-        _state = Load(path);
+        _seen = File.GetLastWriteTimeUtc(path);
+        _state = Read(path) ?? new State();
     }
 
     /// <summary>Raised after anything changes, from whichever thread changed it.</summary>
     public event Action? Changed;
 
-    /// <summary>Where new stacks go, and the folder scanned for existing ones. Null until the user has said.</summary>
-    public string? StacksFolder
+    /// <summary>
+    /// The folders scanned for stacks, and where a new one can be written — in the order they were
+    /// added, so the first is the one a new stack goes to unless the user picks another. Empty until
+    /// the user has said.
+    /// </summary>
+    public IReadOnlyList<string> StacksFolders
     {
-        get { lock (_lock) return _state.StacksFolder; }
+        get { lock (_lock) return _state.FolderList; }
     }
 
     /// <summary>Folders outside the stacks folder that the user added as stacks.</summary>
@@ -59,7 +67,37 @@ public sealed class StackRegistry
         lock (_lock) return _state.Forgotten.Any(f => f.Host == host && f.Project == project);
     }
 
-    public void SetStacksFolder(string path) => Update(s => s with { StacksFolder = Path.GetFullPath(path) });
+    public void AddStacksFolder(string path)
+    {
+        var full = Normalize(path);
+        Update(s => s.FolderList.Contains(full, PathComparer) ? s : s.WithFolders([.. s.FolderList, full]));
+    }
+
+    /// <summary>
+    /// Stop scanning a folder. Its files are not touched; nor is anything running from it, which
+    /// stays listed from its labels for as long as it runs.
+    /// <para>
+    /// What this host remembered from the folder goes with it. A down stack kept only by its record
+    /// would otherwise stay on the list as though it had been added by hand — the opposite of what
+    /// removing its folder asked for.
+    /// </para>
+    /// </summary>
+    public void RemoveStacksFolder(string path)
+    {
+        var full = Normalize(path);
+
+        Update(s => s.FolderList.Contains(full, PathComparer)
+            ? s.WithFolders([.. s.FolderList.Where(f => !PathComparer.Equals(f, full))]) with
+            {
+                Stacks = [.. s.Stacks.Where(r => r.OnHost || !StackCatalog.IsUnder(r.WorkingDirectory, full))],
+            }
+            : s);
+    }
+
+    /// <summary>A folder as the registry keeps it: absolute, and without a trailing separator.</summary>
+    static string Normalize(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+    static StringComparer PathComparer => StackCatalog.PathComparer;
 
     public void Adopt(string folder)
     {
@@ -119,17 +157,42 @@ public sealed class StackRegistry
 
         lock (_lock)
         {
-            var next = change(_state);
-            changed = !ReferenceEquals(next, _state);
+            var current = Current();
+            var next = change(current);
+            changed = !ReferenceEquals(next, current);
+
+            _state = next;
 
             if (changed)
             {
-                _state = next;
                 Save(_path, next);
+                _seen = File.GetLastWriteTimeUtc(_path);
             }
         }
 
         if (changed) Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// What is on disk, if another process has written it since this one last looked, and what is
+    /// in memory otherwise.
+    /// <para>
+    /// The file is rewritten whole, so a change made to what was read at startup puts back every
+    /// line another Dray wrote since — the dev host running beside the app, or a second window.
+    /// That is how a stacks folder chosen in one of them used to vanish when the other merely
+    /// noticed a stack come up. A file that cannot be read is not an empty one, so it keeps what
+    /// is in memory rather than starting again from nothing.
+    /// </para>
+    /// </summary>
+    State Current()
+    {
+        var stamp = File.GetLastWriteTimeUtc(_path);
+        if (stamp == _seen) return _state;
+
+        if (Read(_path) is not { } fresh) return _state;
+
+        _seen = stamp;
+        return fresh;
     }
 
     // ---------------------------------------------------------------- the file
@@ -139,7 +202,18 @@ public sealed class StackRegistry
     sealed record State
     {
         public int Version { get; init; } = 1;
+
+        /// <summary>The one folder earlier versions kept. Read so it is not lost, never written.</summary>
         public string? StacksFolder { get; init; }
+
+        public IReadOnlyList<string>? StacksFolders { get; init; }
+
+        /// <summary>The folders, with an earlier version's single one as the first.</summary>
+        [JsonIgnore]
+        public IReadOnlyList<string> FolderList => StacksFolders ?? (StacksFolder is { } one ? [one] : []);
+
+        public State WithFolders(IReadOnlyList<string> folders) => this with { StacksFolder = null, StacksFolders = folders };
+
         public IReadOnlyList<string> Adopted { get; init; } = [];
         public IReadOnlyList<StackRecord> Stacks { get; init; } = [];
         public IReadOnlyList<Forgotten> Forgotten { get; init; } = [];
@@ -152,18 +226,19 @@ public sealed class StackRegistry
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    static State Load(string path)
+    /// <summary>The file's contents, or null where there is no file or none Dray can read.</summary>
+    static State? Read(string path)
     {
         try
         {
-            return File.Exists(path) ? JsonSerializer.Deserialize<State>(File.ReadAllText(path), Json) ?? new State() : new State();
+            return File.Exists(path) ? JsonSerializer.Deserialize<State>(File.ReadAllText(path), Json) : null;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             // A file Dray cannot read is a file Dray did not write correctly, or one someone edited
-            // by hand. Starting empty loses a list of paths, which every stack on screen will put
-            // back; refusing to start would lose the app.
-            return new State();
+            // by hand. At startup that means starting empty: it loses a list of paths, which every
+            // stack on screen will put back, where refusing to start would lose the app.
+            return null;
         }
     }
 

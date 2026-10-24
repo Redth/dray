@@ -9,6 +9,8 @@
 @inject IShellBridge Shell
 
 <div class="editor">
+    @if (!Bare)
+    {
     <div class="editor__bar chrome">
         <span class="editor__dir mono" title="@File.Path">@Directory</span>
         <span class="editor__file mono" title="@File.Path">@FileName</span>
@@ -44,6 +46,7 @@
 
         <Button Label="Close" Icon="IconRef.Close" Variant="ButtonVariant.Ghost" IconOnly="true" OnClick="CloseAsync" />
     </div>
+    }
 
     <div class="editor__host" @ref="_host"></div>
 </div>
@@ -63,6 +66,18 @@
     [Parameter] public bool ReadOnly { get; set; }
 
     /// <summary>
+    /// Only the editor, without the bar that names, saves and closes the file — for text that is not
+    /// a file yet, whose owner reads it with <see cref="GetTextAsync"/> when it is time to write it.
+    /// </summary>
+    [Parameter] public bool Bare { get; set; }
+
+    /// <summary>
+    /// The text, after each pause in typing — for an owner that checks what is being written rather
+    /// than what was saved. <see cref="SetTextAsync"/> raises it too, once the text has settled.
+    /// </summary>
+    [Parameter] public EventCallback<string> OnTextChanged { get; set; }
+
+    /// <summary>
     /// Inline annotations to draw beside the text — currently what each <c>${VAR}</c> resolves to.
     /// <para>
     /// Drawn with Monaco's <c>after</c> content, which is the inlay-hint mechanism: the text is not
@@ -78,6 +93,11 @@
     /// anything else, which gets syntax highlighting only.
     /// </summary>
     [Parameter] public string? Schema { get; set; }
+
+    /// <summary>Clickable labels above lines — what a click on one means is the owner's, by <see cref="EditorLens.Id"/>.</summary>
+    [Parameter] public IReadOnlyList<EditorLens> Lenses { get; set; } = [];
+
+    [Parameter] public EventCallback<string> OnLens { get; set; }
 
     /// <summary>Problems to underline, from something that checked the file — compose itself.</summary>
     [Parameter] public IReadOnlyList<EditorProblem> Problems { get; set; } = [];
@@ -114,6 +134,7 @@
                     readOnly = ReadOnly,
                     schema = Schema,
                     name = FileName,
+                    reportText = OnTextChanged.HasDelegate,
                 });
 
             _loadedPath = File.Path;
@@ -125,6 +146,7 @@
 
             await AnnotateAsync();
             await ReportProblemsAsync();
+            await LensAsync();
             return;
         }
 
@@ -143,6 +165,32 @@
         // user edits in a panel next to this one, so they change without the file changing.
         await AnnotateAsync();
         await ReportProblemsAsync();
+        await LensAsync();
+    }
+
+    IReadOnlyList<EditorLens> _lensed = [];
+
+    async Task LensAsync()
+    {
+        if (_editor is null || _module is null) return;
+        if (_lensed.SequenceEqual(Lenses)) return;
+
+        _lensed = Lenses;
+        await _module.InvokeVoidAsync("editor.lenses", _editor, Lenses);
+    }
+
+    [JSInvokable("OnLens")]
+    public Task JsLens(string id) => OnLens.InvokeAsync(id);
+
+    /// <summary>
+    /// Make the editor's text <paramref name="text"/>, as one undoable edit of only what differs —
+    /// for an edit computed over the whole file. Leaves the file unsaved.
+    /// </summary>
+    public async Task ReplaceTextAsync(string text)
+    {
+        if (_editor is null || _module is null) return;
+
+        await _module.InvokeVoidAsync("editor.replace", _editor, text);
     }
 
     IReadOnlyList<EditorProblem> _reported = [];
@@ -159,6 +207,18 @@
     /// <summary>The text as it is in the editor now, saved or not.</summary>
     public async Task<string?> GetTextAsync()
         => _editor is null || _module is null ? null : await _module.InvokeAsync<string>("editor.getValue", _editor);
+
+    /// <summary>
+    /// Replace the whole text, as one undoable edit, and treat it as the new unedited state — for an
+    /// owner whose text is produced elsewhere and has been produced again.
+    /// </summary>
+    public async Task SetTextAsync(string text)
+    {
+        if (_editor is null || _module is null) return;
+
+        await _module.InvokeVoidAsync("editor.setValue", _editor, text, File.Language);
+        await SetDirtyAsync(false);
+    }
 
     /// <summary>Insert lines before a 1-based line, as one undoable edit. Leaves the file unsaved.</summary>
     public async Task InsertAsync(int beforeLine, string text)
@@ -188,6 +248,9 @@
         _annotated = Annotations;
         await _module.InvokeVoidAsync("editor.annotate", _editor, Annotations);
     }
+
+    [JSInvokable("OnTextChanged")]
+    public Task JsTextChanged(string text) => OnTextChanged.InvokeAsync(text);
 
     [JSInvokable("OnDirtyChanged")]
     public async Task JsDirtyChanged(bool dirty)

@@ -41,7 +41,8 @@ public static class MacProgram
         builder.Services.AddMauiBlazorWebView();
 
         // AppKit draws the sidebar, toolbar, menus and dialogs; Blazor must not draw its own.
-        builder.Services.AddSingleton(ShellCapabilities.Native(debug: IsDebug));
+        // A Window-sized dialog is its own NSWindow here (MacDialogWindow), with sheets of its own.
+        builder.Services.AddSingleton(ShellCapabilities.Native(debug: IsDebug) with { HasDialogWindows = true });
         builder.Services.AddSingleton<IShellState, ShellState>();
         builder.Services.AddSingleton<IShellBridge, MacShellBridge>();
 

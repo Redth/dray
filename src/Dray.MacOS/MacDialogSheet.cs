@@ -30,7 +30,8 @@ public sealed class MacDialogSheet(IServiceProvider services)
         {
             try
             {
-                new MacDialogFrame(services, session).Present();
+                if (session.Request.Size == DialogSize.Window) new MacDialogWindow(services, session).Present();
+                else new MacDialogFrame(services, session).Present();
             }
             catch (Exception ex)
             {
@@ -75,15 +76,13 @@ sealed class MacDialogFrame
     readonly MacDialogBody _body;
     readonly NSTextField _title;
     readonly NSTextField _subtitle;
+    readonly MacDialogButtonRow _buttons;
     readonly NSStackView _row;
-    readonly NSProgressIndicator _spinner;
     readonly NSLayoutConstraint _bodyHeight;
-    readonly Dictionary<string, NSButton> _buttons = new(StringComparer.Ordinal);
     readonly double _width;
 
     NSWindow? _parent;
     bool _presented;
-    IReadOnlyList<DialogButton> _drawn = [];
 
     public MacDialogFrame(IServiceProvider services, DialogSession session)
     {
@@ -107,19 +106,8 @@ sealed class MacDialogFrame
 
         _body = new MacDialogBody(services, session, new CGSize(bodyWidth, initial));
 
-        _spinner = new NSProgressIndicator
-        {
-            Style = NSProgressIndicatorStyle.Spinning,
-            ControlSize = NSControlSize.Small,
-            Indeterminate = true,
-        };
-
-        _row = new NSStackView
-        {
-            Orientation = NSUserInterfaceLayoutOrientation.Horizontal,
-            Spacing = 12,
-            TranslatesAutoresizingMaskIntoConstraints = false,
-        };
+        _buttons = new MacDialogButtonRow(session);
+        _row = _buttons.View;
 
         var header = NSStackView.FromViews([_title, _subtitle]);
         header.Orientation = NSUserInterfaceLayoutOrientation.Vertical;
@@ -158,7 +146,7 @@ sealed class MacDialogFrame
         _panel.ContentView = content;
 
         DrawTitle();
-        DrawButtons();
+        _buttons.Draw();
 
         _session.Changed += OnChanged;
         _session.Closed += OnClosed;
@@ -225,7 +213,7 @@ sealed class MacDialogFrame
         if (_session.IsClosed) return;
 
         DrawTitle();
-        DrawButtons();
+        _buttons.Draw();
 
         if (!_presented && _session.ContentHeight is not null)
         {
@@ -260,10 +248,75 @@ sealed class MacDialogFrame
     }
 
     /// <summary>
+    /// Fit the sheet to its content: the body as tall as it measured, up to what the window can hold.
+    /// Anything taller scrolls inside the body rather than pushing the buttons off the screen.
+    /// </summary>
+    void Resize(bool animate)
+    {
+        var wanted = _session.ContentHeight is { } measured
+            ? measured + 2 * Inset
+            : InitialHeightOf(_session.Request.Size);
+
+        var available = (_parent?.ContentLayoutRect.Height ?? 800) - 180;
+        var height = Math.Clamp(wanted, MinBody, Math.Max(MinBody, available));
+
+        if (Math.Abs(_bodyHeight.Constant - height) >= 1) _bodyHeight.Constant = (nfloat)height;
+
+        _panel.ContentView!.LayoutSubtreeIfNeeded();
+
+        var fitting = _panel.ContentView.FittingSize;
+        var frame = _panel.FrameRectFor(new CGRect(0, 0, _width, fitting.Height));
+        var current = _panel.Frame;
+
+        // A sheet hangs from the top of its window, so it grows downwards: the top edge stays put.
+        var next = new CGRect(current.X, current.Y + current.Height - frame.Height, _width, frame.Height);
+        if (Math.Abs(next.Height - current.Height) < 1 && _presented) return;
+
+        _panel.SetFrame(next, display: true, animate: animate);
+    }
+}
+
+/// <summary>
+/// A dialog's AppKit button row, drawn from its session: shared by the sheet and the window, which
+/// differ in everything around it and nothing in it.
+/// </summary>
+sealed class MacDialogButtonRow
+{
+    readonly DialogSession _session;
+    readonly Dictionary<string, NSButton> _buttons = new(StringComparer.Ordinal);
+    readonly NSProgressIndicator _spinner = new()
+    {
+        Style = NSProgressIndicatorStyle.Spinning,
+        ControlSize = NSControlSize.Small,
+        Indeterminate = true,
+    };
+
+    IReadOnlyList<DialogButton> _drawn = [];
+    readonly bool _escapeCancels;
+
+    /// <param name="escapeCancels">
+    /// Whether Escape presses Cancel. A sheet's yes; a window holding an editor's no — the editor
+    /// uses Escape itself, and one stray press would throw away a file being written.
+    /// </param>
+    public MacDialogButtonRow(DialogSession session, bool escapeCancels = true)
+    {
+        _session = session;
+        _escapeCancels = escapeCancels;
+        View = new NSStackView
+        {
+            Orientation = NSUserInterfaceLayoutOrientation.Horizontal,
+            Spacing = 12,
+            TranslatesAutoresizingMaskIntoConstraints = false,
+        };
+    }
+
+    public NSStackView View { get; }
+
+    /// <summary>
     /// Redraw the button row from the session. Buttons are kept by id and updated in place, so a
     /// button that is only changing its label or its enabled state does not flicker or lose focus.
     /// </summary>
-    void DrawButtons()
+    public void Draw()
     {
         var buttons = _session.Buttons;
         if (buttons.SequenceEqual(_drawn)) return;
@@ -300,7 +353,7 @@ sealed class MacDialogFrame
             button.Enabled = spec.Pressable;
             button.HasDestructiveAction = spec.Role == DialogButtonRole.Destructive;
             button.KeyEquivalent = spec.Id == commit ? "\r"
-                : spec.Role == DialogButtonRole.Cancel ? "\u001b"
+                : spec.Role == DialogButtonRole.Cancel && _escapeCancels ? "\u001b"
                 : string.Empty;
         }
 
@@ -325,37 +378,10 @@ sealed class MacDialogFrame
             _spinner.Hidden = true;
         }
 
-        _row.SetViews(leading, NSStackViewGravity.Leading);
-        _row.SetViews([.. trailing], NSStackViewGravity.Trailing);
+        View.SetViews(leading, NSStackViewGravity.Leading);
+        View.SetViews([.. trailing], NSStackViewGravity.Trailing);
     }
 
-    /// <summary>
-    /// Fit the sheet to its content: the body as tall as it measured, up to what the window can hold.
-    /// Anything taller scrolls inside the body rather than pushing the buttons off the screen.
-    /// </summary>
-    void Resize(bool animate)
-    {
-        var wanted = _session.ContentHeight is { } measured
-            ? measured + 2 * Inset
-            : InitialHeightOf(_session.Request.Size);
-
-        var available = (_parent?.ContentLayoutRect.Height ?? 800) - 180;
-        var height = Math.Clamp(wanted, MinBody, Math.Max(MinBody, available));
-
-        if (Math.Abs(_bodyHeight.Constant - height) >= 1) _bodyHeight.Constant = (nfloat)height;
-
-        _panel.ContentView!.LayoutSubtreeIfNeeded();
-
-        var fitting = _panel.ContentView.FittingSize;
-        var frame = _panel.FrameRectFor(new CGRect(0, 0, _width, fitting.Height));
-        var current = _panel.Frame;
-
-        // A sheet hangs from the top of its window, so it grows downwards: the top edge stays put.
-        var next = new CGRect(current.X, current.Y + current.Height - frame.Height, _width, frame.Height);
-        if (Math.Abs(next.Height - current.Height) < 1 && _presented) return;
-
-        _panel.SetFrame(next, display: true, animate: animate);
-    }
 }
 
 /// <summary>

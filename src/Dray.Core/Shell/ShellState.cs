@@ -115,7 +115,8 @@ public sealed class ShellState : IShellState
         // Back is declared beside the actions rather than among them, so it is checked on its own.
         // Missing that made every native back button a silent no-op.
         var declared = Chrome.Back?.Id == actionId
-            || Chrome.ActionList.Any(a => a.Id == actionId && a.IsEnabled);
+            || Chrome.ActionList.Any(a => a.Id == actionId && a.IsEnabled)
+            || Chrome.MenuList.Any(m => m.Commands.Any(c => c.Id == actionId));
 
         if (!declared) return;
 
@@ -144,6 +145,11 @@ public sealed class ShellState : IShellState
                 .Select(f => f.Id == filterId ? f with { SelectedIndex = selectedIndex } : f)
                 .ToList(),
         };
+
+        // Hosts first. A native menu shows its choice as its title and nothing else would tell it:
+        // when the page re-declares its chrome with the same selection, there is no change left to
+        // raise. Unlike search text, writing this back fights no caret — it is a menu's label.
+        ChromeChanged?.Invoke(Chrome);
         FilterChanged?.Invoke(filterId, selectedIndex);
     }
 

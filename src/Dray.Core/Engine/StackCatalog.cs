@@ -9,8 +9,8 @@ namespace Dray.Core.Engine;
 /// registered. This is the only source for a stack whose files are on another machine.</item>
 /// <item><b>The registry</b> — stacks this host has had containers for, which is what keeps one on
 /// the list after it is brought down.</item>
-/// <item><b>Folders</b> — the stacks folder the user chose, scanned, and any folder they added — so a
-/// stack written and never deployed is on the list too.</item>
+/// <item><b>Folders</b> — the stacks folders the user chose, scanned, and any single stack folder they
+/// added — so a stack written and never deployed is on the list too.</item>
 /// </list>
 /// <para>
 /// Folders are watched, never polled. A change to a compose file or a <c>.env</c>, or a stack folder
@@ -61,7 +61,7 @@ public sealed class StackCatalog : IDisposable
             StackDiscovery.From(containers),
             definitions,
             host is null ? [] : Registry.KnownOn(host),
-            Registry.StacksFolder,
+            Registry.StacksFolders,
             DeclaredServices,
             File.Exists,
             onHost);
@@ -128,7 +128,7 @@ public sealed class StackCatalog : IDisposable
         IReadOnlyList<StackSummary> observed,
         IReadOnlyList<StackDefinition> definitions,
         IReadOnlyList<StackRecord> known,
-        string? stacksFolder,
+        IReadOnlyList<string> stacksFolders,
         Func<IReadOnlyList<string>, IReadOnlyList<ComposeServiceEntry>> declaredServices,
         Func<string, bool> exists,
         IReadOnlySet<string>? onHost = null)
@@ -141,7 +141,7 @@ public sealed class StackCatalog : IDisposable
             if (files.Count == 0 || !files.All(exists)) return StackProvenance.Observed;
 
             var folder = directory ?? Path.GetDirectoryName(files[0]);
-            return IsUnder(folder, stacksFolder) ? StackProvenance.Managed : StackProvenance.Adopted;
+            return FolderOf(folder, stacksFolders) is not null ? StackProvenance.Managed : StackProvenance.Adopted;
         }
 
         IReadOnlyList<StackService> WithDeclared(IReadOnlyList<StackService> services, IReadOnlyList<ComposeServiceEntry> declared)
@@ -217,13 +217,23 @@ public sealed class StackCatalog : IDisposable
     {
         if (path is null || folder is null) return false;
 
-        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)) + Path.DirectorySeparatorChar;
-        return Path.GetFullPath(path).StartsWith(root, comparison);
+        return Path.GetFullPath(path).StartsWith(root, PathComparison);
     }
+
+    /// <summary>The stacks folder <paramref name="path"/> is in, or null where it is in none of them.</summary>
+    public static string? FolderOf(string? path, IEnumerable<string> folders)
+        => path is null ? null : folders.FirstOrDefault(folder => IsUnder(path, folder));
+
+    /// <summary>Paths compare as the file system does: without case on Windows and macOS.</summary>
+    static StringComparison PathComparison => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    /// <inheritdoc cref="PathComparison"/>
+    public static StringComparer PathComparer => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
 
     /// <summary>
     /// The services a stack's files declare, across every file, read once per edit of each. A
@@ -290,7 +300,7 @@ public sealed class StackCatalog : IDisposable
 
     void OnRegistryChanged()
     {
-        // The registry changes when the folder setting changes, or a folder is adopted or
+        // The registry changes when a stacks folder is added or removed, or a folder is adopted or
         // forgotten — and also every time a stack is remembered, which needs no rescan. Rescanning
         // anyway is bounded and cheap; watching the wrong folders is not.
         Rescan();
@@ -302,7 +312,15 @@ public sealed class StackCatalog : IDisposable
     {
         var definitions = new List<StackDefinition>();
 
-        if (Registry.StacksFolder is { } folder) definitions.AddRange(StackFolder.Scan(folder));
+        // A project name is the engine's key for a stack, so the first folder to have one has it:
+        // two folders each holding a "web" are one stack to compose, not two.
+        foreach (var folder in Registry.StacksFolders)
+        {
+            foreach (var definition in StackFolder.Scan(folder))
+            {
+                if (definitions.All(d => d.Project != definition.Project)) definitions.Add(definition);
+            }
+        }
 
         foreach (var adopted in Registry.AdoptedFolders)
         {
@@ -320,7 +338,7 @@ public sealed class StackCatalog : IDisposable
             foreach (var watcher in _watchers) watcher.Dispose();
             _watchers.Clear();
 
-            if (Registry.StacksFolder is { } folder && Directory.Exists(folder)) _watchers.Add(WatcherFor(folder, recursive: true));
+            foreach (var folder in Registry.StacksFolders.Where(Directory.Exists)) _watchers.Add(WatcherFor(folder, recursive: true));
 
             foreach (var adopted in Registry.AdoptedFolders.Where(Directory.Exists)) _watchers.Add(WatcherFor(adopted, recursive: false));
         }

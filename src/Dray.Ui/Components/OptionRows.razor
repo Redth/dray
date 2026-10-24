@@ -1,0 +1,34 @@
+@* Key-and-value rows — labels, driver options — with a row to add the next one and a way to drop
+   each. The rows are the caller's list, edited in place. *@
+
+<div class="or">
+    <span class="field__label">@Title <span class="muted">— optional</span></span>
+
+    @foreach (var row in Rows)
+    {
+        var captured = row;
+
+        <div class="or__row" @key="row">
+            <input class="input mono" @bind="row.Key" @bind:event="oninput" placeholder="@KeyPlaceholder" spellcheck="false" aria-label="@($"{Title} key")" />
+            <span class="or__eq muted" aria-hidden="true">=</span>
+            <input class="input mono" @bind="row.Value" @bind:event="oninput" placeholder="@ValuePlaceholder" spellcheck="false" aria-label="@($"{Title} value")" />
+            <Button Label="@($"Remove {(row.Key.Length > 0 ? row.Key : "this row")}")" Icon="IconRef.Close" IconOnly="true"
+                    Variant="ButtonVariant.Ghost" OnClick="() => Rows.Remove(captured)" />
+        </div>
+    }
+
+    <div>
+        <Button Label="@($"Add {Title.ToLowerInvariant().TrimEnd('s')}")" Icon="IconRef.Plus" Variant="ButtonVariant.Ghost"
+                OnClick="() => Rows.Add(new OptionRow())" />
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    [Parameter, EditorRequired] public List<OptionRow> Rows { get; set; } = [];
+
+    [Parameter] public string? KeyPlaceholder { get; set; }
+
+    [Parameter] public string? ValuePlaceholder { get; set; }
+}
