@@ -46,6 +46,17 @@ public static class ClusterPairing
 public sealed class KindCli(IDockerConfigSource source)
 {
     /// <summary>
+    /// <c>PATH</c>'s separator and a directory's, for the platform the config source describes —
+    /// not the one the code happens to run on. They agree on a real machine; a test that describes a
+    /// Mac from a Windows runner is where using <see cref="Path.PathSeparator"/> and
+    /// <see cref="Path.Combine(string[])"/> wrote <c>/opt/homebrew/bin\kind</c>.
+    /// </summary>
+    internal static char ListSeparator(IDockerConfigSource source) => source.IsWindows ? ';' : ':';
+
+    internal static string Join(IDockerConfigSource source, params string[] parts)
+        => string.Join(source.IsWindows ? '\\' : '/', parts.Select((part, i) => i == 0 ? part.TrimEnd('/', '\\') : part.Trim('/', '\\')));
+
+    /// <summary>
     /// What kind accepts as a cluster name — it becomes container names and a context, so lower case,
     /// digits and hyphens.
     /// </summary>
@@ -59,11 +70,11 @@ public sealed class KindCli(IDockerConfigSource source)
     public string? Find()
     {
         var exe = source.IsWindows ? "kind.exe" : "kind";
-        var path = (source.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        var path = (source.GetEnvironmentVariable("PATH") ?? "").Split(ListSeparator(source), StringSplitOptions.RemoveEmptyEntries);
 
         foreach (var dir in path.Concat(KnownDirectories()))
         {
-            var candidate = Path.Combine(dir, exe);
+            var candidate = Join(source, dir, exe);
             if (source.FileExists(candidate)) return candidate;
         }
 
@@ -76,11 +87,11 @@ public sealed class KindCli(IDockerConfigSource source)
 
         if (source.IsWindows)
         {
-            var local = source.GetEnvironmentVariable("LOCALAPPDATA") ?? Path.Combine(home, "AppData", "Local");
-            return [Path.Combine(local, "Microsoft", "WinGet", "Links"), Path.Combine(home, "go", "bin"), Path.Combine(home, "scoop", "shims")];
+            var local = source.GetEnvironmentVariable("LOCALAPPDATA") ?? Join(source, home, "AppData", "Local");
+            return [Join(source, local, "Microsoft", "WinGet", "Links"), Join(source, home, "go", "bin"), Join(source, home, "scoop", "shims")];
         }
 
-        return ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", Path.Combine(home, "go", "bin"), Path.Combine(home, ".local", "bin")];
+        return ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", Join(source, home, "go", "bin"), Join(source, home, ".local", "bin")];
     }
 
     /// <summary>The command that installs kind here, shown for the user to run — Dray does not run a package manager on its own.</summary>
@@ -101,8 +112,8 @@ public sealed class KindCli(IDockerConfigSource source)
         };
 
         var path = source.GetEnvironmentVariable("PATH") ?? "";
-        var extra = KnownDirectories().Where(d => !path.Split(Path.PathSeparator).Contains(d));
-        env["PATH"] = string.Join(Path.PathSeparator, new[] { path }.Concat(extra).Where(p => p.Length > 0));
+        var extra = KnownDirectories().Where(d => !path.Split(ListSeparator(source)).Contains(d));
+        env["PATH"] = string.Join(ListSeparator(source), new[] { path }.Concat(extra).Where(p => p.Length > 0));
 
         return env;
     }
@@ -183,7 +194,7 @@ public sealed class KubectlCli(IDockerConfigSource source)
     public string? Find()
     {
         var exe = source.IsWindows ? "kubectl.exe" : "kubectl";
-        var path = (source.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        var path = (source.GetEnvironmentVariable("PATH") ?? "").Split(KindCli.ListSeparator(source), StringSplitOptions.RemoveEmptyEntries);
         var known = new KindCli(source).KnownDirectories();
 
         // Docker Desktop ships one under its own resources on macOS, which is where a machine with
@@ -192,7 +203,7 @@ public sealed class KubectlCli(IDockerConfigSource source)
 
         foreach (var dir in path.Concat(known).Concat(extra))
         {
-            var candidate = Path.Combine(dir, exe);
+            var candidate = KindCli.Join(source, dir, exe);
             if (source.FileExists(candidate)) return candidate;
         }
 
