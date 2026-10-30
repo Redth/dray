@@ -215,7 +215,7 @@ else if (_state is { } state && !state.IsComplete)
         => Engine.Hosts.FirstOrDefault(h => h.State == HostConnectionState.Connected && h.Capabilities.ContainerOs == os);
 
     string Connected(ContainerOs os) => Answering(os) is { } host
-        ? $"Connected to {host.Name}{(host.Capabilities.EngineVersion is { } v ? $", Docker {v}" : "")}."
+        ? $"Connected to {host.Label}{(host.Capabilities.EngineVersion is { } v ? $", Docker {v}" : "")}."
         : "An engine running these is connected.";
 
     async Task RunAsync(SetupStep step)

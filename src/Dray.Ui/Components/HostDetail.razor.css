@@ -39,6 +39,8 @@
 }
 
 .hostd__actions {
+    display: flex;
+    gap: var(--s1);
     flex: 0 0 auto;
     align-self: flex-start;
 }

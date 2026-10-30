@@ -99,7 +99,22 @@
     /// </summary>
     const int MaxLines = 5_000;
 
-    [Parameter, EditorRequired] public ContainerSummary Container { get; set; } = default!;
+    /// <summary>The container whose log this is. Either this or <see cref="Source"/>.</summary>
+    [Parameter] public ContainerSummary? Container { get; set; }
+
+    /// <summary>
+    /// Where the lines come from, for a log that is not a container's — a pod's, on a cluster. The
+    /// view is the same either way: one log view, with one set of controls, wherever a log is read.
+    /// </summary>
+    [Parameter] public Func<CancellationToken, IAsyncEnumerable<LogLine>>? Source { get; set; }
+
+    /// <summary>Identifies <see cref="Source"/>: a different key restarts the stream, the same one leaves it running.</summary>
+    [Parameter] public string? SourceKey { get; set; }
+
+    /// <summary>Whether lines carry their stream. Null asks the selected engine; a pod's never do.</summary>
+    [Parameter] public bool? LogMetadata { get; set; }
+
+    string StreamKey => Container?.Id ?? SourceKey ?? "";
 
     readonly List<LogLine> _lines = [];
 
@@ -113,7 +128,7 @@
     string? _streamingFor;
 
     /// <summary>Whether the engine attaches a timestamp and a stream to each line.</summary>
-    bool HasLogMetadata => Engine.Selected?.Capabilities.SupportsLogMetadata ?? true;
+    bool HasLogMetadata => LogMetadata ?? Engine.Selected?.Capabilities.SupportsLogMetadata ?? true;
 
     bool _showTimestamps = true;
     bool _wrap;
@@ -147,9 +162,9 @@
     protected override async Task OnParametersSetAsync()
     {
         // Switching containers restarts the stream; a re-render for any other reason must not.
-        if (_streamingFor == Container.Id) return;
+        if (_streamingFor == StreamKey) return;
 
-        _streamingFor = Container.Id;
+        _streamingFor = StreamKey;
         await RestartStreamAsync();
     }
 
@@ -185,7 +200,7 @@
         _streaming = true;
 
         _cts = new CancellationTokenSource();
-        _pump = PumpAsync(Container.Id, _cts.Token);
+        _pump = PumpAsync(_cts.Token);
     }
 
     /// <summary>
@@ -243,11 +258,15 @@
         }
     }
 
-    async Task PumpAsync(string containerId, CancellationToken ct)
+    async Task PumpAsync(CancellationToken ct)
     {
+        var lines = Source is { } source
+            ? source(ct)
+            : Container is { } container ? Engine.StreamLogsAsync(container.Id, LogOptions.Default, ct) : AsyncEnumerable.Empty<LogLine>();
+
         try
         {
-            await foreach (var line in Engine.StreamLogsAsync(containerId, LogOptions.Default, ct))
+            await foreach (var line in lines.WithCancellation(ct))
             {
                 _lines.Add(line);
 

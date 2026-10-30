@@ -1,3 +1,5 @@
+using Dray.Core.Settings;
+using Dray.Core.Kubernetes;
 using Dray.Core.Engine;
 using Dray.Core.Shell;
 using Dray.Ui.Services;
@@ -68,7 +70,8 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
         var nav = new Xaml.Controls.NavigationView
         {
             PaneDisplayMode = Xaml.Controls.NavigationViewPaneDisplayMode.Auto,
-            IsSettingsVisible = false,
+            // WinUI's own Settings item at the foot of the pane, where Windows apps keep it.
+            IsSettingsVisible = true,
             IsBackButtonVisible = Xaml.Controls.NavigationViewBackButtonVisible.Collapsed,
             IsTitleBarAutoPaddingEnabled = false,
             OpenPaneLength = WinPaneResizer.SavedWidth,
@@ -137,9 +140,8 @@ public sealed class NativeShellHandler() : ViewHandler<NativeShell, Xaml.Control
             nav,
             shell,
             theme,
-            services.GetRequiredService<EngineManager>(),
-            services.GetRequiredService<HostSwitcher>(),
-            services.GetRequiredService<IShellBridge>(),
+            services.GetRequiredService<ClusterManager>(),
+            services.GetRequiredService<DraySettings>(),
             debug: services.GetRequiredService<ShellCapabilities>().IsDebugBuild);
         _toolbar = new WinToolbarProjector(services.GetRequiredService<WinTitleBarToolbar>(), titleBar, _webView, shell, theme);
 

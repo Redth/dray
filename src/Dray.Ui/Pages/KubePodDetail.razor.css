@@ -1,0 +1,85 @@
+.kpod {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s4);
+}
+
+/* The column scrolls; its sections keep their height. Left to shrink, a long pull error was
+   squeezed to one clipped line to fit the card. */
+.kpod > * {
+    flex-shrink: 0;
+}
+
+.kpod__containers {
+    display: flex;
+    flex-direction: column;
+}
+
+.kpod__c {
+    display: grid;
+    grid-template-columns: minmax(12rem, 1fr) 2fr auto;
+    align-items: baseline;
+    gap: var(--s2) var(--s4);
+    padding: var(--s3) var(--s4);
+    border-top: 1px solid var(--line);
+}
+
+.kpod__c:first-child {
+    border-top: 0;
+}
+
+.kpod__cname {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.kpod__image {
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+}
+
+.kpod__cstate {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    min-width: 0;
+}
+
+.kpod__message {
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.kpod__ports {
+    display: flex;
+    gap: var(--s1);
+}
+
+.kpod__container {
+    align-self: center;
+    width: auto;
+    margin: var(--s1) 0;
+}
+
+.kpod__previous {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    margin-left: var(--s3);
+    font-size: var(--text-sm);
+}
+
+/* The workload a pod belongs to, as a link that reads as text with a quiet underline — the Stacks
+   page's treatment, so a link looks the same wherever it is. */
+.kv a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--line-strong);
+    text-underline-offset: 2px;
+}
+
+.kv a:hover {
+    text-decoration-color: currentColor;
+}

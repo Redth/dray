@@ -65,7 +65,14 @@
 </div>
 
 @code {
-    [Parameter, EditorRequired] public ContainerSummary Container { get; set; } = default!;
+    /// <summary>The container to open a shell in. Either this or <see cref="Open"/>.</summary>
+    [Parameter] public ContainerSummary? Container { get; set; }
+
+    /// <summary>
+    /// How to start the session, for a shell that is not a container's — a pod's, on a cluster. One
+    /// terminal component either way, so a shell looks and behaves the same wherever it is opened.
+    /// </summary>
+    [Parameter] public Func<Task<IExecSession>>? Open { get; set; }
 
     ElementReference _host;
     IJSObjectReference? _module;
@@ -102,7 +109,9 @@
 
         try
         {
-            _session = await Engine.StartExecAsync(Container.Id, ExecOptions.InteractiveShell);
+            _session = Open is { } open
+                ? await open()
+                : await Engine.StartExecAsync(Container?.Id ?? throw new InvalidOperationException("ExecTerminal needs a Container or Open."), ExecOptions.InteractiveShell);
             _pump = new CancellationTokenSource();
 
             _ = PumpAsync(_session, _pump.Token);

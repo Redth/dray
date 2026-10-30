@@ -1,21 +1,24 @@
 @* The fallback nav, for hosts without a native sidebar. Renders from NavigationManifest —
    the same list the native sidebars use, so the two can never drift (docs/NATIVE-SHELL.md 2.2). *@
+@implements IDisposable
 @inject ShellCapabilities Caps
+@inject ClusterManager Clusters
+@inject DraySettings Settings
 
 <nav class="sidebar chrome" aria-label="Main">
-    <div class="sidebar__brand">
-        <BrandMark />
-        <span>Dray</span>
-    </div>
-
-    @* First in the sidebar, above the navigation: which engine is selected decides what every page
-       below it shows (DESIGN.md section 5). *@
-    <div class="sidebar__picker">
+    @* The window's top-left corner: the mark, then which engine every page below is about. The
+       native heads put the picker in the same place — the macOS toolbar above the sidebar, the
+       Windows title bar after its icon — so it is where the eye already goes on every head
+       (DESIGN.md section 5). The mark replaces the word "Dray" here, as it does in the Windows
+       title bar: the tab already says which app this is, and the corner is worth more as the
+       control. *@
+    <div class="sidebar__corner">
+        <span class="sidebar__mark" aria-hidden="true"><BrandMark /></span>
         <HostPicker />
     </div>
 
     <ul class="sidebar__list">
-        @foreach (var node in NavigationManifest.Visible(Caps.IsDebugBuild))
+        @foreach (var node in NavigationManifest.Visible(Caps.IsDebugBuild, HasCluster, Settings.HiddenRoutes))
         {
             @if (node.IsGroup)
             {
@@ -31,9 +34,43 @@
             }
         }
     </ul>
+
+    @* At the foot, where the platforms that have a native sidebar keep it too — Windows draws its
+       Settings item there; macOS keeps it in the app menu. *@
+    <div class="sidebar__foot">
+        @NavItem(new NavNode { Title = "Settings", Route = NavigationManifest.SettingsRoute, Icon = IconRef.Settings })
+    </div>
 </nav>
 
 @code {
+    /// <summary>A local cluster is in the kubeconfig, so the Kubernetes group belongs here — connected or not, so it can say why not.</summary>
+    bool HasCluster => Clusters.LocalContexts.Count > 0;
+
+    bool _hadCluster;
+
+    protected override void OnInitialized()
+    {
+        _hadCluster = HasCluster;
+        Clusters.Changed += OnClustersChanged;
+        Settings.Changed += OnSettingsChanged;
+    }
+
+    void OnSettingsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>ClusterManager raises for every watch event; the sidebar re-renders only when the group comes or goes.</summary>
+    void OnClustersChanged()
+    {
+        if (HasCluster == _hadCluster) return;
+        _hadCluster = HasCluster;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Clusters.Changed -= OnClustersChanged;
+        Settings.Changed -= OnSettingsChanged;
+    }
+
     @* The title is what the rail has instead of a label once the window is too narrow for one. *@
     RenderFragment NavItem(NavNode node) => @<NavLink class="nav-item" href="@node.Route" title="@node.Title"
                                                       Match="@(node.Route == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)">

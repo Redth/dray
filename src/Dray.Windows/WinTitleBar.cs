@@ -21,7 +21,7 @@ namespace Dray.WinUI;
 /// act on, either of which may be built first.
 /// </para>
 /// </summary>
-public sealed class WinTitleBar(IShellState shell)
+public sealed class WinTitleBar(IShellState shell, WinEnginePicker picker)
 {
     Xaml.Controls.Button? _back;
     Xaml.Controls.Button? _toggle;
@@ -76,15 +76,20 @@ public sealed class WinTitleBar(IShellState shell)
         row.Children.Add(_toggle);
         row.Children.Add(BuildAppIcon());
 
+        // Which engine every page is about, in the corner where macOS puts it too. After the icon,
+        // the way a Windows app's title follows its icon — this app's title bar has no title, and
+        // this is the thing worth saying there.
+        row.Children.Add(picker.Build());
+
         ApplyBack();
         ApplyToggle();
         return row;
     }
 
     /// <summary>
-    /// The app's icon before its name, where every Windows title bar has one — the system draws it
-    /// there itself until an app takes the title bar over, as this one does. Decorative: "Dray" is
-    /// beside it, so a screen reader is not told twice.
+    /// The app's icon before the engine picker, where every Windows title bar has one — the system
+    /// draws it there itself until an app takes the title bar over, as this one does. Decorative: the
+    /// window is "Dray" to the taskbar and to assistive technology already.
     /// </summary>
     static Xaml.FrameworkElement BuildAppIcon()
     {

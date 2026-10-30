@@ -1,6 +1,7 @@
 @page "/containers"
 @implements IDisposable
 @inject EngineManager Engine
+@inject ClusterManager Clusters
 @inject IShellBridge Shell
 @inject StatsHub Stats
 
@@ -36,6 +37,8 @@
             </div>
         }
 
+        <ClusterNodes />
+
         @if (Engine.HasNoHosts)
         {
             <NoEngine />
@@ -47,7 +50,7 @@
         else if (Engine.Selected is { State: HostConnectionState.Unreachable } host && Engine.Store.Count == 0)
         {
             <EmptyState Icon="IconRef.Warning"
-                        Title="@($"Cannot reach {host.Name}")"
+                        Title="@($"Cannot reach {host.Label}")"
                         Body="@(host.StateDetail ?? "The engine did not respond.")">
                 <Actions>
                     <Button Label="Choose another host" Icon="IconRef.Host" OnClick="@(() => Nav("/hosts"))" />
@@ -216,7 +219,12 @@
     {
         get
         {
-            IEnumerable<ContainerSummary> q = Engine.Store.Containers;
+            // A local cluster's nodes are listed above, under their cluster, not among the user's
+            // own containers (docs/KUBERNETES.md §4) — unless Kubernetes is off in Settings, when there
+            // is no row above and a node is a container like any other.
+            IEnumerable<ContainerSummary> q = Clusters.Enabled
+                ? Engine.Store.Containers.Where(c => c.ClusterNode is null)
+                : Engine.Store.Containers;
 
             q = _stateFilter switch
             {
@@ -452,7 +460,7 @@
 
             return new PageChrome(
                 "Containers",
-                Subtitle: host is null ? null : $"{running} running · {host.Name}",
+                Subtitle: host is null ? null : $"{running} running · {host.Label}",
                 Search: new ChromeSearch("Filter containers", _search),
                 Actions:
                 [

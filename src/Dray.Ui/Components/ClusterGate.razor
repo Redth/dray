@@ -1,0 +1,79 @@
+@* Shows its content only when there is a connected cluster; otherwise says, in words, which of the
+   ways there is not one this is — and what to do about it. One component, so every Kubernetes page
+   is honest about the same states in the same sentences.
+
+   Sits inside ClusterScope. *@
+@inject ClusterManager Clusters
+@inject NavigationManager Nav
+@inject IShellBridge Shell
+
+@if (!Clusters.Enabled)
+{
+    @* Reached by a link or the palette's history: the pages are not in the sidebar while it is off,
+       so say so rather than showing a page with nothing to show. *@
+    <EmptyState Icon="IconRef.Cluster"
+                Title="Kubernetes is turned off"
+                Body="Dray is not reading your kubeconfig or connecting to a cluster. Turn it on in Settings to see your cluster here.">
+        <Actions>
+            <Button Label="Open Settings" Icon="IconRef.Settings" OnClick="@(() => Nav.NavigateTo(NavigationManifest.SettingsRoute))" />
+        </Actions>
+    </EmptyState>
+}
+else if (Clusters.Selected is null)
+{
+    var remote = Clusters.Contexts.Count(c => !c.IsLocal);
+
+    <EmptyState Icon="IconRef.Cluster"
+                Title="No cluster on this machine"
+                Body="@(remote > 0
+                    ? $"Your kubeconfig names {remote} cluster{(remote == 1 ? "" : "s")} elsewhere. Dray connects to clusters on this machine — Docker Desktop's, OrbStack's, Rancher Desktop's, or a kind or k3d cluster on your engine."
+                    : "There is no kubeconfig context for a cluster here. Docker Desktop, OrbStack and Rancher Desktop each have a Kubernetes switch in their settings, or a kind cluster runs on the engine you already have.")">
+        <Actions>
+            @* The one cluster Dray makes, on the engine the user already has (docs/KUBERNETES.md §7). *@
+            <Button Label="Create a kind cluster…" Icon="IconRef.Plus" Variant="ButtonVariant.Primary"
+                    OnClick="() => CreateKindDialog.ShowAsync(Shell)" />
+            <Button Label="Look again" Icon="IconRef.Refresh" Variant="ButtonVariant.Ghost" OnClick="RefreshAsync" />
+        </Actions>
+    </EmptyState>
+}
+else if (Clusters.Selected.State == HostConnectionState.Connecting)
+{
+    <div class="stack-v">
+        @for (var i = 0; i < 6; i++)
+        {
+            <Skeleton Width="@($"{45 + (i * 11 % 40)}%")" />
+        }
+    </div>
+}
+else if (Clusters.Selected.State != HostConnectionState.Connected)
+{
+    <EmptyState Icon="IconRef.Warning"
+                Title="@($"Cannot reach {Clusters.Selected.Name}")"
+                Body="@(Clusters.Selected.StateDetail ?? "The cluster did not answer.")">
+        <Actions>
+            <Button Label="Try again" Icon="IconRef.Refresh" OnClick="RetryAsync" />
+        </Actions>
+    </EmptyState>
+}
+else if (Kind is { } kind && Clusters.ProblemFor(kind) is { } problem && !Clusters.Store.IsSynced(kind))
+{
+    <EmptyState Icon="IconRef.Warning" Title="Could not list these" Body="@problem" />
+}
+else
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>The kind the page lists, so a watch that could not start is said rather than shown as an empty list.</summary>
+    [Parameter] public ClusterKind? Kind { get; set; }
+
+    async Task RetryAsync()
+    {
+        if (Clusters.Selected is { } selected) await Clusters.SelectAsync(selected.Name);
+    }
+
+    Task RefreshAsync() => Clusters.RefreshAsync();
+}

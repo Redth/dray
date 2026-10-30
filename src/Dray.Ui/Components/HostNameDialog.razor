@@ -1,0 +1,54 @@
+@* Give a host a name of Dray's own.
+
+   The name is Dray's alone: the Docker context keeps its name, because that is what
+   `docker --context` takes and what every other tool shows. Blank goes back to the host's own
+   name, so there is no separate "reset" to find. *@
+@inherits DialogBody
+@inject EngineManager Engine
+
+<div class="field">
+    <label class="field__label" for="host-name-input">Name in Dray</label>
+    <input id="host-name-input" class="input" @bind="_name" @bind:event="oninput"
+           autocomplete="off" spellcheck="false" maxlength="@HostDisplayName.MaxLength"
+           placeholder="@Host.Name" />
+</div>
+
+<p class="hostname__hint muted">
+    Shown in the toolbar and wherever Dray names this engine. The Docker context is still called
+    <code class="mono">@Host.Name</code>, so scripts and the terminal are unaffected. Leave it empty
+    to use that name.
+</p>
+
+@code {
+    [Parameter, EditorRequired] public DockerHost Host { get; set; } = default!;
+
+    /// <summary>Open it. True once a name has been saved or cleared.</summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell, DockerHost host)
+        => await shell.ShowDialogAsync(new DialogRequest(
+            $"Name {host.Label}",
+            typeof(HostNameDialog),
+            new Dictionary<string, object?> { [nameof(Host)] = host },
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("save", "Save")],
+            Size: DialogSize.Small)) == "save";
+
+    string _name = "";
+
+    /// <summary>Saved only when it would change something.</summary>
+    bool CanSubmit => HostDisplayName.Normalize(_name, Host.Name) != Host.DisplayName;
+
+    protected override IReadOnlyList<DialogButton> Buttons =>
+    [
+        DialogButton.Cancel(),
+        DialogButton.Confirm("save", "Save") with { Enabled = CanSubmit },
+    ];
+
+    // Once, when the dialog opens. Not in OnParametersSet: the host re-renders the body whenever a
+    // button changes, and the field would otherwise fight the user's typing.
+    protected override void OnInitialized() => _name = Host.DisplayName ?? "";
+
+    protected override Task<bool> OnPressedAsync(string id)
+    {
+        if (id == "save") Engine.SetDisplayName(Host.Id, _name);
+        return Task.FromResult(true);
+    }
+}

@@ -53,6 +53,8 @@ public sealed class EngineManager : IAsyncDisposable
     readonly IContainerRuntimeFactory _factory;
     readonly DockerDesktop? _desktop;
     readonly IHostSelectionStore? _selection;
+    readonly IHostNameStore? _nameStore;
+    readonly Dictionary<string, string> _names;
 
     readonly SemaphoreSlim _gate = new(1, 1);
     readonly Dictionary<string, DockerHost> _hosts = [];
@@ -67,18 +69,22 @@ public sealed class EngineManager : IAsyncDisposable
     /// <param name="selection">Where the user's choice of host is kept between launches. Null keeps nothing.</param>
     /// <param name="compose">How compose is found and run; a test hands in one over a scripted runner.</param>
     /// <param name="catalog">Stacks beyond what is running — remembered ones and the stacks folder.</param>
+    /// <param name="names">The names the user has given hosts. Null keeps none, and every host shows its own.</param>
     public EngineManager(
         DockerContextReader reader,
         IContainerRuntimeFactory factory,
         DockerDesktop? desktop = null,
         IHostSelectionStore? selection = null,
         ComposeCli? compose = null,
-        StackCatalog? catalog = null)
+        StackCatalog? catalog = null,
+        IHostNameStore? names = null)
     {
         _reader = reader;
         _factory = factory;
         _desktop = desktop;
         _selection = selection;
+        _nameStore = names;
+        _names = new Dictionary<string, string>(names?.Load() ?? new Dictionary<string, string>());
         _compose = compose ?? new ComposeCli();
         Catalog = catalog;
 
@@ -321,10 +327,44 @@ public sealed class EngineManager : IAsyncDisposable
     /// </summary>
     public IReadOnlyList<DockerHost> Hosts => [.. _hosts.Values
         .Where(h => CanonicalFor(h) is null)
+        .Select(Named)
         .OrderBy(Rank)
-        .ThenBy(h => h.Name, StringComparer.OrdinalIgnoreCase)];
+        .ThenBy(h => h.Label, StringComparer.OrdinalIgnoreCase)];
 
-    public DockerHost? Selected { get; private set; }
+    public DockerHost? Selected
+    {
+        get => _selected is null ? null : Named(_selected);
+        private set => _selected = value;
+    }
+
+    DockerHost? _selected;
+
+    /// <summary>
+    /// The host with the user's name for it applied. Done here, as hosts are handed out, rather than
+    /// wherever a host is discovered, probed or replaced — there are a dozen of those, and a name
+    /// missed at any one of them would vanish the next time that host's state changed.
+    /// </summary>
+    DockerHost Named(DockerHost host)
+        => _names.TryGetValue(host.Id, out var name) ? host with { DisplayName = name } : host with { DisplayName = null };
+
+    /// <summary>
+    /// Give a host a name of Dray's own, or clear it with null or blank. Applies at once and is
+    /// remembered between launches. The host's own name — the one the CLI uses — is untouched.
+    /// </summary>
+    public void SetDisplayName(string hostId, string? name)
+    {
+        if (!_hosts.TryGetValue(hostId, out var host)) return;
+
+        var kept = HostDisplayName.Normalize(name, host.Name);
+        var current = _names.GetValueOrDefault(hostId);
+        if (kept == current) return;
+
+        if (kept is null) _names.Remove(hostId);
+        else _names[hostId] = kept;
+
+        _nameStore?.Save(new Dictionary<string, string>(_names));
+        Changed?.Invoke();
+    }
 
     /// <summary>True when discovery found nothing at all — the first-run state.</summary>
     public bool HasNoHosts => _hosts.Count == 0;

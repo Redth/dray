@@ -1,0 +1,80 @@
+@page "/kubernetes/workloads"
+@inject ClusterManager Clusters
+@inject KubeView View
+@inject KubeActions Actions
+@inject NavigationManager Nav
+
+<ClusterScope>
+    <PageChromeScope Chrome="Chrome" OnSearch="s => _search = s" OnFilter="OnFilterAsync" />
+
+    <div class="page page--flush">
+        <KubeNotice @bind-Outcome="_outcome" />
+
+        <ClusterGate Kind="ClusterKind.Deployment">
+            @if (Visible.Count == 0)
+            {
+                <EmptyState Icon="IconRef.Workload"
+                            Title="@(_search.Length > 0 ? "No workloads match" : "No workloads")"
+                            Body="@(_search.Length > 0
+                                ? "Nothing here matches the current search."
+                                : "No Deployments, StatefulSets, DaemonSets or Jobs outside the system namespaces. kubectl apply a manifest and it appears here as it rolls out.")" />
+            }
+            else
+            {
+                <DataTable TRow="WorkloadSummary"
+                           Columns="WorkloadGrid.Columns(View.ManyNamespaces)"
+                           Rows="Visible"
+                           Values="w => WorkloadGrid.Row(w, Clusters.Store.PodsOf(w), showNamespace: View.ManyNamespaces)"
+                           Key="w => w.Uid"
+                           ActionsFor="Actions.ForWorkload"
+                           OnAction="RunAsync"
+                           OnRowOpen="Open"
+                           Placeholder="No workloads" />
+            }
+        </ClusterGate>
+    </div>
+</ClusterScope>
+
+@code {
+    string _search = "";
+    KubeOutcome? _outcome;
+
+    /// <summary>Worst first, as on every list: the broken one is the one someone opened this page for.</summary>
+    IReadOnlyList<WorkloadSummary> Visible =>
+    [
+        .. Clusters.Store.Workloads
+            .Where(w => View.Matches(w.Namespace))
+
+            // A Job a CronJob made is the CronJob's business; the Job itself is still listed, as it
+            // is the thing that ran.
+            .Where(w => _search.Length == 0 || w.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase))
+            .OrderBy(w => GridState.From(WorkloadStatus.Resolve(w, Clusters.Store.PodsOf(w))).Rank)
+            .ThenBy(w => w.Namespace, StringComparer.Ordinal)
+            .ThenBy(w => w.Name, StringComparer.Ordinal),
+    ];
+
+    WorkloadSummary? ByUid(string uid) => Clusters.Store.Workloads.FirstOrDefault(w => w.Uid == uid);
+
+    async Task RunAsync((string Row, string Action) chosen)
+    {
+        if (ByUid(chosen.Row) is { } w) _outcome = await Actions.RunAsync(w, chosen.Action) ?? _outcome;
+    }
+
+    void Open(string uid)
+    {
+        if (ByUid(uid) is { } w) Nav.NavigateTo(KubeRoutes.Workload(w));
+    }
+
+    async Task OnFilterAsync((string FilterId, int Index) change)
+    {
+        if (await View.ApplyAsync(change.FilterId, change.Index) is { } problem) _outcome = new KubeOutcome(problem, Ok: false);
+    }
+
+    PageChrome Chrome => new(
+        "Workloads",
+        Subtitle: Clusters.Selected is { State: HostConnectionState.Connected } c
+            ? $"{Clusters.Store.Workloads.Count(w => View.Matches(w.Namespace))} on {c.Name}"
+            : Clusters.Selected?.Name,
+        Search: new ChromeSearch("Filter workloads", _search),
+        Filters: View.Filters);
+}

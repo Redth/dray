@@ -7,13 +7,30 @@
     overflow-y: auto;
 }
 
-.sidebar__brand {
+/* The corner the native heads give to their toolbar's leading items. As tall as the web toolbar
+   beside it, so the picker and the page title share a line. */
+.sidebar__corner {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--s2);
-    padding: var(--s4) var(--s4) var(--s3);
-    font-weight: 600;
+    gap: var(--s1);
+    min-height: 44px;
+    padding: var(--s2) var(--s2) var(--s2) var(--s3);
+    margin-bottom: var(--s2);
+    border-bottom: 1px solid var(--line);
+}
+
+.sidebar__mark {
+    display: flex;
+    flex: none;
     color: var(--brand);
+}
+
+/* Pushed to the bottom of the sidebar by the list above taking the rest. */
+.sidebar__foot {
+    margin-top: auto;
+    padding: var(--s2) var(--s2) var(--s3);
+    border-top: 1px solid var(--line);
 }
 
 .sidebar__list {
@@ -65,12 +82,13 @@
         flex-basis: 3.25rem;
     }
 
-    .sidebar__brand {
-        justify-content: center;
-        padding: var(--s4) 0 var(--s3);
+    /* The corner stacks: the mark, then the picker as its icon, like every item below it. */
+    .sidebar__corner {
+        flex-direction: column;
+        gap: var(--s2);
+        padding: var(--s3) 0 var(--s2);
     }
 
-    .sidebar__brand span,
     ::deep .nav-item span {
         position: absolute;
         width: 1px;
@@ -98,24 +116,16 @@
     }
 }
 
-.sidebar__picker {
-    padding: 0 var(--s2) var(--s2);
-    margin-bottom: var(--s1);
-    border-bottom: 1px solid var(--line);
-}
-
-/* In the rail the picker is its icon, like every item below it; which engine moves to the tooltip
-   and stays in the accessible name. */
+/* In the rail the picker is its icon; which engine moves to the tooltip and stays in the
+   accessible name. */
 @media (max-width: 52rem) {
-    .sidebar__picker {
-        padding: 0 0 var(--s2);
-    }
-
     ::deep .picker {
         justify-content: center;
+        width: auto;
     }
 
-    ::deep .picker__text {
+    ::deep .picker__name,
+    ::deep .picker__chevron {
         position: absolute;
         width: 1px;
         height: 1px;

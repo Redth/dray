@@ -1,0 +1,166 @@
+@* Why a pod is failing, in words — the panel that leads a broken pod's Overview, because it is the
+   question the page was opened to answer (PRODUCT.md: answer the question in the first screen).
+
+   The cluster's own sentence is always shown verbatim. Where Dray can add to it — an image built on
+   this engine that the cluster's separate store has never seen — it does, from things it measured
+   rather than guessed (docs/KUBERNETES.md §8). *@
+@inject ClusterManager Clusters
+@inject EngineManager Engine
+@inject IShellBridge Shell
+@inject NavigationManager Nav
+@inject KindCli Kind
+
+<section class="panel kdiag" role="status">
+    <div class="panel__head">
+        <Icon Name="IconRef.Warning" Size="IconSize.Sm" />
+        <span class="panel__title">@Headline</span>
+    </div>
+
+    <div class="panel__body kdiag__body">
+        @if (Pull is { } c)
+        {
+            <p class="kdiag__said mono">@(c.Message ?? $"The runtime could not pull {c.Image}.")</p>
+
+            @switch (_diagnosis?.Cause)
+            {
+                case PullCause.NotLoaded:
+                    <p>
+                        <strong>@c.Image</strong> is on @Engine.Selected?.Label, but this cluster keeps its
+                        own image store and the image was never loaded into it. Building on the engine
+                        does not put it in the cluster.
+                    </p>
+                    @* Shown, then run only when asked — the pattern Windows setup set. Run is offered for
+                       kind, whose command Dray drives; the others' are there to copy. *@
+                    <div class="kdiag__command">
+                        <code class="mono">@_diagnosis.Command</code>
+                        <Button Label="Copy" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost"
+                                OnClick="() => Shell.WriteClipboardAsync(_diagnosis.Command!)" />
+                        @if (_diagnosis.Tool == ClusterTool.Kind && _diagnosis.Cluster is not null && Kind.Find() is not null)
+                        {
+                            <Button Label="@(_loading ? "Loading…" : "Run it")" Icon="IconRef.Play" Variant="ButtonVariant.Secondary"
+                                    Disabled="_loading" OnClick="LoadAsync" />
+                        }
+                    </div>
+                    @if (_loadResult is { } result)
+                    {
+                        <p class="@(_loadFailed ? "kdiag__failed" : "muted")" role="status">@result</p>
+                    }
+                    <p class="muted">
+                        Run it, and the pod pulls the image on its next attempt — no restart needed. If
+                        the manifest says <code class="mono">imagePullPolicy: Always</code>, or the tag is
+                        <code class="mono">:latest</code>, it will try the registry anyway; set the policy
+                        to <code class="mono">IfNotPresent</code>.
+                    </p>
+                    break;
+
+                case PullCause.NotHereEither:
+                    <p class="muted">
+                        @c.Image is not on @Engine.Selected?.Label either, so this is between the
+                        cluster and the registry: a name that does not exist, a private image with no
+                        pull secret, or no network from the cluster's nodes.
+                    </p>
+                    break;
+            }
+        }
+        else if (Looping is { } loop)
+        {
+            <p>
+                <strong>@loop.Name</strong> has restarted @loop.RestartCount time@(loop.RestartCount == 1 ? "" : "s").
+                @LastExit(loop)
+            </p>
+            <p class="muted">
+                Its log is the instance that failed: Kubernetes keeps it while the next one waits to
+                start, so the reason is usually in the last lines.
+            </p>
+            <div>
+                <Button Label="Open its log" Icon="IconRef.Logs" Variant="ButtonVariant.Secondary"
+                        OnClick="@(() => Nav.NavigateTo(KubeRoutes.Pod(Pod) + "?tab=Logs"))" />
+            </div>
+        }
+        else
+        {
+            <p class="kdiag__said mono">@(PodStatusVocabulary.Resolve(Pod).Detail ?? Pod.Message ?? "The cluster gave no reason.")</p>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public PodSummary Pod { get; set; } = default!;
+
+    PullDiagnosis? _diagnosis;
+    string? _diagnosedFor;
+    bool _loading;
+    bool _loadFailed;
+    string? _loadResult;
+
+    /// <summary>
+    /// Load the image into the cluster. Measured: 0.35 seconds for a 2 MB image, and the pod pulls it
+    /// on its next attempt with nothing restarted — so the pill changes by itself, from the watch.
+    /// </summary>
+    async Task LoadAsync()
+    {
+        if (_diagnosis is not { Cluster: { } cluster } d || Kind.Find() is not { } kind || Engine.Selected is not { } host) return;
+
+        _loading = true;
+        _loadResult = null;
+        try
+        {
+            await foreach (var line in Kind.LoadAsync(kind, d.Image, cluster, Kind.Environment(host)))
+            {
+                _loadResult = line;
+                StateHasChanged();
+            }
+
+            _loadFailed = false;
+            _loadResult = $"Loaded {d.Image} into {cluster}. The pod tries again on its next back-off, within a minute or so.";
+        }
+        catch (Exception e)
+        {
+            _loadFailed = true;
+            _loadResult = e.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    PodContainer? Pull => Pod.InitContainers.Concat(Pod.Containers)
+        .FirstOrDefault(c => c.State == "waiting" && c.Reason is "ImagePullBackOff" or "ErrImagePull");
+
+    PodContainer? Looping => Pod.Containers.FirstOrDefault(c => c.RestartCount > 0 && (c.Reason is "CrashLoopBackOff" || c.LastExitCode is not null and not 0));
+
+    string Headline => PodStatusVocabulary.Resolve(Pod) switch
+    {
+        { Word: "Can't pull image" } => "The image could not be pulled",
+        { Word: "Crash loop" } => "It keeps crashing",
+        { Word: "Pending" } => "Nowhere to run it",
+        { Word: "Evicted" } => "The node evicted it",
+        var s => s.Word,
+    };
+
+    static string LastExit(PodContainer c) => c switch
+    {
+        { LastReason: "OOMKilled" } => "The last instance ran out of memory — it was killed at its limit.",
+        { LastExitCode: { } code } => $"The last instance exited {code}{(ContainerStatusVocabulary.ExplainExitCode(code) is { } why ? $" ({why})" : "")}.",
+        { ExitCode: { } code } => $"It exited {code}.",
+        _ => "",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Pull is not { } c || _diagnosedFor == c.Image) return;
+        _diagnosedFor = c.Image;
+
+        try
+        {
+            var images = await Engine.ListImagesAsync(includeDangling: false);
+            _diagnosis = ImageDiagnosis.Diagnose(c.Image, Clusters.Store.Nodes, images.SelectMany(i => i.Tags).Select(t => t.Display));
+        }
+        catch (Exception)
+        {
+            // No engine to ask means nothing to add; the runtime's sentence still stands.
+            _diagnosis = null;
+        }
+    }
+}

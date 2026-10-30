@@ -20,6 +20,12 @@ public sealed record NavNode
     /// <summary>Hidden unless the app is running a Debug build.</summary>
     public bool DebugOnly { get; init; }
 
+    /// <summary>
+    /// Shown only while there is a cluster to show — the Kubernetes group. Someone with no cluster
+    /// should not carry four entries that all say "no cluster" (docs/KUBERNETES.md §5).
+    /// </summary>
+    public bool RequiresCluster { get; init; }
+
     public bool IsGroup => Children.Count > 0;
 
     public static NavNode Leaf(string title, string route, IconRef icon, bool debugOnly = false)
@@ -59,6 +65,15 @@ public static class NavigationManifest
             NavNode.Leaf("Volumes", "/volumes", IconRef.Volume),
             NavNode.Leaf("Networks", "/networks", IconRef.Network)),
 
+        // The local cluster, beside the engine it runs on (docs/KUBERNETES.md). After the Docker
+        // groups, because the engine is what Dray is first: the cluster is one more thing on it.
+        NavNode.Group(
+            "Kubernetes",
+            NavNode.Leaf("Workloads", "/kubernetes/workloads", IconRef.Workload),
+            NavNode.Leaf("Pods", "/kubernetes/pods", IconRef.Pod),
+            NavNode.Leaf("Services", "/kubernetes/services", IconRef.Service),
+            NavNode.Leaf("Events", "/kubernetes/events", IconRef.Events)) with { RequiresCluster = true },
+
         NavNode.Group(
             "Configuration",
             NavNode.Leaf("Registries", "/registries", IconRef.Registry),
@@ -67,17 +82,31 @@ public static class NavigationManifest
     ];
 
     /// <summary>The manifest with debug-only entries filtered out for release builds.</summary>
-    public static IReadOnlyList<NavNode> Visible(bool includeDebug)
-        => includeDebug ? Nodes : Nodes.Select(Prune).Where(n => n is not null).Select(n => n!).ToList();
+    /// <param name="includeCluster">Whether there is a cluster, so the Kubernetes group belongs in the sidebar.</param>
+    /// <param name="hidden">Routes the user turned off in Settings. A group left with nothing in it goes too.</param>
+    public static IReadOnlyList<NavNode> Visible(bool includeDebug, bool includeCluster = true, IReadOnlyCollection<string>? hidden = null)
+        => [.. Nodes.Select(n => Prune(n, includeDebug, includeCluster, hidden ?? [])).Where(n => n is not null).Select(n => n!)];
 
-    static NavNode? Prune(NavNode node)
+    static NavNode? Prune(NavNode node, bool includeDebug, bool includeCluster, IReadOnlyCollection<string> hidden)
     {
-        if (node.DebugOnly) return null;
+        if (node.DebugOnly && !includeDebug) return null;
+        if (node.RequiresCluster && !includeCluster) return null;
+        if (node.Route is { } route && hidden.Contains(route, StringComparer.OrdinalIgnoreCase)) return null;
         if (!node.IsGroup) return node;
 
-        var kept = node.Children.Select(Prune).Where(c => c is not null).Select(c => c!).ToList();
+        var kept = node.Children.Select(c => Prune(c, includeDebug, includeCluster, hidden)).Where(c => c is not null).Select(c => c!).ToList();
         return kept.Count == 0 ? null : node with { Children = kept };
     }
+
+    /// <summary>
+    /// Where Settings is. Not a node: every platform puts Settings somewhere of its own — the app menu
+    /// and ⌘, on macOS, the foot of the navigation pane on Windows, the foot of the sidebar on the
+    /// web — so each head places it, and the route is the one thing they share.
+    /// </summary>
+    public const string SettingsRoute = "/settings";
+
+    /// <summary>The Kubernetes group's pages, for Settings to offer one by one.</summary>
+    public static IReadOnlyList<NavNode> KubernetesPages => Nodes.First(n => n.RequiresCluster).Children;
 
     /// <summary>Every routable leaf, flattened. Used by the command palette and route validation.</summary>
     public static IEnumerable<NavNode> Leaves(bool includeDebug = true)

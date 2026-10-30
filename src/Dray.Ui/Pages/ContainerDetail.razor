@@ -332,12 +332,12 @@
     PageChrome Chrome => Caps.HasNativeToolbar
         ? new PageChrome(
             Container?.Name ?? "Container",
-            Subtitle: Container is null ? null : Engine.Selected?.Name,
+            Subtitle: Container is null ? null : Engine.Selected?.Label,
             Actions: Container is { } c ? ContainerCommands.ChromeActionsFor(c, Engine.Selected?.Capabilities.SupportsPause ?? true) : null,
             Back: new ChromeBack("back", "All containers"))
         : new PageChrome(
             Container?.Name ?? "Container",
-            Subtitle: Container is null ? null : Engine.Selected?.Name);
+            Subtitle: Container is null ? null : Engine.Selected?.Label);
 
     async Task HandleAction(string id)
     {

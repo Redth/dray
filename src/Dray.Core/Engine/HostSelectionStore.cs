@@ -21,11 +21,12 @@ public interface IHostSelectionStore
 }
 
 /// <summary>Keeps the choice in a one-line file in the user's application data.</summary>
-public sealed class FileHostSelectionStore(string? directory = null) : IHostSelectionStore
+/// <param name="fileName">Which choice: the engine's by default, the cluster's for <c>ClusterManager</c>.</param>
+public sealed class FileHostSelectionStore(string? directory = null, string fileName = "selected-host") : IHostSelectionStore
 {
     readonly string _path = Path.Combine(
         directory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Dray"),
-        "selected-host");
+        fileName);
 
     public string? Load()
     {

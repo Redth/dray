@@ -155,6 +155,27 @@ rows from looking like a bag of sweets, and it is why `--warn` never needs to ca
 Exit codes get plain-language expansion inline: `137` → "Exited 137 · killed (out of memory)",
 `143` → "Exited 143 · stopped", `139` → "Exited 139 · segmentation fault".
 
+**Pods use the same pill** (docs/KUBERNETES.md §5.1). The input is kubectl's STATUS column, with
+one deliberate departure: a crash loop is one steady state, where kubectl alternates between
+`Error`, `OOMKilled` and `CrashLoopBackOff` on every restart.
+
+| Pod | Word | Glyph | Pill |
+|---|---|---|---|
+| running, all ready | Running | ● filled circle | ok |
+| running, not all ready | Not ready *x/y* | ◑ right half | warn |
+| creating, initialising | Starting | ◐ half circle | warn |
+| unscheduled | Pending | ○ hollow circle | neutral |
+| restarted after failing | Crash loop · *last reason* | ↯ zigzag | danger |
+| image pull failed | Can't pull image · *image* | ⤓ arrow to bar | danger |
+| finished | Completed | ■ square | neutral |
+| failed, no restart | Exited *code* · *reason* | ■ square | danger |
+| deleting | Terminating | ◌ dotted circle | warn |
+| evicted | Evicted | ✕ cross | danger |
+| node lost | Node lost | ⚠ | neutral, row dimmed |
+
+The reason is the cluster's own — `OOMKilled` reads "out of memory" because Kubernetes said so,
+not because 137 usually means it.
+
 **One exception, for width.** In a container too narrow to hold it, the word is taken out of the
 layout — never deleted. It stays in the pill's `title` and in its accessible name, and the tint and
 glyph stay on screen. The rule this exception has to keep is the reason the rule exists: every state
@@ -303,15 +324,25 @@ Two rules make this hold up:
 
 ```
 ┌──────────────┬──────────────────────────────────────────────┐
-│              │  native toolbar — title, actions, search      │  ← platform chrome
-│   native     ├──────────────────────────────────────────────┤
-│   sidebar    │                                              │
-│              │           Blazor content                     │  ← one codebase
-│  host picker │           (list  ·  split  ·  full)          │
+│ ● ● ● host ▾ │  native toolbar — back, filters, search, acts │  ← platform chrome
+├──────────────┼──────────────────────────────────────────────┤
+│   native     │                                              │
+│   sidebar    │           Blazor content                     │  ← one codebase
+│              │           (list  ·  split  ·  full)          │
 │  nav tree    │                                              │
 │              │                                              │
 └──────────────┴──────────────────────────────────────────────┘
 ```
+
+**The engine picker is the top-left control on every head** — the toolbar above the sidebar on
+macOS, the title bar after the icon on Windows, the sidebar's top corner on the web. It says which
+engine every page below is about, so it is in the corner the eye reaches first and is never inside
+something that scrolls or collapses. Glyph, name, chevron. The name is the user's name for the
+host where they gave one (`DockerHost.Label`); the state is the glyph — host, refresh arrows while
+connecting, warning when unreachable — never a tint, with the words in the tooltip and the menu.
+Where the corner is too narrow for the name it shortens, then drops to the glyph and chevron; it
+never moves into an overflow menu. The cluster picker is not beside it: a cluster scopes only the
+Kubernetes pages, so it is a menu in their toolbar, with the namespace filter (docs/KUBERNETES.md §1).
 
 Three content archetypes, and only three:
 

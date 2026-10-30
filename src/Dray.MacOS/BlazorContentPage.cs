@@ -1,6 +1,7 @@
 using AppKit;
 using CoreGraphics;
 using Dray.Core.Shell;
+using Dray.Ui.Services;
 using Foundation;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Platforms.MacOS.Controls;
@@ -39,7 +40,11 @@ public sealed class BlazorContentPage : ContentPage
         // right; the only toolbar style that avoids that is Expanded, which puts the title on its
         // own full-width row above the sidebar and loses the inset-sidebar look entirely. The page
         // heading stays in the content, where it costs nothing and sits where it belongs.
-        _toolbar = new MacToolbarProjector(this, _shell);
+        //
+        // The engine picker goes with it, leading, above the sidebar: the same model every head
+        // draws (EnginePicker), so this head builds no engine menu of its own.
+        _toolbar = new MacToolbarProjector(this, _shell, services.GetRequiredService<EnginePicker>(),
+            services.GetRequiredService<IShellBridge>());
 
         _webView = new MacOSBlazorWebView
         {

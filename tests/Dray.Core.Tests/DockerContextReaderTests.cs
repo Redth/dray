@@ -351,6 +351,13 @@ sealed class FakeConfigSource : IDockerConfigSource
         return this;
     }
 
+    /// <summary>A file with contents — a kubeconfig, say.</summary>
+    public FakeConfigSource WithFile(string path, string contents)
+    {
+        _files[Normalize(path)] = contents;
+        return this;
+    }
+
     /// <summary>A directory, which is how a Mac application bundle is found.</summary>
     public FakeConfigSource WithDirectory(string path)
     {

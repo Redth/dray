@@ -1,7 +1,7 @@
-using Dray.Core.Engine;
+using Dray.Core.Settings;
+using Dray.Core.Kubernetes;
 using Dray.Core.Navigation;
 using Dray.Core.Shell;
-using Dray.Ui.Services;
 using Xaml = Microsoft.UI.Xaml;
 
 namespace Dray.WinUI;
@@ -21,74 +21,34 @@ public sealed class WinSidebar : IDisposable
     readonly Xaml.Controls.NavigationView _nav;
     readonly IShellState _shell;
     readonly IPlatformTheme _theme;
-    readonly EngineManager _engine;
-    readonly HostSwitcher _switcher;
-    readonly IShellBridge _bridge;
+    readonly ClusterManager _clusters;
+    readonly DraySettings _settings;
     readonly List<Entry> _items = [];
-
-    /// <summary>
-    /// The host picker: the first item in the pane, above the navigation, because which engine
-    /// is selected decides what every page below it shows (DESIGN.md section 5).
-    /// <para>
-    /// An item that opens a menu rather than a combo box, so it survives the pane collapsing to
-    /// icons — the icon stays and still opens the list — and so the list can carry a sentence per
-    /// engine, which a combo box's items cannot.
-    /// </para>
-    /// </summary>
-    readonly Xaml.Controls.NavigationViewItem _picker;
-    readonly Xaml.Controls.TextBlock _pickerName = new() { TextTrimming = Xaml.TextTrimming.CharacterEllipsis };
-    readonly Xaml.Controls.TextBlock _pickerDetail = new() { TextTrimming = Xaml.TextTrimming.CharacterEllipsis };
+    readonly bool _debug;
+    bool _hasCluster;
 
     public WinSidebar(
         Xaml.Controls.NavigationView nav,
         IShellState shell,
         IPlatformTheme theme,
-        EngineManager engine,
-        HostSwitcher switcher,
-        IShellBridge bridge,
+        ClusterManager clusters,
+        DraySettings settings,
         bool debug)
     {
         _nav = nav;
         _shell = shell;
         _theme = theme;
-        _engine = engine;
-        _switcher = switcher;
-        _bridge = bridge;
 
-        _pickerDetail.Style = (Xaml.Style)Xaml.Application.Current.Resources["CaptionTextBlockStyle"];
-        _pickerDetail.Foreground = (Xaml.Media.Brush)Xaml.Application.Current.Resources["TextFillColorSecondaryBrush"];
+        _debug = debug;
+        _clusters = clusters;
+        _settings = settings;
+        _hasCluster = clusters.LocalContexts.Count > 0;
 
-        var label = new Xaml.Controls.StackPanel();
-        label.Children.Add(_pickerName);
-        label.Children.Add(_pickerDetail);
-
-        _picker = new Xaml.Controls.NavigationViewItem
-        {
-            Content = label,
-            SelectsOnInvoked = false,
-            Icon = WinIcons.Create(IconRef.Host, _theme.Current),
-
-            // Two lines, so taller than the 32 the pane's other items get.
-            MinHeight = 48,
-        };
-
-        Xaml.Automation.AutomationProperties.SetName(_picker, "Engine");
-        nav.MenuItems.Add(_picker);
-        nav.MenuItems.Add(new Xaml.Controls.NavigationViewItemSeparator());
-        UpdatePicker();
-
-        foreach (var node in NavigationManifest.Visible(debug))
-        {
-            if (node.IsGroup)
-            {
-                nav.MenuItems.Add(new Xaml.Controls.NavigationViewItemHeader { Content = node.Title });
-                foreach (var child in node.Children) nav.MenuItems.Add(Build(child));
-            }
-            else
-            {
-                nav.MenuItems.Add(Build(node));
-            }
-        }
+        // The engine picker is not in here: it is in the title bar (WinEnginePicker), so every item
+        // in the pane is a place to go.
+        Fill();
+        _clusters.Changed += OnClustersChanged;
+        _settings.Changed += OnSettingsChanged;
 
         // ItemInvoked rather than SelectionChanged: it fires for the user and not for the
         // programmatic selection below, so following the router never asks the router to navigate.
@@ -97,70 +57,50 @@ public sealed class WinSidebar : IDisposable
 
         _shell.RouteChanged += OnRouteChanged;
         _theme.Changed += OnThemeChanged;
-        _engine.Changed += OnEngineChanged;
 
         Select(_shell.Route);
     }
 
-    void OnEngineChanged() => _nav.DispatcherQueue.TryEnqueue(UpdatePicker);
-
-    /// <summary>The selected engine and what it is, or what is happening to it.</summary>
-    void UpdatePicker()
+    /// <summary>The pane's items from the manifest — with the Kubernetes group only while there is a local cluster.</summary>
+    void Fill()
     {
-        var selected = _engine.Selected;
+        _nav.MenuItems.Clear();
+        _items.Clear();
 
-        _pickerName.Text = selected?.Name ?? "No engine";
-        _pickerDetail.Text = _engine.Transition ?? (selected is null ? "Choose or set one up" : Describe(selected));
-
-        Xaml.Controls.ToolTipService.SetToolTip(_picker, selected is null ? "Choose an engine" : $"{selected.Name} — {Describe(selected)}");
-    }
-
-    string Describe(DockerHost host) => _switcher.Describe(host);
-
-    /// <summary>
-    /// The list of engines, built when it opens so it is never stale. Each is a radio item: one
-    /// engine is selected at a time, and the menu says which.
-    /// </summary>
-    void ShowPicker()
-    {
-        var menu = new Xaml.Controls.MenuFlyout { Placement = Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
-
-        foreach (var host in _engine.Hosts)
+        foreach (var node in NavigationManifest.Visible(_debug, _hasCluster, _settings.HiddenRoutes))
         {
-            var id = host.Id;
-            var item = new Xaml.Controls.RadioMenuFlyoutItem
+            if (node.IsGroup)
             {
-                Text = $"{host.Name}  ·  {Describe(host)}",
-                GroupName = "engines",
-                IsChecked = _engine.Selected?.Id == id,
-                IsEnabled = _engine.Transition is null,
-            };
-
-            item.Click += (_, _) => _ = ChooseAsync(id);
-            menu.Items.Add(item);
+                _nav.MenuItems.Add(new Xaml.Controls.NavigationViewItemHeader { Content = node.Title });
+                foreach (var child in node.Children) _nav.MenuItems.Add(Build(child));
+            }
+            else
+            {
+                _nav.MenuItems.Add(Build(node));
+            }
         }
-
-        if (menu.Items.Count > 0) menu.Items.Add(new Xaml.Controls.MenuFlyoutSeparator());
-
-        var manage = new Xaml.Controls.MenuFlyoutItem
-        {
-            Text = "Hosts and setup…",
-            Icon = WinIcons.Create(IconRef.Host, _theme.Current),
-        };
-        manage.Click += (_, _) => _shell.RequestNavigation("/hosts");
-        menu.Items.Add(manage);
-
-        menu.ShowAt(_picker);
     }
 
-    async Task ChooseAsync(string hostId)
+    /// <summary>ClusterManager raises for every watch event; the pane is rebuilt only when the group comes or goes.</summary>
+    void OnClustersChanged()
     {
-        if (await _switcher.ChooseAsync(hostId) is { } problem)
+        var has = _clusters.LocalContexts.Count > 0;
+        if (has == _hasCluster) return;
+        _hasCluster = has;
+
+        _nav.DispatcherQueue.TryEnqueue(() =>
         {
-            // Said where the user is likely to look next, and on the Hosts page if they go there.
-            await _bridge.NotifyAsync("Could not switch engine", problem, NoticeKind.Warning);
-        }
+            Fill();
+            Select(_shell.Route);
+        });
     }
+
+    /// <summary>A page turned off in Settings leaves the pane at once.</summary>
+    void OnSettingsChanged() => _nav.DispatcherQueue.TryEnqueue(() =>
+    {
+        Fill();
+        Select(_shell.Route);
+    });
 
     Xaml.Controls.NavigationViewItem Build(NavNode node)
     {
@@ -187,9 +127,10 @@ public sealed class WinSidebar : IDisposable
 
     void OnItemInvoked(Xaml.Controls.NavigationView sender, Xaml.Controls.NavigationViewItemInvokedEventArgs e)
     {
-        if (e.InvokedItemContainer == _picker)
+        // The pane's own Settings item, at its foot where every Windows app keeps it.
+        if (e.IsSettingsInvoked)
         {
-            ShowPicker();
+            _shell.RequestNavigation(NavigationManifest.SettingsRoute);
             return;
         }
 
@@ -207,7 +148,13 @@ public sealed class WinSidebar : IDisposable
     /// </para>
     /// </summary>
     void Select(string route)
-    {
+    {        if (string.Equals(route, NavigationManifest.SettingsRoute, StringComparison.OrdinalIgnoreCase))
+        {
+            _nav.SelectedItem = _nav.SettingsItem;
+            return;
+        }
+
+
         var match = _items.FirstOrDefault(i => string.Equals(i.Route, route, StringComparison.OrdinalIgnoreCase))
             ?? _items
                 .Where(i => i.Route != NavigationManifest.HomeRoute
@@ -220,8 +167,6 @@ public sealed class WinSidebar : IDisposable
 
     void OnThemeChanged() => _nav.DispatcherQueue.TryEnqueue(() =>
     {
-        _picker.Icon = WinIcons.Create(IconRef.Host, _theme.Current);
-
         foreach (var entry in _items)
         {
             if (entry.Icon is { } icon) entry.Item.Icon = WinIcons.Create(icon, _theme.Current);
@@ -235,6 +180,7 @@ public sealed class WinSidebar : IDisposable
         _nav.ItemInvoked -= OnItemInvoked;
         _shell.RouteChanged -= OnRouteChanged;
         _theme.Changed -= OnThemeChanged;
-        _engine.Changed -= OnEngineChanged;
+        _clusters.Changed -= OnClustersChanged;
+        _settings.Changed -= OnSettingsChanged;
     }
 }

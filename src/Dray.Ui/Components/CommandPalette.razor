@@ -4,6 +4,8 @@
    rather than registered at startup: most of it is the user's own containers and images, and a
    catalogue populated once would be stale the moment anything changed. *@
 @implements IDisposable
+@inject ClusterManager Clusters
+@inject DraySettings Settings
 @inject EngineManager Engine
 @inject IShellBridge Shell
 @inject NavigationManager Nav
@@ -136,7 +138,7 @@
     {
         _catalogue =
         [
-            .. CommandCatalogue.Navigation(Caps.IsDebugBuild),
+            .. CommandCatalogue.Navigation(Caps.IsDebugBuild, Clusters.LocalContexts.Count > 0, Settings.HiddenRoutes),
             .. CommandCatalogue.ForContainers(Engine.Store.Containers, Engine.Selected?.Capabilities.SupportsPause ?? true),
             .. CommandCatalogue.ForStacks(Engine.Stacks),
         ];

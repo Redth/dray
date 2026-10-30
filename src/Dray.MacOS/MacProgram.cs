@@ -1,3 +1,6 @@
+using Dray.Core.Settings;
+using Dray.Core.Kubernetes;
+using Dray.Kubernetes;
 using Dray.Core.Engine;
 using Dray.Core.Shell;
 using Dray.Apple;
@@ -65,6 +68,7 @@ public static class MacProgram
         builder.Services.AddSingleton<DockerCliContext>();
         builder.Services.AddSingleton<DockerDesktop>();
         builder.Services.AddSingleton<IHostSelectionStore, FileHostSelectionStore>();
+        builder.Services.AddSingleton<IHostNameStore, FileHostNameStore>();
         builder.Services.AddSingleton<IContainerRuntimeFactory>(
             new CompositeRuntimeFactory(new AppleRuntimeFactory(), new DockerRuntimeFactory()));
         // Stacks beyond what is running: remembered ones and the stacks folder. Paths only — see
@@ -72,9 +76,25 @@ public static class MacProgram
         builder.Services.AddSingleton(new StackRegistry(Path.Combine(DrayPaths.ConfigDirectory, "stacks.json")));
         builder.Services.AddSingleton<StackCatalog>();
         builder.Services.AddSingleton<EngineManager>();
+        // The local cluster beside the engine (docs/KUBERNETES.md): its own manager, its own store,
+        // its own remembered choice — the engine picker and the cluster picker are separate.
+        // What the user chose in Settings, read once and followed live by whatever it governs.
+        builder.Services.AddSingleton<ISettingsStore, FileSettingsStore>();
+        builder.Services.AddSingleton<DraySettings>();
+        builder.Services.AddSingleton<KubeconfigReader>();
+        builder.Services.AddSingleton<ClusterSelectionStore>();
+        builder.Services.AddSingleton<IClusterClientFactory, KubeClusterClientFactory>();
+        builder.Services.AddSingleton<ClusterManager>();
+        builder.Services.AddSingleton<KindCli>();
+        builder.Services.AddSingleton<KubectlCli>();
         builder.Services.AddSingleton(new StackHistory(Path.Combine(DrayPaths.ConfigDirectory, "history.json")));
         builder.Services.AddSingleton<StackOperations>();
         builder.Services.AddSingleton<HostSwitcher>();
+        builder.Services.AddSingleton<EnginePicker>();
+        builder.Services.AddSingleton<KubeView>();
+
+        // Scoped: it navigates, and the navigator belongs to the WebView.
+        builder.Services.AddScoped<KubeActions>();
         // Scoped: it holds one live stream per watched container and must go away with the view
         // that asked for them.
         builder.Services.AddScoped<StatsHub>();

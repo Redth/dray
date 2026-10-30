@@ -1,0 +1,162 @@
+@page "/kubernetes/workloads/{KindSegment}/{Namespace}/{Name}"
+@inject ClusterManager Clusters
+@inject KubeActions Actions
+@inject NavigationManager Nav
+@inject ShellCapabilities Caps
+
+<ClusterScope>
+    <PageChromeScope Chrome="Chrome" OnAction="HandleAction" />
+
+    <ClusterGate Kind="Kind">
+        @if (Workload is not { } w)
+        {
+            <div class="page">
+                <EmptyState Icon="IconRef.Workload"
+                            Title="That workload is not here"
+                            Body="@($"{Namespace}/{Name} has been deleted, or belongs to a different cluster than the one selected.")">
+                    <Actions>
+                        <Button Label="All workloads" Icon="IconRef.Workload" OnClick="@(() => Nav.NavigateTo("/kubernetes/workloads"))" />
+                    </Actions>
+                </EmptyState>
+            </div>
+        }
+        else
+        {
+            var pods = Clusters.Store.PodsOf(w);
+
+            <div class="detail">
+                <div class="detail__head">
+                    <div class="detail__title">
+                        @if (!Caps.HasNativeToolbar)
+                        {
+                            <BackButton To="/kubernetes/workloads" Label="All workloads" />
+                        }
+                        <h2>@w.Name</h2>
+                        <StatePill Status="WorkloadStatus.Resolve(w, pods)" />
+                    </div>
+                    <div class="detail__meta mono muted">
+                        <span>@WorkloadStatus.KindLabel(w.Kind)</span>
+                        <span>@w.Namespace</span>
+                        @foreach (var image in w.Images)
+                        {
+                            <span>@image</span>
+                        }
+                    </div>
+                    <div class="detail__actions kwl__actions">
+                        @if (w.CanScale && Clusters.Selected?.Capabilities.CanScale == true)
+                        {
+                            <span class="muted">Replicas</span>
+                            <ReplicaStepper @ref="_stepper" Name="@w.Name" Desired="w.Desired" Busy="_scaling" OnScale="r => ScaleAsync(w, r)" />
+                        }
+                        else
+                        {
+                            <span class="muted">@(w.Kind == ClusterKind.Job ? $"{w.Succeeded} of {w.Desired} completed" : $"{w.Ready} of {w.Desired} ready")</span>
+                        }
+                        @if (!Caps.HasNativeToolbar)
+                        {
+                            @foreach (var action in Actions.ForWorkload(w))
+                            {
+                                var id = action.Id;
+                                <Button Label="@action.Label" Icon="action.Icon" Variant="ButtonVariant.Ghost" Danger="action.Danger"
+                                        OnClick="() => HandleAction(id)" />
+                            }
+                        }
+                    </div>
+                </div>
+
+                <KubeNotice @bind-Outcome="_outcome" />
+
+                <div class="page kwl">
+                    <section class="panel kwl__pods">
+                        <div class="panel__head"><span class="panel__title">Pods</span><span class="muted">@pods.Count</span></div>
+                        @if (pods.Count == 0)
+                        {
+                            <p class="panel__body muted">
+                                @(w.Desired == 0 ? "Scaled to zero: nothing runs until it is scaled up." : "No pods yet — the controller has not created them, or the scheduler has nowhere to put them. The events below say which.")
+                            </p>
+                        }
+                        else
+                        {
+                            <DataTable TRow="PodSummary"
+                                       Columns="PodGrid.Columns(manyNamespaces: false)"
+                                       Rows="pods.OrderBy(p => GridState.From(PodStatusVocabulary.Resolve(p)).Rank).ThenBy(p => p.Name).ToList()"
+                                       Values="p => PodGrid.Row(p, null, showNamespace: false)"
+                                       Key="p => p.Uid"
+                                       ActionsFor="Actions.ForPod"
+                                       OnAction="RunPodAsync"
+                                       OnRowOpen="OpenPod"
+                                       Placeholder="No pods" />
+                        }
+                    </section>
+
+                    <KubeEventList Item="w" />
+                </div>
+            </div>
+        }
+    </ClusterGate>
+</ClusterScope>
+
+@code {
+    [Parameter] public string KindSegment { get; set; } = "";
+
+    [Parameter] public string Namespace { get; set; } = "";
+
+    [Parameter] public string Name { get; set; } = "";
+
+    ReplicaStepper? _stepper;
+    KubeOutcome? _outcome;
+    bool _scaling;
+
+    ClusterKind Kind => KubeRoutes.KindFromRoute(KindSegment) ?? ClusterKind.Deployment;
+
+    WorkloadSummary? Workload => Clusters.Store.FindWorkload(Kind, Namespace, Name);
+
+    async Task ScaleAsync(WorkloadSummary w, int replicas)
+    {
+        _scaling = true;
+        try
+        {
+            _outcome = await Actions.ScaleAsync(w, replicas);
+
+            // Declined at zero, or refused: the stepper goes back to what the cluster has.
+            if (_outcome is { Ok: false } || (replicas == 0 && Workload?.Desired != 0)) _stepper?.Reset();
+        }
+        finally
+        {
+            _scaling = false;
+        }
+    }
+
+    async Task RunPodAsync((string Row, string Action) chosen)
+    {
+        if (Clusters.Store.Find<PodSummary>(ClusterKind.Pod, chosen.Row) is { } pod) _outcome = await Actions.RunAsync(pod, chosen.Action) ?? _outcome;
+    }
+
+    void OpenPod(string uid)
+    {
+        if (Clusters.Store.Find<PodSummary>(ClusterKind.Pod, uid) is { } pod) Nav.NavigateTo(KubeRoutes.Pod(pod));
+    }
+
+    async Task HandleAction(string id)
+    {
+        if (id == "back")
+        {
+            Nav.NavigateTo("/kubernetes/workloads");
+            return;
+        }
+
+        if (Workload is { } w)
+        {
+            _outcome = await Actions.RunAsync(w, id) ?? _outcome;
+            if (id == "delete" && _outcome is { Ok: true }) Nav.NavigateTo("/kubernetes/workloads");
+        }
+    }
+
+    PageChrome Chrome => new(
+        Workload?.Name ?? Name,
+        Subtitle: $"{WorkloadStatus.KindLabel(Kind)} · {Namespace} · {Clusters.Selected?.Name}",
+        Back: new ChromeBack("back", "All workloads"),
+        Actions: Workload is { } w
+            ? [.. Actions.ForWorkload(w).Select(a => a.Danger ? ChromeAction.Destructive(a.Id, a.Label, a.Icon) : ChromeAction.Secondary(a.Id, a.Label, a.Icon))]
+            : null);
+}

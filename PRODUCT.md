@@ -21,6 +21,12 @@ Their context is a side window: they are in an editor or a terminal, something i
 switch to Dray to find out *why* — a port that isn't mapped, a container that exited 137, a stack
 where one service never became healthy. They are back in the editor within ninety seconds.
 
+Some also run a Kubernetes cluster on the same laptop — Docker Desktop's, OrbStack's, or a kind
+or k3d cluster — to try a manifest before it goes somewhere that matters. A pod stuck in
+`CrashLoopBackOff` is the same question as a container that exited 137, one layer up, and Dray
+answers it in the same window. They are not cluster administrators, and Dray is not a cluster
+console.
+
 Some also keep a home server, a NAS, or a VPS with a Docker daemon on it. That is the same job one
 hop away, and the architecture treats it as the same job — but it is not the job Dray is designed
 around. The machine in front of them is.
@@ -34,7 +40,15 @@ because it answers the question faster.
 ## Product Purpose
 
 Dray is a desktop application for managing Docker: containers, images, volumes, networks, registries,
-and compose stacks — locally and on any host reachable through a Docker context.
+and compose stacks — locally and on any host reachable through a Docker context — and the local
+Kubernetes cluster that runs beside them.
+
+Kubernetes support is a lens on the user's own workloads, not an admin console, and in v1 it
+connects only to clusters measured as running on this machine. Dray does not flip an engine's own
+Kubernetes switch, for the same reason it does not ship an engine. It will create a kind cluster
+when asked, because a kind cluster is containers on the engine the user already has — a workload,
+not a runtime — and it shows the command and what it will change before running it.
+`docs/KUBERNETES.md` is the contract.
 
 It manages the engine you have, and helps you get one when you have none. Dray does not ship a
 runtime of its own and does not compete with Docker Desktop, Colima, OrbStack, Rancher Desktop, or a

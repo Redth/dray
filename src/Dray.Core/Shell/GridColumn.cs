@@ -55,6 +55,12 @@ public enum GridCell
 /// width, so the ordering is fixed here rather than measured.
 /// </param>
 /// <param name="Numeric">Right-aligned and tabular. Also how the grid knows to sort numerically.</param>
+/// <param name="Grow">
+/// Whether the column shares the width left over. A short value — a count, an age, a pill — has
+/// one right width, and given an equal share of the table it takes room from the column that needs
+/// it: an event's message came out as wide as its type pill. False pins the column at
+/// <paramref name="MinWidth"/> and leaves the rest to the columns that grow.
+/// </param>
 public sealed record GridColumn(
     string Field,
     string Title,
@@ -63,7 +69,8 @@ public sealed record GridColumn(
     bool Sortable = true,
     bool Numeric = false,
     int? MinWidth = null,
-    string? Tooltip = null);
+    string? Tooltip = null,
+    bool Grow = true);
 
 /// <summary>
 /// A container's state for a grid cell, already resolved.

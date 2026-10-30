@@ -200,7 +200,7 @@
 
     PageChrome Chrome => new(
         Image?.DisplayName ?? "Image",
-        Subtitle: Engine.Selected?.Name,
+        Subtitle: Engine.Selected?.Label,
         Actions:
         [
             ChromeAction.Secondary("copy", "Copy ID", IconRef.Copy),

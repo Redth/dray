@@ -290,7 +290,7 @@
 
     PageChrome Chrome => new(
         $"{StackName} logs",
-        Subtitle: Engine.Selected?.Name,
+        Subtitle: Engine.Selected?.Label,
         Back: new ChromeBack("back", "All stacks"));
 
     void HandleAction(string id)

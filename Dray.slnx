@@ -4,6 +4,7 @@
     <Project Path="src/Dray.Core/Dray.Core.csproj" />
     <Project Path="src/Dray.DevHost/Dray.DevHost.csproj" />
     <Project Path="src/Dray.Docker/Dray.Docker.csproj" />
+    <Project Path="src/Dray.Kubernetes/Dray.Kubernetes.csproj" />
     <Project Path="src/Dray.MacOS/Dray.MacOS.csproj" />
     <Project Path="src/Dray.Ui/Dray.Ui.csproj" />
     <Project Path="src/Dray.Windows/Dray.Windows.csproj" />
@@ -12,5 +13,6 @@
     <Project Path="tests/Dray.Core.Tests/Dray.Core.Tests.csproj" />
     <Project Path="tests/Dray.Apple.Tests/Dray.Apple.Tests.csproj" />
     <Project Path="tests/Dray.Docker.Tests/Dray.Docker.Tests.csproj" />
+    <Project Path="tests/Dray.Kubernetes.Tests/Dray.Kubernetes.Tests.csproj" />
   </Folder>
 </Solution>

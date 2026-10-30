@@ -1,0 +1,110 @@
+@page "/kubernetes/services"
+@inject ClusterManager Clusters
+@inject KubeView View
+@inject KubeActions Actions
+@inject IShellBridge Shell
+
+<ClusterScope>
+    <PageChromeScope Chrome="Chrome" OnSearch="s => _search = s" OnFilter="OnFilterAsync" />
+
+    <div class="page page--flush">
+        <KubeNotice @bind-Outcome="_outcome" />
+
+        <ClusterGate Kind="ClusterKind.Service">
+            @* Forwards are first-class things the user can see and stop, not side effects of a
+               click (docs/KUBERNETES.md §5.4). They live as long as Dray does, and this is where
+               they are listed. *@
+            @if (Clusters.Forwards.Count > 0)
+            {
+                <section class="panel kube-forwards" aria-label="Port forwards">
+                    <div class="panel__head">
+                        <span class="panel__title">Forwarded to this machine</span>
+                    </div>
+                    <ul class="kube-forwards__list">
+                        @foreach (var forward in Clusters.Forwards)
+                        {
+                            var url = $"http://localhost:{forward.LocalPort}";
+                            <li class="kube-forwards__item">
+                                <Icon Name="IconRef.Port" Size="IconSize.Sm" />
+                                <span class="mono">localhost:@forward.LocalPort</span>
+                                <span class="muted">→ @forward.Namespace/@forward.Pod:@forward.RemotePort</span>
+                                @if (forward.Failure is { } failure)
+                                {
+                                    <span class="kube-forwards__failure">@failure</span>
+                                }
+                                else if (forward.Connections > 0)
+                                {
+                                    <span class="muted">· @forward.Connections connection@(forward.Connections == 1 ? "" : "s")</span>
+                                }
+                                <span class="kube-forwards__spacer"></span>
+                                <Button Label="Open" Icon="IconRef.External" Variant="ButtonVariant.Ghost"
+                                        OnClick="() => Shell.OpenExternalAsync(url)" />
+                                <Button Label="Copy address" Icon="IconRef.Copy" IconOnly="true" Variant="ButtonVariant.Ghost"
+                                        OnClick="() => Shell.WriteClipboardAsync(url)" />
+                                <Button Label="Stop" Icon="IconRef.Stop" Variant="ButtonVariant.Ghost"
+                                        OnClick="() => Clusters.StopForwardAsync(forward)" />
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+
+            @if (Visible.Count == 0)
+            {
+                <EmptyState Icon="IconRef.Service"
+                            Title="@(_search.Length > 0 ? "No services match" : "No services")"
+                            Body="@(_search.Length > 0
+                                ? "Nothing here matches the current search."
+                                : "No Services outside the system namespaces. A Service is how a workload is reached; forward one of its ports to reach it from this machine.")" />
+            }
+            else
+            {
+                <DataTable TRow="ServiceSummary"
+                           Columns="ServiceGrid.Columns(View.ManyNamespaces)"
+                           Rows="Visible"
+                           Values="s => ServiceGrid.Row(s, Clusters.Store.PodsFor(s).Count, Clusters.Forwards)"
+                           Key="s => s.Uid"
+                           ActionsFor="Actions.ForService"
+                           OnAction="RunAsync"
+                           Placeholder="No services" />
+            }
+        </ClusterGate>
+    </div>
+</ClusterScope>
+
+@code {
+    string _search = "";
+    KubeOutcome? _outcome;
+
+    IReadOnlyList<ServiceSummary> Visible =>
+    [
+        .. Clusters.Store.Services
+            .Where(s => View.Matches(s.Namespace))
+
+            // The API server's own Service is in default and is in every cluster; it is not the
+            // user's and cannot be forwarded to.
+            .Where(s => !(s.Namespace == "default" && s.Name == "kubernetes"))
+            .Where(s => _search.Length == 0 || s.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase))
+            .OrderBy(s => s.Namespace, StringComparer.Ordinal)
+            .ThenBy(s => s.Name, StringComparer.Ordinal),
+    ];
+
+    async Task RunAsync((string Row, string Action) chosen)
+    {
+        if (Clusters.Store.Find<ServiceSummary>(ClusterKind.Service, chosen.Row) is { } service)
+            _outcome = await Actions.RunAsync(service, chosen.Action) ?? _outcome;
+    }
+
+    async Task OnFilterAsync((string FilterId, int Index) change)
+    {
+        if (await View.ApplyAsync(change.FilterId, change.Index) is { } problem) _outcome = new KubeOutcome(problem, Ok: false);
+    }
+
+    PageChrome Chrome => new(
+        "Services",
+        Subtitle: Clusters.Selected is { State: HostConnectionState.Connected } c
+            ? Clusters.Forwards.Count > 0 ? $"{Visible.Count} on {c.Name} · {Clusters.Forwards.Count} forwarded" : $"{Visible.Count} on {c.Name}"
+            : Clusters.Selected?.Name,
+        Search: new ChromeSearch("Filter services", _search),
+        Filters: View.Filters);
+}

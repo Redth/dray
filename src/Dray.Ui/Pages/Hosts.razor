@@ -41,7 +41,7 @@
                                             @onclick="() => Select(host)">
                                         <EngineGlyph Icon="HostFacts.Icon(host)" Active="selected" />
                                         <span class="hostitem__text">
-                                            <span class="hostitem__name">@host.Name</span>
+                                            <span class="hostitem__name">@host.Label</span>
                                             @* Why it is down, under its name rather than only in a
                                                tooltip: for an engine Docker Desktop has switched
                                                away from, this is the sentence that says choosing
@@ -104,6 +104,10 @@
                         {
                             <HostDetail Host="current" />
                         }
+
+                        @* The clusters beside the engines: what Dray connects to, and why not
+                           where it does not (docs/KUBERNETES.md §3). *@
+                        <ClusterList />
                     </div>
                 </div>
             </div>

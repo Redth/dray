@@ -835,6 +835,22 @@ textarea,
 
 /* Inside a card the tab bar is the card's own header, so it takes the card's padding rather than
    the page's and its rule runs the full width. */
+/* The tab row of a detail card — containers, pods, workloads. Global because every detail page
+   has one; it was scoped to the container page until a second page needed it. */
+.detail__tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 var(--s3);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+}
+
+/* Pushes the tab row's own menu to the far corner. The tabs keep their natural width; the space
+   between them and the menu is what is left over. */
+.detail__tabs-spacer {
+    flex: 1 1 auto;
+}
+
 .card > .detail__tabs {
   padding: 0 var(--s3);
   background: var(--surface-2);

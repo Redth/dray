@@ -14,20 +14,34 @@
 
         <div class="hostd__title">
             <div class="hostd__nameline">
-                <h2 id="hostd-title" class="hostd__name">@Host.Name</h2>
+                <h2 id="hostd-title" class="hostd__name">@Host.Label</h2>
                 <HostState Host="Host" />
             </div>
-            <p class="hostd__engine">@EngineLine</p>
+            <p class="hostd__engine">
+                @* The name the CLI knows it by, when the user has given it another: that is the one
+                   to type in a terminal. *@
+                @if (Host.DisplayName is not null)
+                {
+                    <span class="mono">@Host.Name</span><span> · </span>
+                }
+                @EngineLine
+            </p>
         </div>
 
-        @if (DockerCliContext.CanRemove(Host))
-        {
-            <div class="hostd__actions">
+        <div class="hostd__actions">
+            @* A name of Dray's own, for the toolbar's picker and everywhere else Dray names this
+               engine. The context keeps its name; leaving the field empty goes back to it. *@
+            <Button Label="Rename" Icon="IconRef.Rename" Variant="ButtonVariant.Ghost"
+                    Tooltip="Give this host a name in Dray. The Docker context keeps its own."
+                    OnClick="RenameAsync" />
+
+            @if (DockerCliContext.CanRemove(Host))
+            {
                 <Button Label="Remove" Icon="IconRef.Trash" Variant="ButtonVariant.Ghost" Danger="true"
                         Tooltip="Remove this host from Dray and from docker context ls"
                         Disabled="_working" OnClick="RemoveAsync" />
-            </div>
-        }
+            }
+        </div>
     </header>
 
     @if (Host.State == HostConnectionState.Unreachable)
@@ -174,6 +188,8 @@
 </section>
 
 @code {
+    async Task RenameAsync() => await HostNameDialog.ShowAsync(Shell, Host);
+
     [Parameter, EditorRequired] public DockerHost Host { get; set; } = default!;
 
     EngineServiceState? _service;

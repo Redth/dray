@@ -331,12 +331,12 @@
     PageChrome Chrome => new(
         "Images",
         Subtitle: _images is null
-            ? Engine.Selected?.Name
+            ? Engine.Selected?.Label
             : _images.All(i => i.SizeReported)
-                ? $"{_images.Count} · {Humanize.Bytes(_images.Sum(i => i.UniqueBytes))} on {Engine.Selected?.Name}"
+                ? $"{_images.Count} · {Humanize.Bytes(_images.Sum(i => i.UniqueBytes))} on {Engine.Selected?.Label}"
 
                 // A total built from unmeasured images would be a number nobody could act on.
-                : $"{_images.Count} on {Engine.Selected?.Name}",
+                : $"{_images.Count} on {Engine.Selected?.Label}",
         Search: new ChromeSearch("Filter images", _search),
         Actions:
         [

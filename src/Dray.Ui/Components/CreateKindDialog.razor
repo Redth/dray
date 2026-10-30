@@ -1,0 +1,142 @@
+@* Create a kind cluster on the engine the user is connected to (docs/KUBERNETES.md §7).
+
+   A kind cluster is containers on the user's own engine — a workload, closer to a compose stack than
+   to a runtime — which is why Dray makes one and still installs no engine. The dialog says the
+   three things about it that are not obvious before anything runs, and shows kind's own output
+   while it works. *@
+@inherits DialogBody
+@inject KindCli Kind
+@inject EngineManager Engine
+@inject ClusterManager Clusters
+@inject IShellBridge Shell
+
+@if (_kind is null)
+{
+    <p>
+        Dray creates kind clusters with the <code class="mono">kind</code> command, and it is not
+        installed — or not anywhere Dray can find it. Dray does not download it for you: run this in a
+        terminal, then look again.
+    </p>
+    <div class="ckind__command">
+        <code class="mono">@Kind.InstallCommand</code>
+        <Button Label="Copy" Icon="IconRef.Copy" Variant="ButtonVariant.Ghost" OnClick="() => Shell.WriteClipboardAsync(Kind.InstallCommand)" />
+    </div>
+}
+else if (EngineProblem is { } problem)
+{
+    <p>@problem</p>
+}
+else
+{
+    <div class="field">
+        <label class="field__label" for="kind-name">Cluster name</label>
+        <input id="kind-name" class="input mono" @bind="_name" @bind:event="oninput"
+               autocomplete="off" spellcheck="false" disabled="@_running" />
+        @if (!KindCli.IsValidName(_name))
+        {
+            <p class="ckind__hint muted">Lower-case letters, digits and hyphens. It becomes the context <code class="mono">kind-@_name</code>.</p>
+        }
+    </div>
+
+    <ul class="ckind__facts">
+        <li>It runs on <strong>@Engine.Selected?.Label</strong>: the cluster's nodes are containers there.</li>
+        <li>The first cluster downloads kind's node image — about 1.3 GB.</li>
+        <li><strong>kind makes it kubectl's current context.</strong> kind has no way not to, and Dray does not quietly change it back.</li>
+        <li>kind writes the cluster's client key into your kubeconfig. That is kind's file; Dray keeps none of it.</li>
+    </ul>
+
+    @if (_output.Count > 0)
+    {
+        <pre class="ckind__output mono" aria-live="polite">@string.Join("\n", _output.TakeLast(12))</pre>
+    }
+
+    @if (_problem is { } failed)
+    {
+        <p class="ckind__problem" role="alert">@failed</p>
+    }
+}
+
+@code {
+    /// <summary>Open it. True once a cluster has been created.</summary>
+    public static async Task<bool> ShowAsync(IShellBridge shell)
+        => await shell.ShowDialogAsync(new DialogRequest(
+            "Create a kind cluster",
+            typeof(CreateKindDialog),
+            new Dictionary<string, object?>(),
+            Buttons: [DialogButton.Cancel(), DialogButton.Confirm("create", "Create")])) == "create";
+
+    string? _kind;
+    string _name = "dev";
+    bool _running;
+    string? _problem;
+    readonly List<string> _output = [];
+
+    protected override void OnInitialized()
+    {
+        _kind = Kind.Find();
+
+        // Not over a cluster that is already there: kind refuses, and the message would be the
+        // first the user learns of it.
+        var taken = Clusters.Contexts.Select(c => c.Name).ToHashSet();
+        for (var i = 2; taken.Contains($"kind-{_name}"); i++) _name = $"dev{i}";
+    }
+
+    /// <summary>kind needs a Docker-compatible engine running Linux containers. Said plainly where this one is not.</summary>
+    string? EngineProblem => Engine.Selected switch
+    {
+        null => "kind runs its cluster as containers on a Docker engine, and none is connected.",
+        { State: not HostConnectionState.Connected } h => $"{h.Label} is not connected. kind needs an engine that answers.",
+        { Endpoint.Scheme: EndpointScheme.AppleContainer } h => $"kind needs a Docker-compatible engine, and {h.Label} is Apple's container. Choose a Docker engine in the picker first.",
+        { Capabilities.ContainerOs: ContainerOs.Windows } h => $"kind needs Linux containers, and {h.Label} runs Windows containers.",
+        _ => null,
+    };
+
+    protected override IReadOnlyList<DialogButton> Buttons => _kind is null || EngineProblem is not null
+        ? [DialogButton.Cancel() with { Label = "Close" }, DialogButton.Confirm("look", "Look again")]
+        : [DialogButton.Cancel() with { Enabled = !_running }, DialogButton.Confirm("create", "Create") with { Enabled = KindCli.IsValidName(_name) && !_running, Busy = _running }];
+
+    protected override async Task<bool> OnPressedAsync(string id)
+    {
+        if (id == "look")
+        {
+            _kind = Kind.Find();
+            StateHasChanged();
+            return false;
+        }
+
+        if (id != "create" || _kind is null || Engine.Selected is not { } host) return true;
+
+        _running = true;
+        _problem = null;
+        _output.Clear();
+        StateHasChanged();
+
+        try
+        {
+            await foreach (var line in Kind.CreateAsync(_kind, _name, Kind.Environment(host), Closing))
+            {
+                _output.Add(line);
+                StateHasChanged();
+            }
+
+            // The new context is in the kubeconfig now; read it and show it.
+            await Clusters.RefreshAsync();
+            await Clusters.SelectAsync($"kind-{_name}");
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return true;
+        }
+        catch (Exception e)
+        {
+            _problem = e.Message;
+            return false;
+        }
+        finally
+        {
+            _running = false;
+            StateHasChanged();
+        }
+    }
+}

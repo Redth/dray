@@ -40,6 +40,11 @@
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
+  <ItemGroup Label="Kubernetes">
+    <!-- Official client. Used by .scratch/k8s-k0 today and by Dray.Kubernetes in Phase 6.5. -->
+    <PackageVersion Include="KubernetesClient" Version="21.0.8" />
+  </ItemGroup>
+
   <ItemGroup Label="Runtime">
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />

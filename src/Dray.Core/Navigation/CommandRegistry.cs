@@ -91,8 +91,10 @@ public static class CommandCatalogue
     /// with the nav — a route added in one place appears in both.
     /// </para>
     /// </summary>
-    public static IEnumerable<Command> Navigation(bool includeDebug)
-        => NavigationManifest.Leaves(includeDebug)
+    /// <param name="includeCluster">Whether the Kubernetes pages exist right now — the sidebar's own rule.</param>
+    /// <param name="hidden">Pages turned off in Settings, which leave the palette as they leave the sidebar.</param>
+    public static IEnumerable<Command> Navigation(bool includeDebug, bool includeCluster = true, IReadOnlyCollection<string>? hidden = null)
+        => Flatten(NavigationManifest.Visible(includeDebug, includeCluster, hidden))
             .Where(node => node.Route is not null)
             .Select(node => new Command(
                 $"go:{node.Route}",
@@ -100,7 +102,17 @@ public static class CommandCatalogue
                 "Go to",
                 CommandKind.Navigate,
                 node.Icon ?? IconRef.ChevronRight,
-                Detail: node.Route));
+                Detail: node.Route))
+            .Append(new Command(
+                $"go:{NavigationManifest.SettingsRoute}",
+                "Settings",
+                "Go to",
+                CommandKind.Navigate,
+                IconRef.Settings,
+                Detail: NavigationManifest.SettingsRoute));
+
+    static IEnumerable<NavNode> Flatten(IEnumerable<NavNode> nodes)
+        => nodes.SelectMany(n => n.IsGroup ? Flatten(n.Children) : [n]);
 
     /// <summary>
     /// A jump to each container, plus the actions that apply to it right now.

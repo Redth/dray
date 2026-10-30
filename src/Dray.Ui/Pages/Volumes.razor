@@ -178,9 +178,9 @@
 
     PageChrome Chrome => new(
         "Volumes",
-        Subtitle: !HasVolumes ? Engine.Selected?.Name
-            : _volumes is null ? Engine.Selected?.Name
-            : $"{_volumes.Count} on {Engine.Selected?.Name}",
+        Subtitle: !HasVolumes ? Engine.Selected?.Label
+            : _volumes is null ? Engine.Selected?.Label
+            : $"{_volumes.Count} on {Engine.Selected?.Label}",
 
         // No search bar over a page that is explaining itself.
         Search: HasVolumes ? new ChromeSearch("Filter volumes", _search) : null,

@@ -122,6 +122,15 @@
     font-size: var(--text-base);
 }
 
+/* A plain value under a fixed layout: one line, clipped at its column. */
+.dt__text {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* A name cell holds two lines and the second is often long — an anonymous volume's name is a
    64-character hash. Under a fixed layout the cell has a width and the text has to respect it,
    or it runs straight across the column beside it. */

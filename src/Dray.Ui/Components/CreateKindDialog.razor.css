@@ -1,0 +1,52 @@
+.ckind__facts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    margin: var(--s3) 0 0;
+    padding-left: var(--s4);
+    list-style: disc;
+    max-width: 60ch;
+}
+
+.ckind__hint {
+    margin-top: var(--s1);
+    font-size: var(--text-xs);
+}
+
+.ckind__command {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin-top: var(--s3);
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+}
+
+.ckind__command code {
+    flex: 1 1 auto;
+    user-select: text;
+}
+
+/* kind's own words while it works — the only sign a minute-long step is moving. */
+.ckind__output {
+    margin-top: var(--s3);
+    padding: var(--s2) var(--s3);
+    max-height: 12rem;
+    overflow: auto;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    font-size: var(--text-xs);
+    white-space: pre-wrap;
+    user-select: text;
+}
+
+.ckind__problem {
+    margin-top: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm);
+    background: var(--danger-tint);
+    color: var(--danger-ink);
+    font-size: var(--text-sm);
+}

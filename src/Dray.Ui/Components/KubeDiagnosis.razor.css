@@ -1,0 +1,47 @@
+/* Keeps its height in the page's scrolling column: left to shrink, a long pull error was squeezed
+   to one clipped line. Declared here because the page's own stylesheet cannot reach this root. */
+.kdiag {
+    flex-shrink: 0;
+}
+
+.kdiag .panel__head {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--s2);
+    color: var(--danger-ink);
+}
+
+.kdiag__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    max-width: 80ch;
+}
+
+/* The runtime's own words, selectable: they are what gets pasted into a search or an issue. */
+.kdiag__said {
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.kdiag__command {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+}
+
+.kdiag__command code {
+    flex: 1 1 auto;
+    user-select: text;
+}
+
+.kdiag__failed {
+    color: var(--danger-ink);
+    font-size: var(--text-sm);
+}

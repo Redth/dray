@@ -1,0 +1,57 @@
+@* The containers that are a local cluster's nodes, as one row per cluster above the Containers list
+   rather than in it (docs/KUBERNETES.md §4).
+
+   A kind node shows up as a container running a 1.3 GB kindest/node image the user never pulled by
+   name — something they did not knowingly create and cannot explain, the same problem the volume
+   helpers are kept out of the list for. Here it says what it is, and leads to the cluster. *@
+@inject EngineManager Engine
+@inject ClusterManager Clusters
+@inject NavigationManager Nav
+
+@if (Clusters.Enabled && Groups.Count > 0)
+{
+    <ul class="cnodes" aria-label="Kubernetes clusters on this engine">
+        @foreach (var group in Groups)
+        {
+            var running = group.Nodes.Count(n => n.State == DockerState.Running);
+            var context = group.Nodes.Select(n => ClusterPairing.ContextFor(n, Clusters.Contexts)).FirstOrDefault(c => c is not null);
+
+            <li class="cnodes__item">
+                <Icon Name="IconRef.Cluster" Size="IconSize.Md" />
+                <span class="cnodes__text">
+                    <span class="cnodes__name">@group.Tool cluster <strong>@group.Cluster</strong></span>
+                    <span class="muted cnodes__sub">
+                        @group.Nodes.Count node@(group.Nodes.Count == 1 ? "" : "s") · @(running == group.Nodes.Count ? "running" : $"{running} of {group.Nodes.Count} running")
+                        @if (context is not null)
+                        {
+                            <span> · context @context.Name</span>
+                        }
+                    </span>
+                </span>
+                <StatePill Status="@(running == group.Nodes.Count ? new ContainerStatus(StateTone.Ok, "●", "Running") : running == 0 ? new ContainerStatus(StateTone.Neutral, "■", "Stopped") : new ContainerStatus(StateTone.Warn, "◐", "Partly running"))" />
+                @if (context is not null)
+                {
+                    <Button Label="Open in Kubernetes" Icon="IconRef.Workload" Variant="ButtonVariant.Ghost" OnClick="() => OpenAsync(context)" />
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    sealed record NodeGroup(string Tool, string Cluster, IReadOnlyList<ContainerSummary> Nodes);
+
+    IReadOnlyList<NodeGroup> Groups =>
+    [
+        .. Engine.Store.Containers
+            .Where(c => c.ClusterNode is not null)
+            .GroupBy(c => (c.ClusterNode!.Tool, c.ClusterNode.Cluster))
+            .OrderBy(g => g.Key.Cluster, StringComparer.Ordinal)
+            .Select(g => new NodeGroup(g.Key.Tool, g.Key.Cluster, [.. g])),
+    ];
+
+    async Task OpenAsync(KubeContext context)
+    {
+        if (await Clusters.SelectAsync(context.Name) is null) Nav.NavigateTo("/kubernetes/workloads");
+    }
+}

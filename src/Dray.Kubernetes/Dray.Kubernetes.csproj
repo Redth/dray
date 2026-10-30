@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Dray.Kubernetes</RootNamespace>
+    <Description>
+      IClusterClient over the Kubernetes API, for clusters on this machine. A sibling of the
+      container runtimes, not one of them (docs/KUBERNETES.md §9.1).
+    </Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="KubernetesClient" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The mapping from the API's types and the reflector's loop are internal because nothing
+         outside this assembly should build a PodSummary from a V1Pod — but they are where the
+         cluster's behaviour is encoded, so they are exactly what needs testing. -->
+    <InternalsVisibleTo Include="Dray.Kubernetes.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Dray.Core/Dray.Core.csproj" />
+  </ItemGroup>
+</Project>
